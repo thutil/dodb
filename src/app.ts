@@ -5,6 +5,7 @@ import commandRouter from "./routes/command";
 import listRouter from "./routes/list";
 import connectionProfileRouter from "./routes/connectionProfile";
 import adminRouter from "./routes/admin";
+import auditLogRouter from "./routes/auditLog";
 
 const app = express();
 
@@ -25,6 +26,7 @@ app.use("/api/command", commandRouter);
 app.use("/api/list", listRouter);
 app.use("/api/profile", connectionProfileRouter);
 app.use("/api/admin", adminRouter);
+app.use("/api/audit-logs", auditLogRouter);
 
 // Error handling middleware
 app.use((err: any, req: Request, res: Response, next: NextFunction) => {

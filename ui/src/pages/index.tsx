@@ -3,6 +3,7 @@ import Head from "next/head";
 import { Header } from "../components/Header";
 import { SidebarExplorer } from "../components/SidebarExplorer";
 import { ConnectionModal } from "../components/ConnectionModal";
+import { AuditLogDrawer } from "../components/AuditLogDrawer";
 import { DataGrid, PendingChanges } from "../components/DataGrid";
 import { SqlConsole } from "../components/SqlConsole";
 import { AdminPanel } from "../components/AdminPanel";
@@ -18,6 +19,7 @@ export default function Home() {
   const [profiles, setProfiles] = useState<ConnectionProfile[]>([]);
   const [activeProfile, setActiveProfile] = useState<ConnectionProfile | null>(null);
   const [isConnModalOpen, setIsConnModalOpen] = useState(false);
+  const [isAuditLogOpen, setIsAuditLogOpen] = useState(false);
 
   const [databases, setDatabases] = useState<string[]>([]);
   const [activeDatabase, setActiveDatabase] = useState<string>("");
@@ -321,6 +323,7 @@ export default function Home() {
           activeView={activeView}
           onChangeView={setActiveView}
           onOpenConnections={() => setIsConnModalOpen(true)}
+          onOpenAuditLogs={() => setIsAuditLogOpen(true)}
           theme={theme}
           onToggleTheme={toggleTheme}
         />
@@ -416,6 +419,12 @@ export default function Home() {
             setIsConnModalOpen(false);
           }}
           onTestConnection={handleTestConnection}
+        />
+
+        <AuditLogDrawer
+          isOpen={isAuditLogOpen}
+          onClose={() => setIsAuditLogOpen(false)}
+          profiles={profiles}
         />
       </div>
 

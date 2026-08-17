@@ -20,8 +20,10 @@ import {
   ArrowUp,
   ArrowDown,
   ArrowUpDown,
+  Calendar as CalendarIcon,
 } from "lucide-react";
 import { ColumnInfo, TableRowData, ConnectionProfile, ColumnFilter, FilterOperator } from "../types";
+import { DateTimePickerPopover } from "./DateTimePickerPopover";
 
 export interface PendingChanges {
   inserts: TableRowData[];
@@ -88,6 +90,19 @@ export const DataGrid: React.FC<DataGridProps> = ({
   // Active Inline Editing Cell
   const [editingCell, setEditingCell] = useState<{ pkKey: string; isNew: boolean; nIdx?: number; colName: string } | null>(null);
   const [editValue, setEditValue] = useState<string>("");
+
+  // DateTime Picker Popover state
+  const [activePicker, setActivePicker] = useState<{
+    colName: string;
+    colType: string;
+    value: string;
+    onApply: (val: string) => void;
+  } | null>(null);
+
+  const isDateTimeColumn = (colType: string = ""): boolean => {
+    const t = colType.toLowerCase();
+    return t.includes("date") || t.includes("time") || t.includes("timestamp");
+  };
 
   // Row Edit Modal State
   const [rowEditModal, setRowEditModal] = useState<{ pkKey: string; rowIdx: number; data: TableRowData } | null>(null);
@@ -754,29 +769,55 @@ export const DataGrid: React.FC<DataGridProps> = ({
             </div>
 
             <div className="row-modal-body">
-              {columns.map((col) => (
-                <div key={col.name} className="row-field-group">
-                  <label className="row-field-label">
-                    <span>{col.name}</span>
-                    <span className="col-type-tag">{col.type}</span>
-                  </label>
-                  <input
-                    type="text"
-                    className="input font-mono"
-                    value={
-                      rowEditModal.data[col.name] === null || rowEditModal.data[col.name] === undefined
-                        ? ""
-                        : String(rowEditModal.data[col.name])
-                    }
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setRowEditModal((prev) =>
-                        prev ? { ...prev, data: { ...prev.data, [col.name]: val } } : null
-                      );
-                    }}
-                  />
-                </div>
-              ))}
+              {columns.map((col) => {
+                const isDate = isDateTimeColumn(col.type);
+                const curVal = rowEditModal.data[col.name] === null || rowEditModal.data[col.name] === undefined
+                  ? ""
+                  : String(rowEditModal.data[col.name]);
+
+                return (
+                  <div key={col.name} className="row-field-group">
+                    <label className="row-field-label">
+                      <span>{col.name}</span>
+                      <span className="col-type-tag">{col.type}</span>
+                    </label>
+                    <div className="input-with-picker">
+                      <input
+                        type="text"
+                        className="input font-mono"
+                        value={curVal}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setRowEditModal((prev) =>
+                            prev ? { ...prev, data: { ...prev.data, [col.name]: val } } : null
+                          );
+                        }}
+                      />
+                      {isDate && (
+                        <button
+                          type="button"
+                          className="btn-picker-trigger"
+                          onClick={() => {
+                            setActivePicker({
+                              colName: col.name,
+                              colType: col.type,
+                              value: curVal,
+                              onApply: (selectedVal) => {
+                                setRowEditModal((prev) =>
+                                  prev ? { ...prev, data: { ...prev.data, [col.name]: selectedVal } } : null
+                                );
+                              },
+                            });
+                          }}
+                          title="Pick Date & Time"
+                        >
+                          <CalendarIcon size={14} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
 
             <div className="cell-card-footer">
@@ -1225,11 +1266,45 @@ export const DataGrid: React.FC<DataGridProps> = ({
         .active-sort-icon {
           color: var(--accent-blue);
         }
-        .inactive-sort-icon {
-          color: var(--text-muted);
-          opacity: 0.5;
+        .input-with-picker {
+          position: relative;
+          display: flex;
+          align-items: center;
+          width: 100%;
+        }
+        .input-with-picker input {
+          flex: 1;
+          padding-right: 32px;
+        }
+        .btn-picker-trigger {
+          position: absolute;
+          right: 6px;
+          background: transparent;
+          border: none;
+          color: var(--accent-blue);
+          cursor: pointer;
+          padding: 4px;
+          border-radius: 4px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .btn-picker-trigger:hover {
+          background: rgba(59, 130, 246, 0.15);
         }
       `}</style>
+
+      {activePicker && (
+        <DateTimePickerPopover
+          value={activePicker.value}
+          type={activePicker.colType}
+          onChange={(val) => {
+            activePicker.onApply(val);
+            setActivePicker(null);
+          }}
+          onClose={() => setActivePicker(null)}
+        />
+      )}
     </div>
   );
 };

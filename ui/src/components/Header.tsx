@@ -1,5 +1,5 @@
 import React from "react";
-import { Database, Terminal, Server, Sun, Moon, Shield, GitFork } from "lucide-react";
+import { Database, Terminal, Server, Sun, Moon, Shield, GitFork, FileText } from "lucide-react";
 import { ConnectionProfile } from "../types";
 
 interface HeaderProps {
@@ -10,6 +10,7 @@ interface HeaderProps {
   activeView: "explorer" | "sql" | "admin" | "diagram";
   onChangeView: (view: "explorer" | "sql" | "admin" | "diagram") => void;
   onOpenConnections: () => void;
+  onOpenAuditLogs?: () => void;
   theme: "dark" | "light";
   onToggleTheme: () => void;
 }
@@ -22,6 +23,7 @@ export const Header: React.FC<HeaderProps> = ({
   activeView,
   onChangeView,
   onOpenConnections,
+  onOpenAuditLogs,
   theme,
   onToggleTheme,
 }) => {
@@ -74,7 +76,7 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="status-indicator online" />
             <span className="profile-title">{activeProfile.name}</span>
             <span className={`db-type-badge ${activeProfile.type}`}>
-              {activeProfile.type === "postgres" ? "POSTGRES" : "MYSQL"}
+              {activeProfile.type.toUpperCase()}
             </span>
 
             {databases.length > 0 && (
@@ -96,6 +98,13 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="status-indicator offline" />
             <span>Not Connected</span>
           </div>
+        )}
+
+        {onOpenAuditLogs && (
+          <button className="btn btn-secondary conn-btn" onClick={onOpenAuditLogs} title="View Audit Logs & History">
+            <FileText size={13} />
+            <span>Audit Log</span>
+          </button>
         )}
 
         <button className="btn btn-secondary conn-btn" onClick={onOpenConnections}>
@@ -240,6 +249,10 @@ export const Header: React.FC<HeaderProps> = ({
         .db-type-badge.mariadb {
           background: rgba(249, 115, 22, 0.18);
           color: #fb923c;
+        }
+        .db-type-badge.sqlite {
+          background: rgba(16, 185, 129, 0.18);
+          color: #34d399;
         }
 
         .database-select {

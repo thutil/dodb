@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Server, Plus, Trash2, Zap, CheckCircle2, XCircle, X, Database, HardDrive, RefreshCw } from "lucide-react";
+import { Server, Plus, Trash2, Zap, CheckCircle2, XCircle, X, Database, HardDrive, RefreshCw, Folder, ChevronDown, ChevronRight } from "lucide-react";
 import { ConnectionProfile, DBType } from "../types";
 
 interface ConnectionModalProps {
@@ -25,16 +25,19 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
   const [form, setForm] = useState<Partial<ConnectionProfile>>({
     name: "Local Postgres",
     type: "postgres",
+    group: "Default",
     host: "localhost",
     port: 5432,
     user: "postgres",
     password: "",
     database: "postgres",
+    filePath: "",
   });
   const [testResult, setTestResult] = useState<{ success: boolean; text: string } | null>(null);
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [connecting, setConnecting] = useState(false);
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     if (selectedId) {
@@ -48,13 +51,23 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
   if (!isOpen) return null;
 
   const handleTypeChange = (type: DBType) => {
-    setForm((prev) => ({
-      ...prev,
-      type,
-      port: type === "postgres" ? 5432 : 3306,
-      user: type === "postgres" ? "postgres" : "root",
-      database: type === "postgres" ? "postgres" : "mysql",
-    }));
+    if (type === "sqlite") {
+      setForm((prev) => ({
+        ...prev,
+        type,
+        name: prev.name && prev.name !== "Local Postgres" && prev.name !== "Local MariaDB" ? prev.name : "Local SQLite",
+        filePath: prev.filePath || "./data/database.sqlite",
+        database: prev.filePath || "./data/database.sqlite",
+      }));
+    } else {
+      setForm((prev) => ({
+        ...prev,
+        type,
+        port: type === "postgres" ? 5432 : 3306,
+        user: type === "postgres" ? "postgres" : "root",
+        database: type === "postgres" ? "postgres" : "mysql",
+      }));
+    }
   };
 
   const handleTest = async () => {
@@ -78,7 +91,10 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
   const handleSave = async () => {
     setSaving(true);
     try {
-      await onSaveProfile(form);
+      await onSaveProfile({
+        ...form,
+        group: form.group ? form.group.trim() : "Default",
+      });
       setTestResult({ success: true, text: "Profile saved successfully" });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -89,7 +105,9 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
   };
 
   const handleConnect = async () => {
-    if (!form.host || !form.type) return;
+    if (form.type !== "sqlite" && !form.host) return;
+    if (form.type === "sqlite" && !form.filePath && !form.database) return;
+
     setConnecting(true);
     setTestResult(null);
     try {
@@ -117,13 +135,29 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
     setForm({
       name: "New Connection",
       type: "postgres",
+      group: "Default",
       host: "localhost",
       port: 5432,
       user: "postgres",
       password: "",
       database: "postgres",
+      filePath: "",
     });
     setTestResult(null);
+  };
+
+  // Group profiles
+  const groupedProfiles: Record<string, ConnectionProfile[]> = {};
+  profiles.forEach((p) => {
+    const gName = p.group && p.group.trim() !== "" ? p.group : "Default";
+    if (!groupedProfiles[gName]) {
+      groupedProfiles[gName] = [];
+    }
+    groupedProfiles[gName].push(p);
+  });
+
+  const toggleGroupCollapse = (gName: string) => {
+    setCollapsedGroups((prev) => ({ ...prev, [gName]: !prev[gName] }));
   };
 
   return (
@@ -146,32 +180,68 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
               <span>New Profile</span>
             </button>
             <div className="profile-items-wrapper">
-              {profiles.map((p) => (
-                <div
-                  key={p.id}
-                  className={`profile-card-item ${selectedId === p.id ? "active" : ""}`}
-                  onClick={() => setSelectedId(p.id)}
-                >
-                  <HardDrive size={14} className="profile-type-icon" />
-                  <div className="profile-meta">
-                    <span className="p-title">{p.name}</span>
-                    <span className="p-sub">
-                      {p.type.toUpperCase()} • {p.host}:{p.port}
-                    </span>
-                  </div>
-                </div>
-              ))}
+              {Object.keys(groupedProfiles).length === 0 ? (
+                <div className="empty-profiles-notice">No profiles saved yet</div>
+              ) : (
+                Object.entries(groupedProfiles).map(([groupName, groupItems]) => {
+                  const isCollapsed = collapsedGroups[groupName];
+                  return (
+                    <div key={groupName} className="group-folder-container">
+                      <div
+                        className="group-folder-header"
+                        onClick={() => toggleGroupCollapse(groupName)}
+                      >
+                        {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+                        <Folder size={13} className="folder-icon" />
+                        <span className="folder-title">{groupName}</span>
+                        <span className="folder-count">({groupItems.length})</span>
+                      </div>
+
+                      {!isCollapsed && (
+                        <div className="group-folder-items">
+                          {groupItems.map((p) => (
+                            <div
+                              key={p.id}
+                              className={`profile-card-item ${selectedId === p.id ? "active" : ""}`}
+                              onClick={() => setSelectedId(p.id)}
+                            >
+                              <HardDrive size={13} className="profile-type-icon" />
+                              <div className="profile-meta">
+                                <span className="p-title">{p.name}</span>
+                                <span className="p-sub">
+                                  {p.type.toUpperCase()} • {p.type === "sqlite" ? p.filePath || p.database : `${p.host}:${p.port}`}
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
 
           <div className="profile-editor-panel">
-            <div className="field-group">
-              <label className="field-label">Profile Name</label>
-              <input
-                className="input"
-                value={form.name || ""}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-              />
+            <div className="field-row">
+              <div className="field-group flex-2">
+                <label className="field-label">Profile Name</label>
+                <input
+                  className="input"
+                  value={form.name || ""}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                />
+              </div>
+              <div className="field-group flex-1">
+                <label className="field-label">Group / Folder</label>
+                <input
+                  className="input"
+                  placeholder="e.g. Production, Local"
+                  value={form.group || "Default"}
+                  onChange={(e) => setForm({ ...form, group: e.target.value })}
+                />
+              </div>
             </div>
 
             <div className="field-group">
@@ -193,57 +263,79 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
                   <Database size={14} />
                   <span>MySQL / MariaDB</span>
                 </button>
+                <button
+                  type="button"
+                  className={`engine-card ${form.type === "sqlite" ? "active" : ""}`}
+                  onClick={() => handleTypeChange("sqlite")}
+                >
+                  <Database size={14} />
+                  <span>SQLite</span>
+                </button>
               </div>
             </div>
 
-            <div className="field-row">
-              <div className="field-group flex-2">
-                <label className="field-label">Host</label>
+            {form.type === "sqlite" ? (
+              <div className="field-group">
+                <label className="field-label">SQLite File Path (.db, .sqlite, .sqlite3)</label>
                 <input
                   className="input font-mono"
-                  value={form.host || ""}
-                  onChange={(e) => setForm({ ...form, host: e.target.value })}
+                  placeholder="/absolute/path/to/database.db or ./data/db.sqlite"
+                  value={form.filePath || form.database || ""}
+                  onChange={(e) => setForm({ ...form, filePath: e.target.value, database: e.target.value })}
                 />
               </div>
-              <div className="field-group flex-1">
-                <label className="field-label">Port</label>
-                <input
-                  type="number"
-                  className="input font-mono"
-                  value={form.port || 5432}
-                  onChange={(e) => setForm({ ...form, port: Number(e.target.value) })}
-                />
-              </div>
-            </div>
+            ) : (
+              <>
+                <div className="field-row">
+                  <div className="field-group flex-2">
+                    <label className="field-label">Host</label>
+                    <input
+                      className="input font-mono"
+                      value={form.host || ""}
+                      onChange={(e) => setForm({ ...form, host: e.target.value })}
+                    />
+                  </div>
+                  <div className="field-group flex-1">
+                    <label className="field-label">Port</label>
+                    <input
+                      type="number"
+                      className="input font-mono"
+                      value={form.port || (form.type === "postgres" ? 5432 : 3306)}
+                      onChange={(e) => setForm({ ...form, port: Number(e.target.value) })}
+                    />
+                  </div>
+                </div>
 
-            <div className="field-row">
-              <div className="field-group">
-                <label className="field-label">User</label>
-                <input
-                  className="input"
-                  value={form.user || ""}
-                  onChange={(e) => setForm({ ...form, user: e.target.value })}
-                />
-              </div>
-              <div className="field-group">
-                <label className="field-label">Password</label>
-                <input
-                  type="password"
-                  className="input"
-                  value={form.password || ""}
-                  onChange={(e) => setForm({ ...form, password: e.target.value })}
-                />
-              </div>
-            </div>
+                <div className="field-row">
+                  <div className="field-group">
+                    <label className="field-label">User</label>
+                    <input
+                      className="input"
+                      value={form.user || ""}
+                      onChange={(e) => setForm({ ...form, user: e.target.value })}
+                    />
+                  </div>
+                  <div className="field-group">
+                    <label className="field-label">Password</label>
+                    <input
+                      type="password"
+                      className="input"
+                      value={form.password || ""}
+                      onChange={(e) => setForm({ ...form, password: e.target.value })}
+                    />
+                  </div>
+                </div>
 
-            <div className="field-group">
-              <label className="field-label">Database Name</label>
-              <input
-                className="input font-mono"
-                value={form.database || ""}
-                onChange={(e) => setForm({ ...form, database: e.target.value })}
-              />
-            </div>
+                <div className="field-group">
+                  <label className="field-label">Database Name</label>
+                  <input
+                    className="input font-mono"
+                    value={form.database || ""}
+                    onChange={(e) => setForm({ ...form, database: e.target.value })}
+                  />
+                </div>
+              </>
+            )}
 
             {testResult && (
               <div className={`status-banner ${testResult.success ? "success" : "error"}`}>
@@ -299,8 +391,8 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
         }
 
         .modal-card {
-          width: 720px;
-          height: 520px;
+          width: 760px;
+          height: 560px;
           background: var(--bg-card);
           border: 1px solid var(--border-light);
           border-radius: var(--radius-lg);
@@ -345,7 +437,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
         }
 
         .profile-list-panel {
-          width: 220px;
+          width: 240px;
           border-right: 1px solid var(--border-light);
           background: var(--bg-secondary);
           padding: 12px;
@@ -361,14 +453,55 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           overflow-y: auto;
           display: flex;
           flex-direction: column;
-          gap: 4px;
+          gap: 8px;
+        }
+
+        .empty-profiles-notice {
+          padding: 16px;
+          text-align: center;
+          font-size: 11px;
+          color: var(--text-muted);
+        }
+
+        .group-folder-container {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+
+        .group-folder-header {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          padding: 4px 6px;
+          border-radius: 4px;
+          cursor: pointer;
+          color: var(--text-muted);
+          font-size: 11px;
+          font-weight: 700;
+          user-select: none;
+        }
+        .group-folder-header:hover {
+          background: var(--bg-hover);
+          color: var(--text-main);
+        }
+
+        .folder-icon { color: var(--accent-blue); }
+        .folder-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .folder-count { font-size: 10px; opacity: 0.7; }
+
+        .group-folder-items {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+          padding-left: 12px;
         }
 
         .profile-card-item {
           display: flex;
           align-items: center;
-          gap: 10px;
-          padding: 8px 10px;
+          gap: 8px;
+          padding: 6px 8px;
           border-radius: var(--radius-sm);
           cursor: pointer;
           border: 1px solid transparent;
@@ -380,10 +513,10 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           border-color: var(--border-light);
         }
 
-        .profile-type-icon { color: var(--accent-blue); }
-        .profile-meta { display: flex; flex-direction: column; }
-        .p-title { font-size: 11px; font-weight: 600; color: var(--text-main); }
-        .p-sub { font-size: 9px; color: var(--text-muted); }
+        .profile-type-icon { color: var(--accent-blue); flex-shrink: 0; }
+        .profile-meta { display: flex; flex-direction: column; overflow: hidden; }
+        .p-title { font-size: 11px; font-weight: 600; color: var(--text-main); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .p-sub { font-size: 9px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
         .profile-editor-panel {
           flex: 1;
