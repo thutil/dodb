@@ -7,12 +7,13 @@
   "author": "Bank Jirapan",
   "scripts": {
     "start": "ts-node src/server.ts",
+    "build": "pnpm build:backend && pnpm build:ui",
     "build:backend": "tsc",
     "build:ui": "pnpm --prefix ui build",
     "dev": "nodemon src/server.ts",
     "ui:dev": "pnpm --prefix ui dev",
     "desktop": "electron electron/main.js",
-    "dist:mac": "pnpm build:backend && pnpm build:ui && electron-builder --mac dmg"
+    "dist:mac": "pnpm build && electron-builder --mac dmg"
   },
   "build": {
     "appId": "com.bankjirapan.dodb",
@@ -23,11 +24,32 @@
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "assets/icon.png",
-      "target": ["dmg"],
+      "identity": null,
+      "target": [
+        "dmg"
+      ],
       "hardenedRuntime": false
     },
     "dmg": {
-      "title": "dodb - macOS Database Manager"
+      "title": "dodb - macOS Database Manager",
+      "icon": "assets/icon.png",
+      "contents": [
+        {
+          "x": 130,
+          "y": 180,
+          "type": "file"
+        },
+        {
+          "x": 410,
+          "y": 180,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ],
+      "window": {
+        "width": 540,
+        "height": 360
+      }
     },
     "files": [
       "dist/**/*",

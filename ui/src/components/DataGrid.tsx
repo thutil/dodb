@@ -1,6 +1,27 @@
 import React, { useState, useEffect } from "react";
-import { Table2, RefreshCw, Key, ChevronLeft, ChevronRight, Search, FileText, Plus, Trash2, Check, RotateCcw, AlertCircle, Edit2, Edit3, Download, FileCode } from "lucide-react";
-import { ColumnInfo, TableRowData, ConnectionProfile } from "../types";
+import {
+  Table2,
+  RefreshCw,
+  Key,
+  ChevronLeft,
+  ChevronRight,
+  Search,
+  FileText,
+  Plus,
+  Trash2,
+  Check,
+  RotateCcw,
+  AlertCircle,
+  Edit2,
+  Edit3,
+  Download,
+  FileCode,
+  Filter,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
+} from "lucide-react";
+import { ColumnInfo, TableRowData, ConnectionProfile, ColumnFilter, FilterOperator } from "../types";
 
 export interface PendingChanges {
   inserts: TableRowData[];
@@ -21,6 +42,13 @@ interface DataGridProps {
   onPageChange: (newPage: number) => void;
   onRefresh: () => void;
   onCommitChanges: (changes: PendingChanges) => Promise<{ success: boolean; error?: string }>;
+  sortColumn?: string | null;
+  sortOrder?: "ASC" | "DESC";
+  onSortChange?: (col: string | null, order: "ASC" | "DESC") => void;
+  searchQuery?: string;
+  onSearchChange?: (query: string) => void;
+  filters?: ColumnFilter[];
+  onFiltersChange?: (filters: ColumnFilter[]) => void;
 }
 
 export const DataGrid: React.FC<DataGridProps> = ({
@@ -36,8 +64,16 @@ export const DataGrid: React.FC<DataGridProps> = ({
   onPageChange,
   onRefresh,
   onCommitChanges,
+  sortColumn,
+  sortOrder = "ASC",
+  onSortChange,
+  searchQuery = "",
+  onSearchChange,
+  filters = [],
+  onFiltersChange,
 }) => {
-  const [filterText, setFilterText] = useState("");
+  const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
+
   const [selectedCell, setSelectedCell] = useState<{ row: number; col: string; val: unknown } | null>(null);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [exportType, setExportType] = useState<"sql" | "csv">("sql");
@@ -276,10 +312,10 @@ export const DataGrid: React.FC<DataGridProps> = ({
     if (!activeProfile || !activeDatabase || !tableName) return;
     setExporting(true);
     setExportType(type);
-    setExportModalOpen(true);
     try {
       const endpoint = type === "sql" ? "export-sql" : "export-csv";
-      const res = await fetch(`http://localhost:3000/api/list/${endpoint}`, {
+      const apiBase = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:5820/api";
+      const res = await fetch(`${apiBase}/list/${endpoint}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -309,11 +345,50 @@ export const DataGrid: React.FC<DataGridProps> = ({
     document.body.removeChild(element);
   };
 
-  const filteredRows = rows.filter((row) =>
-    Object.values(row).some(
-      (val) => val !== null && String(val).toLowerCase().includes(filterText.toLowerCase())
-    )
-  );
+  // Filter Management Functions
+  const addFilter = () => {
+    if (!columns || columns.length === 0 || !onFiltersChange) return;
+    const newFilter: ColumnFilter = {
+      id: String(Date.now()),
+      column: columns[0].name,
+      operator: "equals",
+      value: "",
+    };
+    onFiltersChange([...filters, newFilter]);
+    onPageChange(0);
+  };
+
+  const updateFilter = (id: string, updated: Partial<ColumnFilter>) => {
+    if (!onFiltersChange) return;
+    const next = filters.map((f) => (f.id === id ? { ...f, ...updated } : f));
+    onFiltersChange(next);
+    onPageChange(0);
+  };
+
+  const removeFilter = (id: string) => {
+    if (!onFiltersChange) return;
+    const next = filters.filter((f) => f.id !== id);
+    onFiltersChange(next);
+    onPageChange(0);
+  };
+
+  const clearAllFilters = () => {
+    if (onFiltersChange) onFiltersChange([]);
+    if (onSearchChange) onSearchChange("");
+    onPageChange(0);
+  };
+
+  const handleHeaderClick = (colName: string) => {
+    if (!onSortChange) return;
+    if (sortColumn !== colName) {
+      onSortChange(colName, "ASC");
+    } else if (sortOrder === "ASC") {
+      onSortChange(colName, "DESC");
+    } else {
+      onSortChange(null, "ASC");
+    }
+    onPageChange(0);
+  };
 
   const totalPages = Math.ceil(totalRows / pageSize) || 1;
 
@@ -327,10 +402,19 @@ export const DataGrid: React.FC<DataGridProps> = ({
         </div>
 
         <div className="bar-actions">
+          <button
+            className={`btn btn-secondary ${filters.length > 0 ? "filter-active-btn" : ""}`}
+            onClick={() => setIsFilterPanelOpen(!isFilterPanelOpen)}
+          >
+            <Filter size={12} />
+            <span>Filter {filters.length > 0 ? `(${filters.length})` : ""}</span>
+          </button>
+
           <button className="btn btn-secondary" onClick={handleAddRow}>
             <Plus size={12} />
             <span>Add Row</span>
           </button>
+
           <button className="btn btn-secondary" onClick={() => handleFetchExport("sql")}>
             <Download size={12} />
             <span>Export SQL</span>
@@ -344,9 +428,12 @@ export const DataGrid: React.FC<DataGridProps> = ({
             <input
               type="text"
               className="input search-input"
-              placeholder="Filter page..."
-              value={filterText}
-              onChange={(e) => setFilterText(e.target.value)}
+              placeholder="Search table..."
+              value={searchQuery}
+              onChange={(e) => {
+                if (onSearchChange) onSearchChange(e.target.value);
+                onPageChange(0);
+              }}
             />
           </div>
           <button className="btn btn-secondary" onClick={onRefresh} disabled={loading}>
@@ -355,6 +442,84 @@ export const DataGrid: React.FC<DataGridProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Filter Drawer Panel */}
+      {isFilterPanelOpen && (
+        <div className="filter-drawer">
+          <div className="filter-drawer-header">
+            <div className="filter-drawer-title">
+              <Filter size={13} className="filter-icon" />
+              <span>Column Filters</span>
+            </div>
+            <div className="filter-drawer-actions">
+              <button className="btn btn-secondary btn-sm" onClick={addFilter}>
+                <Plus size={11} />
+                <span>Add Condition</span>
+              </button>
+              {(filters.length > 0 || searchQuery) && (
+                <button className="btn btn-secondary btn-sm" onClick={clearAllFilters}>
+                  <RotateCcw size={11} />
+                  <span>Clear Filters</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {filters.length === 0 ? (
+            <div className="empty-filters-msg">No active column filters. Click &quot;+ Add Condition&quot; to filter table rows.</div>
+          ) : (
+            <div className="filter-list">
+              {filters.map((f) => (
+                <div key={f.id} className="filter-row">
+                  <select
+                    className="input font-mono select-column"
+                    value={f.column}
+                    onChange={(e) => updateFilter(f.id, { column: e.target.value })}
+                  >
+                    {columns.map((c) => (
+                      <option key={c.name} value={c.name}>
+                        {c.name} ({c.type})
+                      </option>
+                    ))}
+                  </select>
+
+                  <select
+                    className="input select-operator"
+                    value={f.operator}
+                    onChange={(e) => updateFilter(f.id, { operator: e.target.value as FilterOperator })}
+                  >
+                    <option value="equals">= Equals</option>
+                    <option value="contains">🔍 Contains</option>
+                    <option value="startsWith">Starts with</option>
+                    <option value="endsWith">Ends with</option>
+                    <option value="gt">&gt; Greater than</option>
+                    <option value="gte">&gt;= Greater or equal</option>
+                    <option value="lt">&lt; Less than</option>
+                    <option value="lte">&lt;= Less or equal</option>
+                    <option value="neq">!= Not equal</option>
+                    <option value="isNull">IS NULL</option>
+                    <option value="isNotNull">IS NOT NULL</option>
+                  </select>
+
+                  {f.operator !== "isNull" && f.operator !== "isNotNull" && (
+                    <input
+                      type="text"
+                      className="input font-mono filter-val-input"
+                      placeholder="Value..."
+                      value={f.value}
+                      onChange={(e) => updateFilter(f.id, { value: e.target.value })}
+                    />
+                  )}
+
+                  <button className="icon-del-btn" onClick={() => removeFilter(f.id)} title="Remove filter">
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Transaction Commit / Rollback Bar */}
       {totalPending > 0 && (
@@ -397,19 +562,39 @@ export const DataGrid: React.FC<DataGridProps> = ({
               <tr>
                 <th className="num-col">#</th>
                 <th className="action-col">Act</th>
-                {columns.map((col) => (
-                  <th key={col.name} className="col-hdr">
-                    <div className="hdr-flex">
-                      {col.primaryKey && (
-                        <span title="Primary Key">
-                          <Key size={11} className="pk-icon" />
+                {columns.map((col) => {
+                  const isSorted = sortColumn === col.name;
+                  return (
+                    <th
+                      key={col.name}
+                      className={`col-hdr ${isSorted ? "sorted-hdr" : ""}`}
+                      onClick={() => handleHeaderClick(col.name)}
+                      style={{ cursor: "pointer", userSelect: "none" }}
+                      title="Click to toggle order by"
+                    >
+                      <div className="hdr-flex">
+                        {col.primaryKey && (
+                          <span title="Primary Key">
+                            <Key size={11} className="pk-icon" />
+                          </span>
+                        )}
+                        <span className="col-title">{col.name}</span>
+                        <span className="col-type-tag">{col.type}</span>
+                        <span className="sort-icon-badge">
+                          {isSorted ? (
+                            sortOrder === "ASC" ? (
+                              <ArrowUp size={11} className="active-sort-icon" />
+                            ) : (
+                              <ArrowDown size={11} className="active-sort-icon" />
+                            )
+                          ) : (
+                            <ArrowUpDown size={10} className="inactive-sort-icon" />
+                          )}
                         </span>
-                      )}
-                      <span className="col-title">{col.name}</span>
-                      <span className="col-type-tag">{col.type}</span>
-                    </div>
-                  </th>
-                ))}
+                      </div>
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody>
@@ -454,14 +639,14 @@ export const DataGrid: React.FC<DataGridProps> = ({
               ))}
 
               {/* Existing Database Rows */}
-              {filteredRows.length === 0 && newRows.length === 0 ? (
+              {rows.length === 0 && newRows.length === 0 ? (
                 <tr>
                   <td colSpan={columns.length + 2} className="empty-cell">
                     No matching records found
                   </td>
                 </tr>
               ) : (
-                filteredRows.map((row, idx) => {
+                rows.map((row, idx) => {
                   const pkKey = getPkKey(row, idx);
                   const isDeleted = deletedRowKeys.has(pkKey);
                   const rowEdits = editedCells[pkKey] || {};
@@ -958,7 +1143,94 @@ export const DataGrid: React.FC<DataGridProps> = ({
           justify-content: flex-end;
           gap: 8px;
         }
+
+        .filter-active-btn {
+          background: rgba(59, 130, 246, 0.15) !important;
+          color: var(--accent-blue) !important;
+          border-color: rgba(59, 130, 246, 0.4) !important;
+          font-weight: 600;
+        }
+
+        .filter-drawer {
+          background: var(--bg-tertiary);
+          border-bottom: 1px solid var(--border-light);
+          padding: 10px 14px;
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+        }
+
+        .filter-drawer-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }
+        .filter-drawer-title {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 11px;
+          font-weight: 700;
+          color: var(--text-main);
+        }
+        .filter-icon { color: var(--accent-blue); }
+        .filter-drawer-actions {
+          display: flex;
+          gap: 6px;
+        }
+        .btn-sm {
+          padding: 3px 8px;
+          font-size: 10px;
+        }
+
+        .empty-filters-msg {
+          font-size: 11px;
+          color: var(--text-muted);
+          font-style: italic;
+          padding: 4px 0;
+        }
+
+        .filter-list {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+        }
+        .filter-row {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .select-column {
+          width: 160px;
+          font-size: 11px;
+        }
+        .select-operator {
+          width: 150px;
+          font-size: 11px;
+        }
+        .filter-val-input {
+          flex: 1;
+          max-width: 260px;
+          font-size: 11px;
+        }
+
+        .sorted-hdr {
+          background: var(--bg-hover) !important;
+        }
+        .sort-icon-badge {
+          display: inline-flex;
+          align-items: center;
+          margin-left: 4px;
+        }
+        .active-sort-icon {
+          color: var(--accent-blue);
+        }
+        .inactive-sort-icon {
+          color: var(--text-muted);
+          opacity: 0.5;
+        }
       `}</style>
     </div>
   );
 };
+

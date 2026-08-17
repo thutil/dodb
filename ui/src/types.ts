@@ -33,3 +33,22 @@ export interface QueryExecutionResult {
   executionTimeMs?: number;
   error?: string;
 }
+export type FilterOperator =
+  | "equals"
+  | "contains"
+  | "startsWith"
+  | "endsWith"
+  | "gt"
+  | "gte"
+  | "lt"
+  | "lte"
+  | "neq"
+  | "isNull"
+  | "isNotNull";
+
+export interface ColumnFilter {
+  id: string;
+  column: string;
+  operator: FilterOperator;
+  value: string;
+}

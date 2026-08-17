@@ -150,32 +150,177 @@ router.post("/columns", async (req: Request, res: Response) => {
   }
 });
 
-// Fetch table rows with pagination
+// Helper to quote SQL identifiers securely
+function quoteIdent(name: string, type: "mariadb" | "postgres"): string {
+  const clean = name.replace(/[^a-zA-Z0-9_]/g, "");
+  return type === "mariadb" ? `\`${clean}\`` : `"${clean}"`;
+}
+
+// Fetch table rows with pagination, sorting, search, and filtering
 router.post("/rows", async (req: Request, res: Response) => {
   try {
     const config = getDBConfig(req);
-    const { database, table, limit = 50, offset = 0, sortColumn, sortOrder = "ASC" } = req.body;
+    const { database, table, limit = 50, offset = 0, sortColumn, sortOrder = "ASC", search, filters } = req.body;
     if (!database || !table) {
       res.status(400).json({ error: "Missing 'database' or 'table' in body" });
       return;
     }
 
     const pool = DBPoolManager.getPool({ ...config, database });
-    const orderClause = sortColumn ? `ORDER BY ${config.type === "mariadb" ? `\`${sortColumn}\`` : `"${sortColumn}"`} ${sortOrder === "DESC" ? "DESC" : "ASC"}` : "";
 
     if (config.type === "mariadb") {
       const conn = await (pool as any).getConnection();
       await conn.query(`USE \`${database}\``);
-      const countRes = await conn.query(`SELECT COUNT(*) as total FROM \`${table}\``);
+
+      // Fetch table columns to enable global search
+      const colsRes = await conn.query(`SHOW COLUMNS FROM \`${table}\``);
+      const colNames: string[] = colsRes.map((c: any) => c.Field);
+
+      const whereConditions: string[] = [];
+      const whereParams: any[] = [];
+
+      // 1. Process Column Filters
+      if (Array.isArray(filters)) {
+        for (const f of filters) {
+          if (!f.column || !colNames.includes(f.column)) continue;
+          const qCol = quoteIdent(f.column, "mariadb");
+          const op = f.operator || "equals";
+          const val = f.value;
+
+          if (op === "isNull") {
+            whereConditions.push(`${qCol} IS NULL`);
+          } else if (op === "isNotNull") {
+            whereConditions.push(`${qCol} IS NOT NULL`);
+          } else if (op === "contains") {
+            whereConditions.push(`${qCol} LIKE ?`);
+            whereParams.push(`%${val}%`);
+          } else if (op === "startsWith") {
+            whereConditions.push(`${qCol} LIKE ?`);
+            whereParams.push(`${val}%`);
+          } else if (op === "endsWith") {
+            whereConditions.push(`${qCol} LIKE ?`);
+            whereParams.push(`%${val}`);
+          } else if (op === "gt") {
+            whereConditions.push(`${qCol} > ?`);
+            whereParams.push(val);
+          } else if (op === "gte") {
+            whereConditions.push(`${qCol} >= ?`);
+            whereParams.push(val);
+          } else if (op === "lt") {
+            whereConditions.push(`${qCol} < ?`);
+            whereParams.push(val);
+          } else if (op === "lte") {
+            whereConditions.push(`${qCol} <= ?`);
+            whereParams.push(val);
+          } else if (op === "neq") {
+            whereConditions.push(`${qCol} != ?`);
+            whereParams.push(val);
+          } else {
+            // equals
+            whereConditions.push(`${qCol} = ?`);
+            whereParams.push(val);
+          }
+        }
+      }
+
+      // 2. Process Global Search
+      if (search && typeof search === "string" && search.trim() !== "" && colNames.length > 0) {
+        const searchVal = `%${search.trim()}%`;
+        const searchOrs = colNames.map((c) => `CAST(${quoteIdent(c, "mariadb")} AS CHAR) LIKE ?`);
+        whereConditions.push(`(${searchOrs.join(" OR ")})`);
+        colNames.forEach(() => whereParams.push(searchVal));
+      }
+
+      const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(" AND ")}` : "";
+      const orderClause = sortColumn && colNames.includes(sortColumn)
+        ? `ORDER BY ${quoteIdent(sortColumn, "mariadb")} ${sortOrder === "DESC" ? "DESC" : "ASC"}`
+        : "";
+
+      const countRes = await conn.query(`SELECT COUNT(*) as total FROM \`${table}\` ${whereClause}`, whereParams);
       const total = Number(countRes[0]?.total || 0);
-      const rows = await conn.query(`SELECT * FROM \`${table}\` ${orderClause} LIMIT ? OFFSET ?`, [Number(limit), Number(offset)]);
+
+      const queryParams = [...whereParams, Number(limit), Number(offset)];
+      const rows = await conn.query(`SELECT * FROM \`${table}\` ${whereClause} ${orderClause} LIMIT ? OFFSET ?`, queryParams);
       await conn.release();
       res.json({ rows, total });
     } else {
-      const countRes = await (pool as any).query(`SELECT COUNT(*) as total FROM "${table}"`);
+      // PostgreSQL
+      const colRes = await (pool as any).query(
+        "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1",
+        [table]
+      );
+      const colNames: string[] = colRes.rows.map((r: any) => r.column_name);
+
+      const whereConditions: string[] = [];
+      const whereParams: any[] = [];
+      let pIdx = 1;
+
+      // 1. Process Column Filters
+      if (Array.isArray(filters)) {
+        for (const f of filters) {
+          if (!f.column || !colNames.includes(f.column)) continue;
+          const qCol = quoteIdent(f.column, "postgres");
+          const op = f.operator || "equals";
+          const val = f.value;
+
+          if (op === "isNull") {
+            whereConditions.push(`${qCol} IS NULL`);
+          } else if (op === "isNotNull") {
+            whereConditions.push(`${qCol} IS NOT NULL`);
+          } else if (op === "contains") {
+            whereConditions.push(`${qCol}::text ILIKE $${pIdx++}`);
+            whereParams.push(`%${val}%`);
+          } else if (op === "startsWith") {
+            whereConditions.push(`${qCol}::text ILIKE $${pIdx++}`);
+            whereParams.push(`${val}%`);
+          } else if (op === "endsWith") {
+            whereConditions.push(`${qCol}::text ILIKE $${pIdx++}`);
+            whereParams.push(`%${val}`);
+          } else if (op === "gt") {
+            whereConditions.push(`${qCol} > $${pIdx++}`);
+            whereParams.push(val);
+          } else if (op === "gte") {
+            whereConditions.push(`${qCol} >= $${pIdx++}`);
+            whereParams.push(val);
+          } else if (op === "lt") {
+            whereConditions.push(`${qCol} < $${pIdx++}`);
+            whereParams.push(val);
+          } else if (op === "lte") {
+            whereConditions.push(`${qCol} <= $${pIdx++}`);
+            whereParams.push(val);
+          } else if (op === "neq") {
+            whereConditions.push(`${qCol} != $${pIdx++}`);
+            whereParams.push(val);
+          } else {
+            // equals
+            whereConditions.push(`${qCol}::text = $${pIdx++}`);
+            whereParams.push(val);
+          }
+        }
+      }
+
+      // 2. Process Global Search
+      if (search && typeof search === "string" && search.trim() !== "" && colNames.length > 0) {
+        const searchVal = `%${search.trim()}%`;
+        const searchOrs: string[] = [];
+        colNames.forEach((c) => {
+          searchOrs.push(`${quoteIdent(c, "postgres")}::text ILIKE $${pIdx++}`);
+          whereParams.push(searchVal);
+        });
+        whereConditions.push(`(${searchOrs.join(" OR ")})`);
+      }
+
+      const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(" AND ")}` : "";
+      const orderClause = sortColumn && colNames.includes(sortColumn)
+        ? `ORDER BY ${quoteIdent(sortColumn, "postgres")} ${sortOrder === "DESC" ? "DESC" : "ASC"}`
+        : "";
+
+      const countRes = await (pool as any).query(`SELECT COUNT(*) as total FROM "${table}" ${whereClause}`, whereParams);
       const total = Number(countRes.rows[0]?.total || 0);
-      const query = `SELECT * FROM "${table}" ${orderClause} LIMIT $1 OFFSET $2`;
-      const result = await (pool as any).query(query, [Number(limit), Number(offset)]);
+
+      const queryParams = [...whereParams, Number(limit), Number(offset)];
+      const query = `SELECT * FROM "${table}" ${whereClause} ${orderClause} LIMIT $${pIdx++} OFFSET $${pIdx++}`;
+      const result = await (pool as any).query(query, queryParams);
       res.json({ rows: result.rows, total });
     }
   } catch (err: any) {

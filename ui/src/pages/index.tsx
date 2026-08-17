@@ -7,9 +7,9 @@ import { DataGrid, PendingChanges } from "../components/DataGrid";
 import { SqlConsole } from "../components/SqlConsole";
 import { AdminPanel } from "../components/AdminPanel";
 import { SchemaDiagram } from "../components/SchemaDiagram";
-import { ConnectionProfile, ColumnInfo, TableRowData, QueryExecutionResult } from "../types";
+import { ConnectionProfile, ColumnInfo, TableRowData, QueryExecutionResult, ColumnFilter } from "../types";
 
-const API_BASE = "http://localhost:3000/api";
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:5820/api";
 
 export default function Home() {
   const [theme, setTheme] = useState<"dark" | "light">("dark");
@@ -32,6 +32,21 @@ export default function Home() {
   const [loadingData, setLoadingData] = useState(false);
   const [page, setPage] = useState(0);
   const pageSize = 50;
+
+  // Sorting, Search, and Filtering state
+  const [sortColumn, setSortColumn] = useState<string | null>(null);
+  const [sortOrder, setSortOrder] = useState<"ASC" | "DESC">("ASC");
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [filters, setFilters] = useState<ColumnFilter[]>([]);
+
+  // Reset state when switching table or database
+  useEffect(() => {
+    setSortColumn(null);
+    setSortOrder("ASC");
+    setSearchQuery("");
+    setFilters([]);
+    setPage(0);
+  }, [activeTable, activeDatabase]);
 
   // Auto Sync Theme with OS System Preference & Manual Toggle
   useEffect(() => {
@@ -111,6 +126,11 @@ export default function Home() {
   const fetchTables = useCallback(async () => {
     if (!activeProfile || !activeDatabase) return;
     setLoadingTables(true);
+    setTables([]);
+    setActiveTable(null);
+    setRows([]);
+    setColumns([]);
+    setTotalRows(0);
     try {
       const res = await fetch(`${API_BASE}/list/tables`, {
         method: "POST",
@@ -119,9 +139,10 @@ export default function Home() {
       });
       if (res.ok) {
         const data = await res.json();
-        setTables(data.tables || []);
-        if (data.tables && data.tables.length > 0) {
-          setActiveTable(data.tables[0]);
+        const newTables: string[] = data.tables || [];
+        setTables(newTables);
+        if (newTables.length > 0) {
+          setActiveTable(newTables[0]);
         } else {
           setActiveTable(null);
         }
@@ -139,7 +160,7 @@ export default function Home() {
     }
   }, [activeDatabase, fetchTables]);
 
-  // Fetch Table Data & Columns when activeTable or page changes
+  // Fetch Table Data & Columns when activeTable, page, sort, search, or filters change
   const fetchTableData = useCallback(async () => {
     if (!activeProfile || !activeDatabase || !activeTable) return;
     setLoadingData(true);
@@ -155,7 +176,7 @@ export default function Home() {
         setColumns(colData.columns || []);
       }
 
-      // 2. Fetch paginated rows
+      // 2. Fetch paginated rows with sorting, search, and filtering
       const rowRes = await fetch(`${API_BASE}/list/rows`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -165,6 +186,10 @@ export default function Home() {
           table: activeTable,
           limit: pageSize,
           offset: page * pageSize,
+          sortColumn: sortColumn || undefined,
+          sortOrder,
+          search: searchQuery || undefined,
+          filters: filters.map((f) => ({ column: f.column, operator: f.operator, value: f.value })),
         }),
       });
       if (rowRes.ok) {
@@ -177,13 +202,13 @@ export default function Home() {
     } finally {
       setLoadingData(false);
     }
-  }, [activeProfile, activeDatabase, activeTable, page]);
+  }, [activeProfile, activeDatabase, activeTable, page, sortColumn, sortOrder, searchQuery, filters]);
 
   useEffect(() => {
-    if (activeTable) {
+    if (activeDatabase && activeTable) {
       fetchTableData();
     }
-  }, [activeTable, page, fetchTableData]);
+  }, [activeDatabase, activeTable, page, sortColumn, sortOrder, searchQuery, filters, fetchTableData]);
 
   // Handle Save Profile
   const handleSaveProfile = async (profileData: Partial<ConnectionProfile>) => {
@@ -284,8 +309,14 @@ export default function Home() {
           activeDatabase={activeDatabase}
           databases={databases}
           onSelectDatabase={(db) => {
-            setActiveDatabase(db);
-            setPage(0);
+            if (db !== activeDatabase) {
+              setActiveDatabase(db);
+              setActiveTable(null);
+              setRows([]);
+              setColumns([]);
+              setTotalRows(0);
+              setPage(0);
+            }
           }}
           activeView={activeView}
           onChangeView={setActiveView}
@@ -300,8 +331,14 @@ export default function Home() {
               databases={databases}
               activeDatabase={activeDatabase}
               onSelectDatabase={(db) => {
-                setActiveDatabase(db);
-                setPage(0);
+                if (db !== activeDatabase) {
+                  setActiveDatabase(db);
+                  setActiveTable(null);
+                  setRows([]);
+                  setColumns([]);
+                  setTotalRows(0);
+                  setPage(0);
+                }
               }}
               tables={tables}
               activeTable={activeTable}
@@ -333,6 +370,16 @@ export default function Home() {
                 onPageChange={setPage}
                 onRefresh={fetchTableData}
                 onCommitChanges={handleCommitChanges}
+                sortColumn={sortColumn}
+                sortOrder={sortOrder}
+                onSortChange={(col, order) => {
+                  setSortColumn(col);
+                  setSortOrder(order);
+                }}
+                searchQuery={searchQuery}
+                onSearchChange={setSearchQuery}
+                filters={filters}
+                onFiltersChange={setFilters}
               />
             ) : activeView === "sql" ? (
               <SqlConsole

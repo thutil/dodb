@@ -80,15 +80,28 @@ pnpm ui:dev
 
 ---
 
-## การบิลด์แพ็กเกจติดตั้ง `.dmg` (Packaging Production DMG)
+## การบิลด์แอปพลิเคชัน (Build & Production)
 
-หากต้องการบิลด์แพ็กเกจติดตั้งไฟล์ `.dmg` สำหรับส่งให้ผู้อื่นทดสอบใช้งาน:
+### 1. บิลด์ไฟล์โปรเจกต์ (Build Assets)
+คำสั่งสำหรับคอมไพล์ Backend TypeScript และ Next.js UI:
+
+```bash
+pnpm build
+```
+
+### 2. บิลด์แพ็กเกจติดตั้ง `.dmg` (Packaging Production DMG)
+คำสั่งสำหรับสร้างไฟล์ติดตั้ง `.dmg` สำหรับ macOS พร้อม Drag-to-Applications Installer:
+
+npx electron-builder --mac dmg && hdiutil create -volname "dodb" -srcfolder dist-dmg/mac-arm64/dodb.app -ov -format UDZO dist-dmg/dodb-1.0.0-macOS.dmg
+
+hdiutil create -volname "dodb" -srcfolder dist-dmg/mac-arm64/dodb.app -ov -format UDZO dist-dmg/dodb-1.0.0-macOS.dmg
 
 ```bash
 pnpm dist:mac
 ```
 
-ไฟล์ติดตั้ง `.dmg` จะถูกสร้างขึ้นที่โฟลเดอร์ `dist-dmg/dodb-1.0.0-macOS.dmg`
+ไฟล์ติดตั้ง `.dmg` จะถูกสร้างขึ้นที่โฟลเดอร์:
+- **`dist-dmg/dodb-1.0.0-arm64.dmg`** (สำหรับ Apple Silicon Mac)
 
 ---
 
