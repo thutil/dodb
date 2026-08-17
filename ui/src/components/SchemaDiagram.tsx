@@ -293,6 +293,12 @@ export const SchemaDiagram: React.FC<SchemaDiagramProps> = ({
 
       {/* React Flow Drag & Drop Canvas with Theme Sync */}
       <div className="flow-wrapper">
+        {loading && (
+          <div className="diagram-loading-overlay">
+            <RefreshCw size={28} className="spin loading-icon" />
+            <span className="loading-text">Loading ER Diagram & Relationships...</span>
+          </div>
+        )}
         <ReactFlow
           nodes={nodes.filter((n) => n.id.toLowerCase().includes(searchQuery.toLowerCase()))}
           edges={edges}
@@ -384,10 +390,35 @@ export const SchemaDiagram: React.FC<SchemaDiagramProps> = ({
         @keyframes spin { 100% { transform: rotate(360deg); } }
 
         .flow-wrapper {
+          position: relative;
           flex: 1;
           width: 100%;
           height: 100%;
           background: var(--bg-content);
+        }
+
+        .diagram-loading-overlay {
+          position: absolute;
+          inset: 0;
+          z-index: 100;
+          background: rgba(18, 18, 22, 0.75);
+          backdrop-filter: blur(4px);
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 12px;
+          color: var(--text-main);
+        }
+
+        .loading-icon {
+          color: var(--accent-blue);
+        }
+
+        .loading-text {
+          font-size: 12px;
+          font-weight: 600;
+          color: var(--text-sub);
         }
       `}</style>
     </div>

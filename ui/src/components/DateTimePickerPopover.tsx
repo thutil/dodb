@@ -115,139 +115,148 @@ export const DateTimePickerPopover: React.FC<DateTimePickerPopoverProps> = ({
   };
 
   return (
-    <div className="datetime-popover" ref={popoverRef} onClick={(e) => e.stopPropagation()}>
-      <div className="popover-header">
-        <div className="popover-tabs">
-          <button
-            type="button"
-            className={`tab-btn ${activeTab === "calendar" ? "active" : ""}`}
-            onClick={() => setActiveTab("calendar")}
-          >
-            <CalendarIcon size={12} />
-            <span>Date</span>
-          </button>
-          {!isDateOnly && (
+    <div className="datetime-modal-overlay" onClick={onClose}>
+      <div className="datetime-popover" ref={popoverRef} onClick={(e) => e.stopPropagation()}>
+        <div className="popover-header">
+          <div className="popover-tabs">
             <button
               type="button"
-              className={`tab-btn ${activeTab === "time" ? "active" : ""}`}
-              onClick={() => setActiveTab("time")}
+              className={`tab-btn ${activeTab === "calendar" ? "active" : ""}`}
+              onClick={() => setActiveTab("calendar")}
             >
-              <Clock size={12} />
-              <span>Time ({pad(hours)}:{pad(minutes)})</span>
+              <CalendarIcon size={12} />
+              <span>Date</span>
             </button>
-          )}
-        </div>
-        <button type="button" className="close-btn" onClick={onClose}>
-          <X size={12} />
-        </button>
-      </div>
-
-      {activeTab === "calendar" ? (
-        <div className="calendar-view">
-          <div className="month-selector">
-            <button type="button" className="nav-btn" onClick={handlePrevMonth}>
-              <ChevronLeft size={14} />
-            </button>
-            <span className="month-title">
-              {monthNames[currentMonth]} {currentYear}
-            </span>
-            <button type="button" className="nav-btn" onClick={handleNextMonth}>
-              <ChevronRight size={14} />
-            </button>
+            {!isDateOnly && (
+              <button
+                type="button"
+                className={`tab-btn ${activeTab === "time" ? "active" : ""}`}
+                onClick={() => setActiveTab("time")}
+              >
+                <Clock size={12} />
+                <span>Time ({pad(hours)}:{pad(minutes)})</span>
+              </button>
+            )}
           </div>
-
-          <div className="week-headers">
-            <span>Su</span>
-            <span>Mo</span>
-            <span>Tu</span>
-            <span>We</span>
-            <span>Th</span>
-            <span>Fr</span>
-            <span>Sa</span>
-          </div>
-
-          <div className="days-grid">{renderCalendarGrid()}</div>
-        </div>
-      ) : (
-        <div className="time-view">
-          <div className="time-column">
-            <span className="time-label">Hours (00-23)</span>
-            <div className="time-scroll">
-              {Array.from({ length: 24 }).map((_, h) => (
-                <button
-                  key={`h-${h}`}
-                  type="button"
-                  className={`time-item ${hours === h ? "selected" : ""}`}
-                  onClick={() => setHours(h)}
-                >
-                  {pad(h)}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="time-column">
-            <span className="time-label">Minutes (00-59)</span>
-            <div className="time-scroll">
-              {Array.from({ length: 60 }).map((_, m) => (
-                <button
-                  key={`m-${m}`}
-                  type="button"
-                  className={`time-item ${minutes === m ? "selected" : ""}`}
-                  onClick={() => setMinutes(m)}
-                >
-                  {pad(m)}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="time-column">
-            <span className="time-label">Sec (00-59)</span>
-            <div className="time-scroll">
-              {Array.from({ length: 60 }).map((_, s) => (
-                <button
-                  key={`s-${s}`}
-                  type="button"
-                  className={`time-item ${seconds === s ? "selected" : ""}`}
-                  onClick={() => setSeconds(s)}
-                >
-                  {pad(s)}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="popover-footer">
-        <span className="preview-val">
-          {currentYear}-{pad(currentMonth + 1)}-{pad(selectedDay)}
-          {!isDateOnly && ` ${pad(hours)}:${pad(minutes)}:${pad(seconds)}`}
-        </span>
-        <div className="footer-actions">
-          <button type="button" className="btn btn-secondary btn-sm" onClick={onClose}>
-            Cancel
+          <button type="button" className="close-btn" onClick={onClose}>
+            <X size={12} />
           </button>
-          <button type="button" className="btn btn-primary btn-sm" onClick={handleConfirm}>
-            <Check size={12} />
-            <span>Apply</span>
-          </button>
+        </div>
+
+        {activeTab === "calendar" ? (
+          <div className="calendar-view">
+            <div className="month-selector">
+              <button type="button" className="nav-btn" onClick={handlePrevMonth}>
+                <ChevronLeft size={14} />
+              </button>
+              <span className="month-title">
+                {monthNames[currentMonth]} {currentYear}
+              </span>
+              <button type="button" className="nav-btn" onClick={handleNextMonth}>
+                <ChevronRight size={14} />
+              </button>
+            </div>
+
+            <div className="week-headers">
+              <span>Su</span>
+              <span>Mo</span>
+              <span>Tu</span>
+              <span>We</span>
+              <span>Th</span>
+              <span>Fr</span>
+              <span>Sa</span>
+            </div>
+
+            <div className="days-grid">{renderCalendarGrid()}</div>
+          </div>
+        ) : (
+          <div className="time-view">
+            <div className="time-column">
+              <span className="time-label">Hours (00-23)</span>
+              <div className="time-scroll">
+                {Array.from({ length: 24 }).map((_, h) => (
+                  <button
+                    key={`h-${h}`}
+                    type="button"
+                    className={`time-item ${hours === h ? "selected" : ""}`}
+                    onClick={() => setHours(h)}
+                  >
+                    {pad(h)}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="time-column">
+              <span className="time-label">Minutes (00-59)</span>
+              <div className="time-scroll">
+                {Array.from({ length: 60 }).map((_, m) => (
+                  <button
+                    key={`m-${m}`}
+                    type="button"
+                    className={`time-item ${minutes === m ? "selected" : ""}`}
+                    onClick={() => setMinutes(m)}
+                  >
+                    {pad(m)}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="time-column">
+              <span className="time-label">Sec (00-59)</span>
+              <div className="time-scroll">
+                {Array.from({ length: 60 }).map((_, s) => (
+                  <button
+                    key={`s-${s}`}
+                    type="button"
+                    className={`time-item ${seconds === s ? "selected" : ""}`}
+                    onClick={() => setSeconds(s)}
+                  >
+                    {pad(s)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="popover-footer">
+          <span className="preview-val">
+            {currentYear}-{pad(currentMonth + 1)}-{pad(selectedDay)}
+            {!isDateOnly && ` ${pad(hours)}:${pad(minutes)}:${pad(seconds)}`}
+          </span>
+          <div className="footer-actions">
+            <button type="button" className="btn btn-secondary btn-sm" onClick={onClose}>
+              Cancel
+            </button>
+            <button type="button" className="btn btn-primary btn-sm" onClick={handleConfirm}>
+              <Check size={12} />
+              <span>Apply</span>
+            </button>
+          </div>
         </div>
       </div>
 
       <style jsx>{`
+        .datetime-modal-overlay {
+          position: fixed;
+          inset: 0;
+          z-index: 3000;
+          background: rgba(0, 0, 0, 0.4);
+          backdrop-filter: blur(2px);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
         .datetime-popover {
-          position: absolute;
-          top: 100%;
-          left: 0;
-          z-index: 2000;
-          margin-top: 4px;
-          width: 280px;
+          position: relative;
+          width: 310px;
           background: var(--bg-card);
           border: 1px solid var(--border-light);
           border-radius: var(--radius-md);
-          box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+          box-shadow: 0 15px 35px rgba(0, 0, 0, 0.5);
           display: flex;
           flex-direction: column;
           overflow: hidden;

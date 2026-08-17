@@ -457,11 +457,13 @@ export default function Home() {
           isOpen={isAuditLogOpen}
           onClose={() => setIsAuditLogOpen(false)}
           profiles={profiles}
+          apiBase={API_BASE}
         />
 
         <GuiSizeModal
           isOpen={isGuiSizeOpen}
           onClose={() => setIsGuiSizeOpen(false)}
+          apiBase={API_BASE}
         />
 
         <footer className="app-footer">

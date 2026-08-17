@@ -37,13 +37,33 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [connecting, setConnecting] = useState(false);
+  const [isCustomGroup, setIsCustomGroup] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+
+  const availableGroups = Array.from(
+    new Set([
+      "Default",
+      "Production",
+      "Staging",
+      "Development",
+      "Local",
+      ...profiles.map((p) => p.group || "Default").filter(Boolean),
+    ])
+  );
 
   useEffect(() => {
     if (selectedId) {
       const p = profiles.find((item) => item.id === selectedId);
       if (p) {
         setForm(p);
+        const defaults = ["Default", "Production", "Staging", "Development", "Local"];
+        const existing = profiles.map((pr) => pr.group).filter(Boolean);
+        const allGroups = new Set([...defaults, ...existing]);
+        if (p.group && !allGroups.has(p.group)) {
+          setIsCustomGroup(true);
+        } else {
+          setIsCustomGroup(false);
+        }
       }
     }
   }, [selectedId, profiles]);
@@ -235,12 +255,49 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
               </div>
               <div className="field-group flex-1">
                 <label className="field-label">Group / Folder</label>
-                <input
-                  className="input"
-                  placeholder="e.g. Production, Local"
-                  value={form.group || "Default"}
-                  onChange={(e) => setForm({ ...form, group: e.target.value })}
-                />
+                {isCustomGroup ? (
+                  <div className="group-input-wrap">
+                    <input
+                      className="input"
+                      placeholder="Type new group name..."
+                      value={form.group || ""}
+                      onChange={(e) => setForm({ ...form, group: e.target.value })}
+                      autoFocus
+                    />
+                    <button
+                      type="button"
+                      className="btn-toggle-group"
+                      onClick={() => {
+                        setIsCustomGroup(false);
+                        setForm({ ...form, group: availableGroups[0] || "Default" });
+                      }}
+                      title="Select existing group"
+                    >
+                      Select Group
+                    </button>
+                  </div>
+                ) : (
+                  <select
+                    className="select"
+                    value={availableGroups.includes(form.group || "Default") ? (form.group || "Default") : "__NEW__"}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === "__NEW__") {
+                        setIsCustomGroup(true);
+                        setForm({ ...form, group: "" });
+                      } else {
+                        setForm({ ...form, group: val });
+                      }
+                    }}
+                  >
+                    {availableGroups.map((g) => (
+                      <option key={g} value={g}>
+                        📁 {g}
+                      </option>
+                    ))}
+                    <option value="__NEW__">➕ Create New Group...</option>
+                  </select>
+                )}
               </div>
             </div>
 
@@ -279,10 +336,16 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
                 <label className="field-label">SQLite File Path (.db, .sqlite, .sqlite3)</label>
                 <input
                   className="input font-mono"
-                  placeholder="/absolute/path/to/database.db or ./data/db.sqlite"
+                  placeholder="/Users/username/data/database.db or ./data/db.sqlite"
                   value={form.filePath || form.database || ""}
                   onChange={(e) => setForm({ ...form, filePath: e.target.value, database: e.target.value })}
                 />
+                <div className="sqlite-info-box">
+                  <Folder size={13} className="info-icon" />
+                  <span>
+                    <strong>Browser / Server File Path Guidance:</strong> Please enter the absolute file path on your server (e.g. <code>/Users/name/data/database.sqlite</code>) or relative path (e.g. <code>./data/database.sqlite</code>).
+                  </span>
+                </div>
               </div>
             ) : (
               <>
@@ -583,6 +646,51 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           gap: 8px;
           margin-top: auto;
           padding-top: 10px;
+        }
+
+        .group-input-wrap {
+          display: flex;
+          gap: 6px;
+        }
+
+        .btn-toggle-group {
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-light);
+          color: var(--text-sub);
+          font-size: 10px;
+          padding: 0 8px;
+          border-radius: var(--radius-sm);
+          cursor: pointer;
+          white-space: nowrap;
+        }
+        .btn-toggle-group:hover {
+          color: var(--text-main);
+          border-color: var(--accent-blue);
+        }
+
+        .sqlite-info-box {
+          margin-top: 6px;
+          padding: 8px 10px;
+          background: rgba(59, 130, 246, 0.08);
+          border: 1px solid rgba(59, 130, 246, 0.2);
+          border-radius: var(--radius-sm);
+          font-size: 11px;
+          color: var(--text-sub);
+          display: flex;
+          align-items: flex-start;
+          gap: 8px;
+          line-height: 1.4;
+        }
+        .sqlite-info-box .info-icon {
+          color: var(--accent-blue);
+          margin-top: 2px;
+          flex-shrink: 0;
+        }
+        .sqlite-info-box code {
+          background: var(--bg-tertiary);
+          padding: 1px 4px;
+          border-radius: 3px;
+          color: var(--text-main);
         }
 
         .spin { animation: spin 1s linear infinite; }

@@ -6,12 +6,14 @@ interface AuditLogDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   profiles: ConnectionProfile[];
+  apiBase?: string;
 }
 
 export const AuditLogDrawer: React.FC<AuditLogDrawerProps> = ({
   isOpen,
   onClose,
   profiles,
+  apiBase = "http://localhost:5820/api",
 }) => {
   const [logs, setLogs] = useState<AuditLogEntry[]>([]);
   const [total, setTotal] = useState(0);
@@ -34,7 +36,8 @@ export const AuditLogDrawer: React.FC<AuditLogDrawerProps> = ({
       if (status) params.append("status", status);
       params.append("limit", "150");
 
-      const res = await fetch(`/api/audit-logs?${params.toString()}`);
+      const baseUrl = apiBase.endsWith("/") ? apiBase.slice(0, -1) : apiBase;
+      const res = await fetch(`${baseUrl}/audit-logs?${params.toString()}`);
       if (res.ok) {
         const data = await res.json();
         setLogs(data.logs || []);
@@ -45,7 +48,7 @@ export const AuditLogDrawer: React.FC<AuditLogDrawerProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [search, selectedProfileId, actionType, status]);
+  }, [search, selectedProfileId, actionType, status, apiBase]);
 
   useEffect(() => {
     if (isOpen) {
@@ -58,7 +61,8 @@ export const AuditLogDrawer: React.FC<AuditLogDrawerProps> = ({
   const handleClearLogs = async () => {
     if (!confirm("Are you sure you want to clear all audit logs?")) return;
     try {
-      const res = await fetch("/api/audit-logs", { method: "DELETE" });
+      const baseUrl = apiBase.endsWith("/") ? apiBase.slice(0, -1) : apiBase;
+      const res = await fetch(`${baseUrl}/audit-logs`, { method: "DELETE" });
       if (res.ok) {
         fetchLogs();
       }
@@ -318,7 +322,7 @@ export const AuditLogDrawer: React.FC<AuditLogDrawerProps> = ({
           background: rgba(0, 0, 0, 0.65);
           backdrop-filter: blur(6px);
           display: flex;
-          align-items: flex-end;
+          align-items: center;
           justify-content: center;
           z-index: 1500;
         }
@@ -326,11 +330,12 @@ export const AuditLogDrawer: React.FC<AuditLogDrawerProps> = ({
         .drawer-card {
           width: 90%;
           max-width: 1200px;
-          height: 80vh;
+          height: 82vh;
+          max-height: 820px;
           background: var(--bg-card);
           border: 1px solid var(--border-light);
-          border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-          box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.5);
+          border-radius: var(--radius-lg);
+          box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
           display: flex;
           flex-direction: column;
           overflow: hidden;

@@ -4,9 +4,14 @@ import { Monitor, Check, X, Sliders } from "lucide-react";
 interface GuiSizeModalProps {
   isOpen: boolean;
   onClose: () => void;
+  apiBase?: string;
 }
 
-export const GuiSizeModal: React.FC<GuiSizeModalProps> = ({ isOpen, onClose }) => {
+export const GuiSizeModal: React.FC<GuiSizeModalProps> = ({
+  isOpen,
+  onClose,
+  apiBase = "http://localhost:5820/api",
+}) => {
   const [width, setWidth] = useState<number>(1280);
   const [height, setHeight] = useState<number>(850);
   const [saving, setSaving] = useState(false);
@@ -14,7 +19,8 @@ export const GuiSizeModal: React.FC<GuiSizeModalProps> = ({ isOpen, onClose }) =
 
   useEffect(() => {
     if (isOpen) {
-      fetch("/api/admin/gui-size")
+      const baseUrl = apiBase.endsWith("/") ? apiBase.slice(0, -1) : apiBase;
+      fetch(`${baseUrl}/admin/gui-size`)
         .then((res) => res.json())
         .then((data) => {
           if (data.width && data.height) {
@@ -24,7 +30,7 @@ export const GuiSizeModal: React.FC<GuiSizeModalProps> = ({ isOpen, onClose }) =
         })
         .catch(() => {});
     }
-  }, [isOpen]);
+  }, [isOpen, apiBase]);
 
   if (!isOpen) return null;
 
@@ -48,7 +54,8 @@ export const GuiSizeModal: React.FC<GuiSizeModalProps> = ({ isOpen, onClose }) =
     setStatusMsg(null);
 
     try {
-      const res = await fetch("/api/admin/gui-size", {
+      const baseUrl = apiBase.endsWith("/") ? apiBase.slice(0, -1) : apiBase;
+      const res = await fetch(`${baseUrl}/admin/gui-size`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ width: w, height: h }),
