@@ -51,5 +51,18 @@ jobs:
           draft: false
           prerelease: false
           generate_release_notes: true
+          body: |
+            ### ⚠️ macOS Installation & Gatekeeper Security Notice
+
+            Since this build is ad-hoc packaged without an Apple Developer ID Code Signing Certificate, macOS Gatekeeper will block unsigned applications upon first launch.
+
+            #### How to Install:
+            1. Download and open `dodb-*.dmg`.
+            2. Drag **`dodb.app`** to your `/Applications` folder.
+            3. Open **Terminal** and run:
+               ```bash
+               xattr -dr com.apple.quarantine /Applications/dodb.app
+               ```
+            4. Launch **dodb** from Applications or via Spotlight (`Cmd + Space`).
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

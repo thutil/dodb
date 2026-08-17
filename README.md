@@ -81,6 +81,24 @@ Features include an **Interactive Data Explorer (Full CRUD)**, **Inline Cell Edi
 
 ---
 
+## 💾 Installation & macOS Gatekeeper Security Notice
+
+Since **dodb** builds are ad-hoc packaged without an Apple Developer ID Code Signing Certificate, macOS Gatekeeper may flag the application as from an "unidentified developer" or "damaged" upon first launch.
+
+### Step-by-Step Installation
+
+1. Download the latest `dodb-*.dmg` installer from the [GitHub Releases](https://github.com/bankjirapan/dodb/releases) page.
+2. Open the `.dmg` file and drag **`dodb.app`** into your `/Applications` folder.
+3. Open **Terminal** and execute the following command to remove the macOS quarantine flag:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/dodb.app
+```
+
+4. Open **dodb** from your Applications folder or via Spotlight (`Cmd + Space`).
+
+---
+
 ## 💻 Prerequisites & System Requirements
 
 - **Operating System**: macOS 11.0+ (Apple Silicon `arm64` or Intel `x64`)
