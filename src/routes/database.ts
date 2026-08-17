@@ -1,6 +1,7 @@
 import express, { Request, Response, NextFunction } from "express";
 import { DBConfig, DBPoolManager } from "../db/connections";
 import { getProfileById } from "../config/dbProfiles";
+import { decryptPassword } from "../utils/crypto";
 
 const router = express.Router();
 
@@ -9,9 +10,11 @@ function getDBConfig(req: Request): DBConfig {
   if (profileId) {
     const profile = getProfileById(profileId);
     if (profile) {
+      const pass = (!req.body.password || req.body.password === "••••••••") ? profile.password : req.body.password;
       return {
         ...profile,
         database: req.body.database || profile.database,
+        password: decryptPassword(pass),
       };
     }
   }
@@ -22,7 +25,7 @@ function getDBConfig(req: Request): DBConfig {
   if (!(type === "mariadb" || type === "postgres")) {
     throw new Error("Database type must be 'mariadb' or 'postgres'");
   }
-  return { id: "-", name: "-", type, host, port, user, password: password || "", database, createdAt: "", updatedAt: "" };
+  return { id: "-", name: "-", type, host, port, user, password: decryptPassword(password || ""), database, createdAt: "", updatedAt: "" };
 }
 
 // Format table name safely for PostgreSQL and MySQL/MariaDB

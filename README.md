@@ -160,6 +160,29 @@ Upon completion, the final installers are generated under `dist-dmg/`:
 
 ---
 
+## 🤖 CI/CD Automated Release via Git Tag
+
+This repository is configured with **GitHub Actions** ([`.github/workflows/release.yml`](file:///.github/workflows/release.yml)) to automatically build the project, package the macOS DMG, and create a GitHub Release whenever a new version tag (e.g. `v1.0.0`) is pushed.
+
+### How to Trigger an Automated Release
+
+1. **Tag your commit**:
+   ```bash
+   git tag v1.0.0
+   ```
+
+2. **Push the tag to GitHub**:
+   ```bash
+   git push origin v1.0.0
+   ```
+
+3. **Automated Release Process**:
+   - GitHub Actions runner (`macos-latest`) will trigger the **Release macOS DMG** workflow.
+   - It compiles all backend and frontend assets, runs `electron-builder` to package the DMG.
+   - A new GitHub Release is created automatically with generated release notes and the `dodb-*.dmg` file attached!
+
+---
+
 ## ⚙️ Configuration & Ports
 
 The default ports used by **dodb** can be overridden via environment variables if required:
@@ -207,5 +230,5 @@ Distributed under the **MIT License**. See `LICENSE` for more information.
 ---
 
 <p align="center">
-  Designed & Developed with ❤️ by <strong>Bank Jirapan</strong>
+  Designed & Developed with ❤️ by <strong>thutil</strong>
 </p>
