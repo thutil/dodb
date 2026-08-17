@@ -5,20 +5,24 @@ import { getProfileById } from "../config/dbProfiles";
 const router = express.Router();
 
 function getDBConfig(req: Request): DBConfig {
-  const { profileId } = req.body;
+  const profileId = req.body.profileId || req.body.id;
   if (profileId) {
     const profile = getProfileById(profileId);
-    if (!profile) throw new Error("Profile not found");
-    return profile;
+    if (profile) {
+      return {
+        ...profile,
+        database: req.body.database || profile.database,
+      };
+    }
   }
-  const { type, host, port, user, password, database } = req.body;
-  if (!type || !host || !port || !user || !password || !database) {
+  const { type, host, port, user, password = "", database } = req.body;
+  if (!type || !host || !port || !user || !database) {
     throw new Error("Missing database configuration parameter");
   }
   if (!(type === "mariadb" || type === "postgres")) {
     throw new Error("Database type must be 'mariadb' or 'postgres'");
   }
-  return { id: "-", name: "-", type, host, port, user, password, database, createdAt: "", updatedAt: "" };
+  return { id: "-", name: "-", type, host, port, user, password: password || "", database, createdAt: "", updatedAt: "" };
 }
 
 // Execute arbitrary SQL command (DANGER: validate input in real use)

@@ -4,14 +4,27 @@ import databaseRouter from "./routes/database";
 import commandRouter from "./routes/command";
 import listRouter from "./routes/list";
 import connectionProfileRouter from "./routes/connectionProfile";
+import adminRouter from "./routes/admin";
 
 const app = express();
+
+app.use((req: Request, res: Response, next: NextFunction) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+  if (req.method === "OPTIONS") {
+    res.sendStatus(200);
+    return;
+  }
+  next();
+});
 
 app.use(bodyParser.json());
 app.use("/api/database", databaseRouter);
 app.use("/api/command", commandRouter);
 app.use("/api/list", listRouter);
 app.use("/api/profile", connectionProfileRouter);
+app.use("/api/admin", adminRouter);
 
 // Error handling middleware
 app.use((err: any, req: Request, res: Response, next: NextFunction) => {

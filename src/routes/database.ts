@@ -5,20 +5,24 @@ import { getProfileById } from "../config/dbProfiles";
 const router = express.Router();
 
 function getDBConfig(req: Request): DBConfig {
-  const { profileId } = req.body;
+  const profileId = req.body.profileId || req.body.id;
   if (profileId) {
     const profile = getProfileById(profileId);
-    if (!profile) throw new Error("Profile not found");
-    return profile;
+    if (profile) {
+      return {
+        ...profile,
+        database: req.body.database || profile.database,
+      };
+    }
   }
-  const { type, host, port, user, password, database } = req.body;
-  if (!type || !host || !port || !user || !password || !database) {
+  const { type, host, port, user, password = "", database } = req.body;
+  if (!type || !host || !port || !user || !database) {
     throw new Error("Missing database configuration parameter");
   }
   if (!(type === "mariadb" || type === "postgres")) {
     throw new Error("Database type must be 'mariadb' or 'postgres'");
   }
-  return { id: "-", name: "-", type, host, port, user, password, database, createdAt: "", updatedAt: "" };
+  return { id: "-", name: "-", type, host, port, user, password: password || "", database, createdAt: "", updatedAt: "" };
 }
 
 // CREATE
@@ -129,6 +133,99 @@ router.delete("/:table/:id", (async (req: Request, res: Response, next: NextFunc
       params = [id];
       const result = await (pool as any).query(query, params);
       res.json({ success: !!result.rowCount });
+    }
+  } catch (err: any) {
+    next(err);
+  }
+}) as express.RequestHandler);
+
+// ATOMIC TRANSACTIONAL COMMIT
+router.post("/commit-changes", (async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const config = getDBConfig(req);
+    const { table, changes } = req.body;
+    if (!table || !changes) {
+      res.status(400).json({ error: "Missing 'table' or 'changes' parameter" });
+      return;
+    }
+    const { inserts = [], updates = [], deletes = [] } = changes;
+    const pool = DBPoolManager.getPool(config);
+
+    if (config.type === "mariadb") {
+      const conn = await (pool as any).getConnection();
+      try {
+        await conn.beginTransaction();
+        
+        // 1. Process Inserts
+        for (const item of inserts) {
+          const keys = Object.keys(item);
+          const vals = Object.values(item);
+          const sql = `INSERT INTO \`${table}\` (${keys.map(k => `\`${k}\``).join(",")}) VALUES (${keys.map(() => "?").join(",")})`;
+          await conn.query(sql, vals);
+        }
+
+        // 2. Process Updates
+        for (const item of updates) {
+          const { pkColumn, pkValue, data } = item;
+          const keys = Object.keys(data);
+          const vals = Object.values(data);
+          const sql = `UPDATE \`${table}\` SET ${keys.map(k => `\`${k}\` = ?`).join(",")} WHERE \`${pkColumn}\` = ?`;
+          await conn.query(sql, [...vals, pkValue]);
+        }
+
+        // 3. Process Deletes
+        for (const item of deletes) {
+          const { pkColumn, pkValue } = item;
+          const sql = `DELETE FROM \`${table}\` WHERE \`${pkColumn}\` = ?`;
+          await conn.query(sql, [pkValue]);
+        }
+
+        await conn.commit();
+        await conn.release();
+        res.json({ success: true, message: "Transaction committed successfully" });
+      } catch (txErr: any) {
+        await conn.rollback();
+        await conn.release();
+        res.status(400).json({ success: false, error: txErr.message || "Transaction rollback executed" });
+      }
+    } else {
+      // PostgreSQL Transaction
+      const client = await (pool as any).connect();
+      try {
+        await client.query("BEGIN");
+
+        // 1. Process Inserts
+        for (const item of inserts) {
+          const keys = Object.keys(item);
+          const vals = Object.values(item);
+          const sql = `INSERT INTO "${table}" (${keys.map(k => `"${k}"`).join(",")}) VALUES (${keys.map((_, i) => `$${i + 1}`).join(",")})`;
+          await client.query(sql, vals);
+        }
+
+        // 2. Process Updates
+        for (const item of updates) {
+          const { pkColumn, pkValue, data } = item;
+          const keys = Object.keys(data);
+          const vals = Object.values(data);
+          const sql = `UPDATE "${table}" SET ${keys.map((k, i) => `"${k}" = $${i + 1}`).join(",")} WHERE "${pkColumn}" = $${keys.length + 1}`;
+          await client.query(sql, [...vals, pkValue]);
+        }
+
+        // 3. Process Deletes
+        for (const item of deletes) {
+          const { pkColumn, pkValue } = item;
+          const sql = `DELETE FROM "${table}" WHERE "${pkColumn}" = $1`;
+          await client.query(sql, [pkValue]);
+        }
+
+        await client.query("COMMIT");
+        client.release();
+        res.json({ success: true, message: "Transaction committed successfully" });
+      } catch (txErr: any) {
+        await client.query("ROLLBACK");
+        client.release();
+        res.status(400).json({ success: false, error: txErr.message || "Transaction rollback executed" });
+      }
     }
   } catch (err: any) {
     next(err);

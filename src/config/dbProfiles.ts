@@ -13,6 +13,10 @@ function loadProfiles(): ConnectionProfile[] {
 }
 
 function saveProfiles(profiles: ConnectionProfile[]) {
+  const dir = path.dirname(PROFILE_PATH);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
   fs.writeFileSync(PROFILE_PATH, JSON.stringify(profiles, null, 2));
 }
 
