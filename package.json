@@ -6,9 +6,9 @@
   "main": "electron/main.js",
   "author": "Bank Jirapan",
   "scripts": {
-    "start": "pnpm exec ts-node src/server.ts",
+    "start": "ts-node src/server.ts",
     "build": "pnpm build:backend && pnpm build:ui",
-    "build:backend": "pnpm exec tsc",
+    "build:backend": "tsc",
     "build:ui": "pnpm --prefix ui build",
     "dev": "nodemon src/server.ts",
     "ui:dev": "pnpm --prefix ui dev",
