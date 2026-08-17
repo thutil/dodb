@@ -1,4 +1,4 @@
-name: Release Multi-Platform Binaries
+name: Release macOS Binaries
 
 on:
   push:
@@ -9,11 +9,8 @@ on:
 
 jobs:
   build:
-    name: Build (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [macos-latest, ubuntu-latest]
+    name: Build (macos-latest)
+    runs-on: macos-latest
 
     permissions:
       contents: write
@@ -49,16 +46,9 @@ jobs:
         run: pnpm build
 
       - name: Build macOS Artifacts
-        if: matrix.os == 'macos-latest'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: pnpm dist:mac
-
-      - name: Build Linux Artifacts
-        if: matrix.os == 'ubuntu-latest'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: pnpm dist:linux
 
       - name: Upload Release Binaries
         uses: softprops/action-gh-release@v2
