@@ -1,4 +1,4 @@
-name: Release macOS DMG
+name: Release Multi-Platform Binaries
 
 on:
   push:
@@ -8,9 +8,13 @@ on:
   workflow_dispatch:
 
 jobs:
-  release:
-    name: Build & Publish macOS DMG
-    runs-on: macos-latest
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+
     permissions:
       contents: write
 
@@ -29,6 +33,13 @@ jobs:
           node-version: 20
           cache: 'pnpm'
 
+      - name: Sync package.json version with Git Tag
+        shell: bash
+        run: |
+          TAG_VER="${GITHUB_REF_NAME#v}"
+          echo "Setting package version to: $TAG_VER"
+          npm version "$TAG_VER" --no-git-tag-version || true
+
       - name: Install dependencies
         run: |
           pnpm install --no-frozen-lockfile
@@ -37,32 +48,41 @@ jobs:
       - name: Build Backend & Frontend
         run: pnpm build
 
-      - name: Build macOS DMG Package
+      - name: Build macOS Artifacts
+        if: matrix.os == 'macos-latest'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: pnpm dist:mac
 
-      - name: Create GitHub Release
+      - name: Build Windows Artifacts
+        if: matrix.os == 'windows-latest'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm dist:win
+
+      - name: Build Linux Artifacts
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm dist:linux
+
+      - name: Upload Release Binaries
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist-dmg/*.dmg
-            dist-dmg/*.blockmap
+            dist-builds/*
           draft: false
           prerelease: false
           generate_release_notes: true
           body: |
-            ### ⚠️ macOS Installation & Gatekeeper Security Notice
+            ### 🚀 dodb Database Manager Release
 
-            Since this build is ad-hoc packaged without an Apple Developer ID Code Signing Certificate, macOS Gatekeeper will block unsigned applications upon first launch.
+            Multi-platform database management tool supporting PostgreSQL, MariaDB/MySQL, and SQLite.
 
-            #### How to Install:
-            1. Download and open `dodb-*.dmg`.
-            2. Drag **`dodb.app`** to your `/Applications` folder.
-            3. Open **Terminal** and run:
-               ```bash
-               xattr -dr com.apple.quarantine /Applications/dodb.app
-               ```
-            4. Launch **dodb** from Applications or via Spotlight (`Cmd + Space`).
+            #### ⚠️ macOS Security Note:
+            If macOS Gatekeeper blocks launch upon initial install:
+            ```bash
+            xattr -dr com.apple.quarantine /Applications/dodb.app
+            ```
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

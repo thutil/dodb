@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import Head from "next/head";
+import pkg from "../../../package.json";
 import { Header } from "../components/Header";
 import { SidebarExplorer } from "../components/SidebarExplorer";
 import { ConnectionModal } from "../components/ConnectionModal";
@@ -426,6 +427,19 @@ export default function Home() {
           onClose={() => setIsAuditLogOpen(false)}
           profiles={profiles}
         />
+
+        <footer className="app-footer">
+          <div className="footer-left">
+            <span className="footer-version">dodb v{pkg.version}</span>
+            <span className="footer-dot">•</span>
+            <span className="footer-status">
+              DB Engine: {activeProfile ? activeProfile.type.toUpperCase() : "Offline"}
+            </span>
+          </div>
+          <div className="footer-right">
+            <span className="footer-text">Local API: http://localhost:5820</span>
+          </div>
+        </footer>
       </div>
 
       <style jsx>{`
@@ -449,6 +463,40 @@ export default function Home() {
           display: flex;
           flex-direction: column;
           overflow: hidden;
+        }
+
+        .app-footer {
+          height: 22px;
+          background: var(--bg-tertiary);
+          border-top: 1px solid var(--border-light);
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 0 12px;
+          font-size: 10px;
+          color: var(--text-muted);
+          user-select: none;
+          z-index: 10;
+        }
+
+        .footer-left, .footer-right {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .footer-version {
+          font-weight: 700;
+          color: var(--accent-blue);
+          font-family: var(--font-mono);
+        }
+
+        .footer-dot {
+          opacity: 0.5;
+        }
+
+        .footer-status, .footer-text {
+          font-family: var(--font-mono);
         }
       `}</style>
     </>
