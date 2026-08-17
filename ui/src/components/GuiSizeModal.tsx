@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Maximize2, Monitor, Check, X, Sliders } from "lucide-react";
+import { Monitor, Check, X, Sliders } from "lucide-react";
 
 interface GuiSizeModalProps {
   isOpen: boolean;
@@ -62,8 +62,9 @@ export const GuiSizeModal: React.FC<GuiSizeModalProps> = ({ isOpen, onClose }) =
       } else {
         setStatusMsg("Failed to update window size");
       }
-    } catch (err: any) {
-      setStatusMsg(`Error: ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setStatusMsg(`Error: ${msg}`);
     } finally {
       setSaving(false);
     }
