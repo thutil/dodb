@@ -33,7 +33,24 @@ export default function Home() {
   const [page, setPage] = useState(0);
   const pageSize = 50;
 
-  // Toggle Theme attribute on <html> tag
+  // Auto Sync Theme with OS System Preference & Manual Toggle
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    const initialTheme = mediaQuery.matches ? "dark" : "light";
+    setTheme(initialTheme);
+    document.documentElement.setAttribute("data-theme", initialTheme);
+
+    const handleChange = (e: MediaQueryListEvent) => {
+      const nextTheme = e.matches ? "dark" : "light";
+      setTheme(nextTheme);
+      document.documentElement.setAttribute("data-theme", nextTheme);
+    };
+
+    mediaQuery.addEventListener("change", handleChange);
+    return () => mediaQuery.removeEventListener("change", handleChange);
+  }, []);
+
   const toggleTheme = () => {
     const nextTheme = theme === "dark" ? "light" : "dark";
     setTheme(nextTheme);
@@ -328,6 +345,7 @@ export default function Home() {
                 activeProfile={activeProfile}
                 activeDatabase={activeDatabase}
                 apiBase={API_BASE}
+                theme={theme}
               />
             ) : (
               <AdminPanel

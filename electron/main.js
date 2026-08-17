@@ -1,37 +1,66 @@
 const { app, BrowserWindow, shell } = require("electron");
 const path = require("path");
-const { spawn } = require("child_process");
+const http = require("http");
+const fs = require("fs");
 
 let mainWindow = null;
 let serverProcess = null;
-let uiProcess = null;
+let uiServer = null;
 
+// Start Express Backend API Server
 function startBackendServer() {
-  const serverPath = path.join(__dirname, "../src/server.ts");
-  const tsNodePath = path.join(__dirname, "../node_modules/.bin/ts-node");
-
-  serverProcess = spawn(tsNodePath, [serverPath], {
-    env: { ...process.env, PORT: "3000" },
-    stdio: "pipe",
-  });
-
-  serverProcess.on("error", (err) => {
-    console.error("Backend server start error:", err);
-  });
+  try {
+    const serverFile = path.join(__dirname, "../dist/server.js");
+    if (fs.existsSync(serverFile)) {
+      require(serverFile);
+    } else {
+      const { spawn } = require("child_process");
+      const tsNodePath = path.join(__dirname, "../node_modules/.bin/ts-node");
+      const serverPath = path.join(__dirname, "../src/server.ts");
+      serverProcess = spawn(tsNodePath, [serverPath], {
+        env: { ...process.env, PORT: "3000" },
+        stdio: "pipe",
+      });
+    }
+  } catch (err) {
+    console.error("Backend start error:", err);
+  }
 }
 
-function startUiServer() {
-  const nextPath = path.join(__dirname, "../ui/node_modules/.bin/next");
+// Start Static UI HTTP Server for packaged app (Port 3001)
+function startUiStaticServer() {
+  const uiOutDir = path.join(__dirname, "../ui/out");
+  if (!fs.existsSync(uiOutDir)) return;
 
-  uiProcess = spawn(nextPath, ["dev", "-p", "3001"], {
-    cwd: path.join(__dirname, "../ui"),
-    env: { ...process.env, PORT: "3001" },
-    stdio: "pipe",
-  });
+  const serveStatic = (req, res) => {
+    let filePath = path.join(uiOutDir, req.url === "/" ? "index.html" : req.url);
+    if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+      filePath = path.join(uiOutDir, "index.html");
+    }
+    const ext = path.extname(filePath);
+    const contentTypeMap = {
+      ".html": "text/html",
+      ".js": "text/javascript",
+      ".css": "text/css",
+      ".json": "application/json",
+      ".png": "image/png",
+      ".jpg": "image/jpeg",
+      ".svg": "image/svg+xml",
+    };
+    const contentType = contentTypeMap[ext] || "application/octet-stream";
+    fs.readFile(filePath, (err, content) => {
+      if (err) {
+        res.writeHead(500);
+        res.end("Server Error");
+      } else {
+        res.writeHead(200, { "Content-Type": contentType });
+        res.end(content, "utf-8");
+      }
+    });
+  };
 
-  uiProcess.on("error", (err) => {
-    console.error("UI server start error:", err);
-  });
+  uiServer = http.createServer(serveStatic);
+  uiServer.listen(3001);
 }
 
 function createWindow() {
@@ -44,11 +73,12 @@ function createWindow() {
     vibrancy: "under-window",
     visualEffectState: "active",
     backgroundColor: "#121216",
+    icon: path.join(__dirname, "../assets/icon.png"),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
     },
-    title: "dodb - macOS Database Manager",
+    title: "dodb - macOS Native Database Manager",
   });
 
   mainWindow.loadURL("http://localhost:3001");
@@ -65,12 +95,11 @@ function createWindow() {
 
 app.whenReady().then(() => {
   startBackendServer();
-  startUiServer();
+  startUiStaticServer();
 
-  // Wait 2s for backend & UI servers to be ready before opening window
   setTimeout(() => {
     createWindow();
-  }, 2000);
+  }, 1000);
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -84,9 +113,9 @@ function cleanup() {
     serverProcess.kill();
     serverProcess = null;
   }
-  if (uiProcess) {
-    uiProcess.kill();
-    uiProcess = null;
+  if (uiServer) {
+    uiServer.close();
+    uiServer = null;
   }
 }
 

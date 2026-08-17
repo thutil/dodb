@@ -1,13 +1,42 @@
 {
-  "name": "dodb-service",
+  "name": "dodb",
   "version": "1.0.0",
+  "productName": "dodb",
+  "description": "dodb - Modern macOS Native Database Management Application for Postgres & MySQL with ER Diagram Visualizer",
   "main": "electron/main.js",
+  "author": "Bank Jirapan",
   "scripts": {
     "start": "ts-node src/server.ts",
-    "build": "tsc",
+    "build:backend": "tsc",
+    "build:ui": "pnpm --prefix ui build",
     "dev": "nodemon src/server.ts",
     "ui:dev": "pnpm --prefix ui dev",
-    "desktop": "electron electron/main.js"
+    "desktop": "electron electron/main.js",
+    "dist:mac": "pnpm build:backend && pnpm build:ui && electron-builder --mac dmg"
+  },
+  "build": {
+    "appId": "com.bankjirapan.dodb",
+    "productName": "dodb",
+    "directories": {
+      "output": "dist-dmg"
+    },
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "assets/icon.png",
+      "target": ["dmg"],
+      "hardenedRuntime": false
+    },
+    "dmg": {
+      "title": "dodb - macOS Database Manager"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "ui/out/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "asar": false
   },
   "dependencies": {
     "@types/body-parser": "^1.19.6",
@@ -23,6 +52,7 @@
     "@types/node": "^24.0.1",
     "@types/uuid": "^10.0.0",
     "electron": "^43.4.0",
+    "electron-builder": "^26.15.3",
     "nodemon": "^3.1.10",
     "ts-node": "^10.9.2",
     "typescript": "^5.8.3"

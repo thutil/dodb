@@ -1,6 +1,20 @@
-/node_modules
-/dist
-/data
+# Dependencies
+node_modules/
+ui/node_modules/
+
+# Build and export outputs
+dist/
+dist-dmg/
+ui/.next/
+ui/out/
+
+# Environment and Data
 .env
-/ui/node_modules
-/ui/.next
+.env.local
+data/
+*.log
+
+# OS and Editor files
+.DS_Store
+.vscode/
+.idea/
