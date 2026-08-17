@@ -4,7 +4,10 @@
   "productName": "dodb",
   "description": "dodb - Modern Multi-Platform Database Manager for Postgres, MySQL, MariaDB & SQLite",
   "main": "electron/main.js",
-  "author": "Bank Jirapan",
+  "author": {
+    "name": "thutil",
+    "email": "thutil@users.noreply.github.com"
+  },
   "scripts": {
     "start": "ts-node src/server.ts",
     "build": "pnpm build:backend && pnpm build:ui",
@@ -13,13 +16,13 @@
     "dev": "nodemon src/server.ts",
     "ui:dev": "pnpm --prefix ui dev",
     "desktop": "electron electron/main.js",
-    "dist:mac": "pnpm build && electron-builder --mac",
-    "dist:win": "pnpm build && electron-builder --win",
-    "dist:linux": "pnpm build && electron-builder --linux",
-    "dist:all": "pnpm build && electron-builder -mwl"
+    "dist:mac": "pnpm build && electron-builder --mac --publish never",
+    "dist:win": "pnpm build && electron-builder --win --publish never",
+    "dist:linux": "pnpm build && electron-builder --linux --publish never",
+    "dist:all": "pnpm build && electron-builder -mwl --publish never"
   },
   "build": {
-    "appId": "com.bankjirapan.dodb",
+    "appId": "com.thutil.dodb",
     "productName": "dodb",
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "directories": {
@@ -57,6 +60,8 @@
     "linux": {
       "icon": "assets/icon.png",
       "category": "Development",
+      "maintainer": "thutil <thutil@users.noreply.github.com>",
+      "desktopName": "dodb",
       "target": [
         {
           "target": "AppImage",
