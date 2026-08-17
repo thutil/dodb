@@ -1,5 +1,5 @@
 import React from "react";
-import { Database, Terminal, Server, Sun, Moon, Shield, GitFork, FileText } from "lucide-react";
+import { Database, Terminal, Server, Sun, Moon, Shield, GitFork, FileText, Sliders } from "lucide-react";
 import { ConnectionProfile } from "../types";
 
 interface HeaderProps {
@@ -11,6 +11,7 @@ interface HeaderProps {
   onChangeView: (view: "explorer" | "sql" | "admin" | "diagram") => void;
   onOpenConnections: () => void;
   onOpenAuditLogs?: () => void;
+  onOpenGuiSize?: () => void;
   theme: "dark" | "light";
   onToggleTheme: () => void;
 }
@@ -24,6 +25,7 @@ export const Header: React.FC<HeaderProps> = ({
   onChangeView,
   onOpenConnections,
   onOpenAuditLogs,
+  onOpenGuiSize,
   theme,
   onToggleTheme,
 }) => {
@@ -104,6 +106,12 @@ export const Header: React.FC<HeaderProps> = ({
           <button className="btn btn-secondary conn-btn" onClick={onOpenAuditLogs} title="View Audit Logs & History">
             <FileText size={13} />
             <span>Audit Log</span>
+          </button>
+        )}
+
+        {onOpenGuiSize && (
+          <button className="btn btn-secondary theme-btn" onClick={onOpenGuiSize} title="GUI Window Size Settings">
+            <Sliders size={13} />
           </button>
         )}
 

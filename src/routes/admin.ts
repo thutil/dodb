@@ -221,4 +221,31 @@ router.post("/kill-process", (async (req: Request, res: Response, next: NextFunc
   }
 }) as express.RequestHandler);
 
+// GET GUI Size Settings
+router.get("/gui-size", (req: Request, res: Response) => {
+  try {
+    const { loadSettings } = require("../config/appSettings");
+    const settings = loadSettings();
+    res.json({ width: settings.guiWidth, height: settings.guiHeight });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST GUI Size Settings
+router.post("/gui-size", (req: Request, res: Response) => {
+  try {
+    const { width, height } = req.body;
+    if (!width || !height || isNaN(Number(width)) || isNaN(Number(height))) {
+      res.status(400).json({ error: "Invalid width or height parameters" });
+      return;
+    }
+    const { saveSettings } = require("../config/appSettings");
+    const updated = saveSettings({ guiWidth: Number(width), guiHeight: Number(height) });
+    res.json({ success: true, width: updated.guiWidth, height: updated.guiHeight });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;

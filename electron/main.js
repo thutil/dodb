@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell } = require("electron");
+const { app, BrowserWindow, shell, ipcMain } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const express = require("express");
@@ -10,7 +10,7 @@ let uiServerInstance = null;
 let uiProcess = null;
 let isBackendRunning = false;
 
-// Helper to resolve directory paths in both dev mode & packaged macOS app bundle
+// Helper to resolve directory paths
 function resolveAppPath(relativePath) {
   const possiblePaths = [
     path.join(__dirname, relativePath),
@@ -22,6 +22,35 @@ function resolveAppPath(relativePath) {
     if (fs.existsSync(p)) return p;
   }
   return path.join(__dirname, relativePath);
+}
+
+// Load GUI settings from data/settings.json
+function loadSettings() {
+  try {
+    const settingsPath = resolveAppPath("data/settings.json");
+    if (fs.existsSync(settingsPath)) {
+      const raw = fs.readFileSync(settingsPath, "utf-8");
+      return JSON.parse(raw);
+    }
+  } catch (err) {
+    console.error("Failed to load window settings:", err);
+  }
+  return { guiWidth: 1280, guiHeight: 850 };
+}
+
+// Save GUI settings to data/settings.json
+function saveSettings(settings) {
+  try {
+    const settingsPath = resolveAppPath("data/settings.json");
+    const dir = path.dirname(settingsPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    const current = loadSettings();
+    fs.writeFileSync(settingsPath, JSON.stringify({ ...current, ...settings }, null, 2));
+  } catch (err) {
+    console.error("Failed to save window settings:", err);
+  }
 }
 
 // Start Express Backend API Server (Port 5820)
@@ -99,11 +128,13 @@ function createWindow() {
   startBackendServer();
   startUiServer();
 
+  const settings = loadSettings();
+
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 850,
-    minWidth: 900,
-    minHeight: 600,
+    width: settings.guiWidth || 1280,
+    height: settings.guiHeight || 850,
+    minWidth: 800,
+    minHeight: 550,
     titleBarStyle: "hiddenInset",
     vibrancy: "under-window",
     visualEffectState: "active",
@@ -112,9 +143,57 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      devTools: false, // Disable DevTools
     },
-    title: "dodb - macOS Native Database Manager",
+    title: "dodb - Database Manager",
   });
+
+  // 1. BLOCK F12, DevTools shortcuts, View Source
+  mainWindow.webContents.on("before-input-event", (event, input) => {
+    const key = (input.key || "").toLowerCase();
+    const isF12 = key === "f12";
+    const isInspect = (input.control || input.meta) && (input.shift || input.alt) && (key === "i" || key === "j" || key === "c");
+    const isViewSource = (input.control || input.meta) && key === "u";
+    const isReload = (input.control || input.meta) && key === "r";
+
+    if (isF12 || isInspect || isViewSource) {
+      event.preventDefault();
+    }
+  });
+
+  // 2. BLOCK Right-Click Context Menu (Inspect Element)
+  mainWindow.webContents.on("context-menu", (e) => {
+    e.preventDefault();
+  });
+
+  // 3. Save Window Bounds on Resize
+  let resizeTimeout;
+  mainWindow.on("resize", () => {
+    clearTimeout(resizeTimeout);
+    resizeTimeout = setTimeout(() => {
+      if (mainWindow) {
+        const [w, h] = mainWindow.getSize();
+        saveSettings({ guiWidth: w, guiHeight: h });
+      }
+    }, 500);
+  });
+
+  // Watch for settings changes to update window size live
+  const watchSettingsPath = resolveAppPath("data/settings.json");
+  if (fs.existsSync(watchSettingsPath)) {
+    fs.watch(watchSettingsPath, () => {
+      try {
+        const s = loadSettings();
+        if (mainWindow && s.guiWidth && s.guiHeight) {
+          const [currentW, currentH] = mainWindow.getSize();
+          if (currentW !== s.guiWidth || currentH !== s.guiHeight) {
+            mainWindow.setSize(s.guiWidth, s.guiHeight);
+            mainWindow.center();
+          }
+        }
+      } catch {}
+    });
+  }
 
   const loadUrlWithRetry = () => {
     if (!mainWindow) return;
@@ -125,7 +204,6 @@ function createWindow() {
   };
 
   mainWindow.webContents.on("did-fail-load", (event, errorCode) => {
-    // Retry if connection failed during initial startup
     if (errorCode === -102 || errorCode === -105 || errorCode === -100) {
       setTimeout(loadUrlWithRetry, 500);
     }

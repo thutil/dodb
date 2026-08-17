@@ -5,6 +5,7 @@ import { Header } from "../components/Header";
 import { SidebarExplorer } from "../components/SidebarExplorer";
 import { ConnectionModal } from "../components/ConnectionModal";
 import { AuditLogDrawer } from "../components/AuditLogDrawer";
+import { GuiSizeModal } from "../components/GuiSizeModal";
 import { DataGrid, PendingChanges } from "../components/DataGrid";
 import { SqlConsole } from "../components/SqlConsole";
 import { AdminPanel } from "../components/AdminPanel";
@@ -21,6 +22,7 @@ export default function Home() {
   const [activeProfile, setActiveProfile] = useState<ConnectionProfile | null>(null);
   const [isConnModalOpen, setIsConnModalOpen] = useState(false);
   const [isAuditLogOpen, setIsAuditLogOpen] = useState(false);
+  const [isGuiSizeOpen, setIsGuiSizeOpen] = useState(false);
 
   const [databases, setDatabases] = useState<string[]>([]);
   const [activeDatabase, setActiveDatabase] = useState<string>("");
@@ -50,6 +52,34 @@ export default function Home() {
     setFilters([]);
     setPage(0);
   }, [activeTable, activeDatabase]);
+
+  // Block F12, DevTools shortcuts, and Right-Click Inspect
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const key = (e.key || "").toLowerCase();
+      const isF12 = key === "f12";
+      const isInspect = (e.ctrlKey || e.metaKey) && (e.shiftKey || e.altKey) && (key === "i" || key === "j" || key === "c");
+      const isViewSource = (e.ctrlKey || e.metaKey) && key === "u";
+
+      if (isF12 || isInspect || isViewSource) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+
+    window.addEventListener("contextmenu", handleContextMenu);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("contextmenu", handleContextMenu);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
 
   // Auto Sync Theme with OS System Preference & Manual Toggle
   useEffect(() => {
@@ -325,6 +355,7 @@ export default function Home() {
           onChangeView={setActiveView}
           onOpenConnections={() => setIsConnModalOpen(true)}
           onOpenAuditLogs={() => setIsAuditLogOpen(true)}
+          onOpenGuiSize={() => setIsGuiSizeOpen(true)}
           theme={theme}
           onToggleTheme={toggleTheme}
         />
@@ -426,6 +457,11 @@ export default function Home() {
           isOpen={isAuditLogOpen}
           onClose={() => setIsAuditLogOpen(false)}
           profiles={profiles}
+        />
+
+        <GuiSizeModal
+          isOpen={isGuiSizeOpen}
+          onClose={() => setIsGuiSizeOpen(false)}
         />
 
         <footer className="app-footer">
