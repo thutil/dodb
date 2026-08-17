@@ -1,110 +1,211 @@
-# dodb - macOS Native Database Manager
+# dodb — Modern macOS Native Database Manager
 
-dodb เป็นแอปพลิเคชันบริหารจัดการฐานข้อมูลรูปแบบ Native macOS สำหรับ PostgreSQL และ MySQL/MariaDB ออกแบบด้วยดีไซน์เรียบหรูสไตล์ macOS พร้อมฟีเจอร์ระดับมืออาชีพครบถ้วน ทั้ง Data Explorer (Full CRUD), SQL Console, Process Manager, Export/Backup, และ ER Diagram แบบ Drag & Drop
+<p align="center">
+  <img src="assets/icon.png" width="128" height="128" alt="dodb Logo" />
+</p>
 
----
+<p align="center">
+  <strong>Modern, Lightning-Fast macOS Native Database Management Application for PostgreSQL & MySQL / MariaDB</strong>
+</p>
 
-## คุณสมบัติหลัก (Key Features)
-
-### 1. การเชื่อมต่อและการสลับฐานข้อมูล (Connection Manager)
-- รองรับทั้ง **PostgreSQL** และ **MySQL / MariaDB**
-- บันทึกโปรไฟล์การเชื่อมต่อ (Connection Profiles) และทดสอบการเชื่อมต่อได้ล่วงหน้า
-- สลับฐานข้อมูลย่อย (Database Switcher) บน Header และ Sidebar ได้เรียลไทม์
-
-### 2. ระบบส่องดูและจัดการข้อมูล (Data Explorer & Full CRUD)
-- **Data Grid**: แสดงผลข้อมูลตารางแบบตั้งหน้า (Pagination), กรองค้นหาเรียลไทม์ (Filter)
-- **Inline Cell Editing**: ดับเบิลคลิกแก้ไขค่าในช่องตารางได้ทันที
-- **Row Edit Modal**: ปุ่มแก้ไขข้อมูลรายแถวพร้อมตัวเลือกดูค่า JSON/Text ยาว
-- **Atomic Database Transaction Bar**: มีระบบกักเก็บรายการเปลี่ยนแปลง (Pending Inserts, Updates, Deletes) พร้อมปุ่ม **Commit Changes** (Execute Transaction) และ **Rollback (Discard)** เมื่อเกิดข้อผิดพลาด
-
-### 3. ระบบแผนผังความสัมพันธ์ตาราง (Drag & Drop ER Diagram)
-- นำไลบรารี **`@xyflow/react` (React Flow 12)** มาพัฒนาเป็นผังความสัมพันธ์ตาราง (ER Diagram)
-- คลิกและลากวางการ์ดตาราง (Table Nodes) ได้อย่างอิสระทุกจุดบน Canvas
-- เส้นโยง Foreign Key เคลื่อนที่ตามการลากวางการ์ดตารางแบบเรียลไทม์
-- สลับสี Canvas ตามธีมของระบบปฏิบัติการอัตโนมัติ (Light / Dark Mode Adaptation)
-
-### 4. ระบบผู้ดูแลเซิร์ฟเวอร์ (Database Admin & Process Manager)
-- **Database Management**: สร้างและลบฐานข้อมูล (Create / Drop Database)
-- **User & Privileges**: สร้างผู้ใช้ใหม่ กำหนดสิทธิ์ Superuser และลบผู้ใช้ (Create / Drop User)
-- **Process Manager**: ตรวจดูรายการ Process / Active Queries ที่กำลังทำงานบนเซิร์ฟเวอร์ พร้อมปุ่ม **Kill Process** เพื่อยุติคำสั่งที่ค้างอยู่
-
-### 5. ระบบส่งออกและสำรองข้อมูล (Export SQL & CSV)
-- **Export SQL Dump**: สร้างไฟล์สคริปต์ ANSI SQL Dump ครอบคลุมทั้งโครงสร้างตาราง (`CREATE TABLE`) และชุดข้อมูล (`INSERT INTO`)
-- **Export CSV**: ส่งออกตารางเป็นไฟล์ CSV พร้อมปุ่มดาวน์โหลดลงเครื่องผ่าน GUI
-
-### 6. การปรับแต่งธีม (System Theme Auto-Sync)
-- ตรวจจับโหมดธีมสว่าง/มืดของระบบปฏิบัติการ macOS อัตโนมัติ (`prefers-color-scheme`)
-- สามารถสลับธีม Dark / Light ด้วยตนเองผ่านปุ่มสลับบนแถบนิเวศด้านบน
+<p align="center">
+  <img src="https://img.shields.io/badge/Platform-macOS%20Native-blue?style=flat-square&logo=apple" alt="Platform" />
+  <img src="https://img.shields.io/badge/Electron-v43.4.0-47848F?style=flat-square&logo=electron" alt="Electron" />
+  <img src="https://img.shields.io/badge/Next.js-v15.3.3-000000?style=flat-square&logo=next.js" alt="Next.js" />
+  <img src="https://img.shields.io/badge/PostgreSQL-Supported-4169E1?style=flat-square&logo=postgresql" alt="PostgreSQL" />
+  <img src="https://img.shields.io/badge/MySQL%20%2F%20MariaDB-Supported-00758F?style=flat-square&logo=mysql" alt="MySQL" />
+  <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License" />
+</p>
 
 ---
 
-## สถาปัตยกรรมระบบ (Architecture)
+## 🌟 Overview
 
-- **Desktop Shell**: Electron 43.4.0 (macOS `hiddenInset` native traffic lights bar)
-- **Frontend UI**: Next.js 15 (React 19), `@xyflow/react`, `lucide-react`, Vanilla CSS tokens
-- **Backend Service**: Express.js REST API, `pg` (PostgreSQL client pool), `mariadb` (MariaDB/MySQL connection pool)
+**dodb** is a high-performance, native macOS database management tool engineered for developer productivity. Designed around macOS native design language (glassmorphism, vibrant dark mode, and seamless `hiddenInset` traffic lights), **dodb** provides complete control over **PostgreSQL** and **MySQL/MariaDB** databases with zero clutter.
+
+Features include an **Interactive Data Explorer (Full CRUD)**, **Inline Cell Editor**, **Atomic Transactional Commit Bar**, **Interactive Drag & Drop ER Diagram Visualizer**, **Process Manager**, and **SQL & CSV Exporters**.
 
 ---
 
-## ขั้นตอนการติดตั้งและการพัฒนา (Development Setup)
+## ✨ Key Features
 
-### ความต้องการของระบบ (Requirements)
-- macOS (Apple Silicon / Intel)
-- Node.js 18+
-- pnpm package manager
+### 🔌 1. Multi-Engine Connection Manager
+- Native support for **PostgreSQL** and **MySQL / MariaDB**.
+- Save and manage multiple connection profiles with connection testing (`Test Connection`).
+- Real-time database switcher in the header and sidebar.
+- Dedicated background connection pooling for low latency and high efficiency.
 
-### การติดตั้ง Dependencies
+### ⚡ 2. Conflict-Free Custom Ports
+- Uses isolated custom ports specifically reserved for **dodb** to avoid collisions with local development tools (e.g. Nginx, React, or Grafana on port 3000):
+  - **Backend API Server**: Port `5820`
+  - **UI Production Server**: Port `5821`
+
+### 📊 3. Data Explorer & Full CRUD
+- **Paginated Data Grid**: High-performance pagination, column sorting, and multi-column filtering.
+- **Inline Cell Editing**: Double-click any cell to update values directly.
+- **Row Edit & View Modal**: Inspect complex data types (JSON, text blobs, timestamps) in a dedicated inspector.
+- **Atomic Database Transaction Bar**: Changes (Inserts, Updates, Deletes) are queued in a pending changes bar. Apply changes atomically using **Commit Changes** (`BEGIN / COMMIT`) or revert with **Rollback**.
+
+### 🕸️ 4. Drag & Drop ER Diagram Visualizer
+- Powered by `@xyflow/react` (React Flow 12).
+- Drag and position table nodes anywhere on a smooth canvas.
+- Live animated foreign key relationship edges dynamically adapt to card positioning.
+- Automatic theme adaptation for Light and Dark modes.
+
+### 🛡️ 5. Database Admin & Process Manager
+- **Database Management**: Create and drop databases directly from the GUI.
+- **User & Privileges**: Manage database users and superuser privileges.
+- **Active Process Monitor**: View running queries, client IPs, and connection durations with a one-click **Kill Process** button.
+
+### 📥 6. SQL & CSV Export
+- **Export SQL Dump**: Generate full ANSI SQL Dumps including `CREATE TABLE` DDL structures and `INSERT INTO` DML data statements.
+- **Export CSV**: Export table data directly to CSV with instant file download.
+
+### 🎨 7. Native macOS Aesthetics & Auto Theme Sync
+- Features macOS `hiddenInset` native title bar styling.
+- Automatically syncs with system theme preferences (`prefers-color-scheme`) with manual Dark/Light toggle.
+
+---
+
+## 🏗️ Architecture & Technology Stack
+
+| Layer | Technology |
+| :--- | :--- |
+| **Desktop Shell** | Electron 43.4.0 (macOS Native Frameless `hiddenInset`) |
+| **Frontend Framework** | Next.js 15.3.3 (React 19), React Flow (`@xyflow/react`), Lucide Icons |
+| **Styling** | Custom Vanilla CSS Design System with System Tokens |
+| **Backend REST API** | Express 5.x, TypeScript 5.8, Node.js |
+| **Database Clients** | `pg` (PostgreSQL Client Pool), `mariadb` (MariaDB/MySQL Pool) |
+| **API Port** | `http://localhost:5820` |
+| **UI Port** | `http://localhost:5821` |
+
+---
+
+## 💻 Prerequisites & System Requirements
+
+- **Operating System**: macOS 11.0+ (Apple Silicon `arm64` or Intel `x64`)
+- **Node.js**: v18.0.0 or higher
+- **Package Manager**: `pnpm` (v8+)
+
+---
+
+## 🚀 Getting Started (Development Setup)
+
+### 1. Clone the Repository & Install Dependencies
 
 ```bash
-# ติดตั้ง dependencies สำหรับ backend และ frontend
+# Clone repository
+git clone https://github.com/bankjirapan/dodb.git
+cd dodb
+
+# Install backend & desktop dependencies
 pnpm install
+
+# Install UI dependencies
 pnpm --prefix ui install
 ```
 
-### การรันโปรแกรมในโหมดพัฒนา (Development Mode)
+### 2. Run in Development Mode
+
+Run the complete Electron desktop app with live reload:
 
 ```bash
-# รันแอปพลิเคชัน Desktop Native
 pnpm desktop
 ```
 
-หรือรันแยกส่วน:
+Or run the backend server and frontend UI independently:
 
 ```bash
-# รัน Backend API (Port 3000)
+# Start Express Backend Server (Port 5820)
 pnpm dev
 
-# รัน Frontend Next.js UI (Port 3001)
+# Start Next.js Development UI (Port 5821)
 pnpm ui:dev
 ```
 
 ---
 
-## การบิลด์แอปพลิเคชัน (Build & Production)
+## 📦 Building for Production
 
-### 1. บิลด์ไฟล์โปรเจกต์ (Build Assets)
-คำสั่งสำหรับคอมไพล์ Backend TypeScript และ Next.js UI:
+### Step 1: Compile Application Assets
+
+Compile the Express TypeScript backend and Next.js frontend:
 
 ```bash
 pnpm build
 ```
 
-### 2. บิลด์แพ็กเกจติดตั้ง `.dmg` (Packaging Production DMG)
-คำสั่งสำหรับสร้างไฟล์ติดตั้ง `.dmg` สำหรับ macOS พร้อม Drag-to-Applications Installer:
+This generates:
+- Backend JS output in `dist/server.js`
+- UI Static Export in `ui/out/`
 
-npx electron-builder --mac dmg && hdiutil create -volname "dodb" -srcfolder dist-dmg/mac-arm64/dodb.app -ov -format UDZO dist-dmg/dodb-1.0.0-macOS.dmg
+### Step 2: Build Packaged macOS Installer (`.dmg`)
 
-hdiutil create -volname "dodb" -srcfolder dist-dmg/mac-arm64/dodb.app -ov -format UDZO dist-dmg/dodb-1.0.0-macOS.dmg
+Package the application into an executable macOS DMG installer using `electron-builder`:
 
 ```bash
 pnpm dist:mac
 ```
 
-ไฟล์ติดตั้ง `.dmg` จะถูกสร้างขึ้นที่โฟลเดอร์:
-- **`dist-dmg/dodb-1.0.0-arm64.dmg`** (สำหรับ Apple Silicon Mac)
+> **Note**: If you encounter directory lock issues during rebuilds, clean previous output first:
+> ```bash
+> rm -rf dist-dmg && pnpm dist:mac
+> ```
+
+### Output Artifacts
+
+Upon completion, the final installers are generated under `dist-dmg/`:
+- **`dist-dmg/dodb-1.0.0-arm64.dmg`** — macOS Apple Silicon Installer (`arm64`)
+- **`dist-dmg/mac-arm64/dodb.app`** — macOS Standalone Application Bundle
 
 ---
 
-## ใบอนุญาต (License)
+## ⚙️ Configuration & Ports
 
-MIT License
+The default ports used by **dodb** can be overridden via environment variables if required:
+
+| Parameter | Environment Variable | Default Value | Description |
+| :--- | :--- | :--- | :--- |
+| **Backend API Port** | `PORT` | `5820` | Port for Express REST API server |
+| **UI API Endpoint** | `NEXT_PUBLIC_API_BASE` | `http://localhost:5820/api` | Base URL used by UI to communicate with backend |
+| **UI Server Port** | `PORT` | `5821` | Port for Electron internal UI static server |
+
+---
+
+## 📂 Project Structure
+
+```
+dodb/
+├── assets/                  # App icons and graphics
+├── dist/                    # Compiled backend TypeScript output
+├── dist-dmg/                # Packaged macOS DMG installers & app bundles
+├── electron/
+│   └── main.js              # Electron main process & server lifecycle manager
+├── src/                     # Express REST API backend
+│   ├── config/              # Saved connection profile configurations
+│   ├── db/                  # PostgreSQL & MariaDB pool managers
+│   ├── routes/              # API Endpoints (database, command, list, admin, profile)
+│   ├── app.ts               # Express middleware setup
+│   └── server.ts            # Entrypoint for Express backend (Port 5820)
+├── ui/                      # Next.js 15 Frontend UI
+│   ├── src/
+│   │   ├── components/      # DataGrid, Header, SidebarExplorer, ConnectionModal, ER Diagram
+│   │   ├── pages/           # Main application page
+│   │   └── types/           # TypeScript interfaces & types
+│   ├── out/                 # Compiled static UI export for Electron
+│   └── package.json         # UI dependencies & scripts
+├── package.json             # Root scripts & electron-builder configuration
+└── README.md                # Project documentation
+```
+
+---
+
+## 📄 License
+
+Distributed under the **MIT License**. See `LICENSE` for more information.
+
+---
+
+<p align="center">
+  Designed & Developed with ❤️ by <strong>Bank Jirapan</strong>
+</p>
