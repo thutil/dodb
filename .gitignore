@@ -5,6 +5,7 @@ ui/node_modules/
 # Build and export outputs
 dist/
 dist-dmg/
+dist-builds/
 ui/.next/
 ui/out/
 

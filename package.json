@@ -16,10 +16,8 @@
     "dev": "nodemon src/server.ts",
     "ui:dev": "pnpm --prefix ui dev",
     "desktop": "electron electron/main.js",
-    "dist:mac": "pnpm build && electron-builder --mac --publish never",
-    "dist:win": "pnpm build && electron-builder --win --publish never",
-    "dist:linux": "pnpm build && electron-builder --linux --publish never",
-    "dist:all": "pnpm build && electron-builder -mwl --publish never"
+    "dist": "pnpm build && electron-builder --mac --publish never",
+    "dist:mac": "pnpm build && electron-builder --mac --publish never"
   },
   "build": {
     "appId": "com.thutil.dodb",
@@ -44,35 +42,6 @@
       ],
       "hardenedRuntime": false
     },
-    "win": {
-      "icon": "assets/icon.png",
-      "target": [
-        {
-          "target": "nsis",
-          "arch": ["x64"]
-        },
-        {
-          "target": "portable",
-          "arch": ["x64"]
-        }
-      ]
-    },
-    "linux": {
-      "icon": "assets/icon.png",
-      "category": "Development",
-      "maintainer": "thutil <thutil@users.noreply.github.com>",
-      "desktopName": "dodb",
-      "target": [
-        {
-          "target": "AppImage",
-          "arch": ["x64"]
-        },
-        {
-          "target": "deb",
-          "arch": ["x64"]
-        }
-      ]
-    },
     "dmg": {
       "title": "dodb - Database Manager",
       "icon": "assets/icon.png",
@@ -93,10 +62,6 @@
         "width": 540,
         "height": 360
       }
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true
     },
     "files": [
       "dist/**/*",
