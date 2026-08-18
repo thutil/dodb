@@ -278,7 +278,7 @@ export default function Home() {
   };
 
   return (
-    <>
+    <React.Fragment>
       <Head>
         <title>dodb - macOS Native Database Manager</title>
         <meta name="description" content="Simple, fast macOS Native Database Manager for Postgres and MySQL" />
@@ -486,6 +486,6 @@ export default function Home() {
           font-family: var(--font-mono);
         }
       `}</style>
-    </>
+    </React.Fragment>
   );
 }
