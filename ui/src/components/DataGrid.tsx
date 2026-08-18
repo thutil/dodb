@@ -675,9 +675,16 @@ export const DataGrid: React.FC<DataGridProps> = ({
                           <button
                             className="icon-edit-btn"
                             onClick={() => openRowModal(idx, row)}
-                            title="Edit Entire Row"
+                            title="Edit Entire Row Modal"
                           >
                             <Edit3 size={11} />
+                          </button>
+                          <button
+                            className="icon-edit-btn"
+                            onClick={() => setSelectedCell({ row: idx, col: pkColName, val: row })}
+                            title="Inspect Full Row Data"
+                          >
+                            <FileText size={11} />
                           </button>
                           <button
                             className={`icon-del-btn ${isDeleted ? "active" : ""}`}
@@ -693,23 +700,62 @@ export const DataGrid: React.FC<DataGridProps> = ({
                         const val = isEdited ? rowEdits[col.name] : row[col.name];
                         const isNull = val === null || val === undefined;
                         const isEditing = !editingCell?.isNew && editingCell?.pkKey === pkKey && editingCell.colName === col.name;
+                        const isDateCol = isDateTimeColumn(col.type);
 
                         return (
                           <td
                             key={col.name}
                             className={`cell-data ${isNull ? "cell-null" : ""} ${isEdited ? "cell-modified" : ""}`}
-                            onClick={() => setSelectedCell({ row: idx, col: col.name, val })}
                             onDoubleClick={() => startEditing(pkKey, false, undefined, col.name, val)}
+                            title="Double-click to edit cell"
                           >
                             {isEditing ? (
-                              <input
-                                autoFocus
-                                className="input cell-edit-input"
-                                value={editValue}
-                                onChange={(e) => setEditValue(e.target.value)}
-                                onBlur={saveCellEdit}
-                                onKeyDown={(e) => e.key === "Enter" && saveCellEdit()}
-                              />
+                              <div className="input-with-picker inline-edit-wrap">
+                                <input
+                                  autoFocus
+                                  className="input cell-edit-input"
+                                  value={editValue}
+                                  onChange={(e) => setEditValue(e.target.value)}
+                                  onBlur={(e) => {
+                                    // Prevent blur when clicking calendar picker trigger
+                                    if (!e.relatedTarget || !(e.relatedTarget as HTMLElement).classList.contains("btn-picker-trigger")) {
+                                      saveCellEdit();
+                                    }
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") saveCellEdit();
+                                    if (e.key === "Escape") setEditingCell(null);
+                                  }}
+                                />
+                                {isDateCol && (
+                                  <button
+                                    type="button"
+                                    className="btn-picker-trigger"
+                                    onMouseDown={(e) => e.preventDefault()}
+                                    onClick={() => {
+                                      setActivePicker({
+                                        colName: col.name,
+                                        colType: col.type,
+                                        value: editValue,
+                                        onApply: (selectedVal) => {
+                                          setEditValue(selectedVal);
+                                          setEditedCells((prev) => ({
+                                            ...prev,
+                                            [pkKey]: {
+                                              ...(prev[pkKey] || {}),
+                                              [col.name]: selectedVal,
+                                            },
+                                          }));
+                                          setEditingCell(null);
+                                        },
+                                      });
+                                    }}
+                                    title="Pick Date & Time"
+                                  >
+                                    <CalendarIcon size={12} />
+                                  </button>
+                                )}
+                              </div>
                             ) : isNull ? (
                               "NULL"
                             ) : typeof val === "object" ? (

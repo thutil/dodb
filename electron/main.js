@@ -24,10 +24,24 @@ function resolveAppPath(relativePath) {
   return path.join(__dirname, relativePath);
 }
 
-// Load GUI settings from data/settings.json
+const os = require("os");
+
+function getPersistentDataDir() {
+  try {
+    if (app && app.getPath) {
+      return path.join(app.getPath("userData"), "data");
+    }
+  } catch {}
+  return path.join(os.homedir(), ".dodb");
+}
+
+const PERSISTENT_DATA_DIR = getPersistentDataDir();
+process.env.DODB_DATA_DIR = PERSISTENT_DATA_DIR;
+
+// Load GUI settings from persistent user directory
 function loadSettings() {
   try {
-    const settingsPath = resolveAppPath("data/settings.json");
+    const settingsPath = path.join(PERSISTENT_DATA_DIR, "settings.json");
     if (fs.existsSync(settingsPath)) {
       const raw = fs.readFileSync(settingsPath, "utf-8");
       return JSON.parse(raw);
@@ -38,16 +52,15 @@ function loadSettings() {
   return { guiWidth: 1280, guiHeight: 850 };
 }
 
-// Save GUI settings to data/settings.json
+// Save GUI settings to persistent user directory
 function saveSettings(settings) {
   try {
-    const settingsPath = resolveAppPath("data/settings.json");
-    const dir = path.dirname(settingsPath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
+    if (!fs.existsSync(PERSISTENT_DATA_DIR)) {
+      fs.mkdirSync(PERSISTENT_DATA_DIR, { recursive: true, mode: 0o700 });
     }
+    const settingsPath = path.join(PERSISTENT_DATA_DIR, "settings.json");
     const current = loadSettings();
-    fs.writeFileSync(settingsPath, JSON.stringify({ ...current, ...settings }, null, 2));
+    fs.writeFileSync(settingsPath, JSON.stringify({ ...current, ...settings }, null, 2), { mode: 0o600 });
   } catch (err) {
     console.error("Failed to save window settings:", err);
   }
@@ -57,6 +70,9 @@ function saveSettings(settings) {
 function startBackendServer() {
   if (isBackendRunning) return;
   try {
+    process.env.DODB_DATA_DIR = PERSISTENT_DATA_DIR;
+    process.env.PORT = "5820";
+
     const compiledJsPath = resolveAppPath("dist/server.js");
     if (fs.existsSync(compiledJsPath)) {
       require(compiledJsPath);
@@ -67,7 +83,7 @@ function startBackendServer() {
       const serverPath = resolveAppPath("src/server.ts");
       serverProcess = spawn(tsNodePath, [serverPath], {
         cwd: path.join(__dirname, ".."),
-        env: { ...process.env, PORT: "5820" },
+        env: { ...process.env, PORT: "5820", DODB_DATA_DIR: PERSISTENT_DATA_DIR },
         stdio: "pipe",
       });
       isBackendRunning = true;
@@ -77,6 +93,7 @@ function startBackendServer() {
     console.error("Backend exception:", err);
   }
 }
+
 
 // Start UI Server (Static Express or Next.js Fallback)
 function startUiServer() {

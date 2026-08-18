@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Calendar as CalendarIcon, Clock, ChevronLeft, ChevronRight, Check, X } from "lucide-react";
+import { Calendar as CalendarIcon, Clock, ChevronLeft, ChevronRight, Check, X, Sparkles } from "lucide-react";
 
 interface DateTimePickerPopoverProps {
   value: string;
@@ -17,7 +17,7 @@ export const DateTimePickerPopover: React.FC<DateTimePickerPopoverProps> = ({
   const popoverRef = useRef<HTMLDivElement>(null);
   const isDateOnly = type.toLowerCase() === "date";
 
-  // Parse initial date
+  // Parse initial date safely
   const parseInitialDate = () => {
     if (!value) return new Date();
     const d = new Date(value);
@@ -48,8 +48,8 @@ export const DateTimePickerPopover: React.FC<DateTimePickerPopoverProps> = ({
   const firstDayOfWeek = new Date(currentYear, currentMonth, 1).getDay();
 
   const monthNames = [
-    "January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December"
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
   ];
 
   const handlePrevMonth = () => {
@@ -72,6 +72,24 @@ export const DateTimePickerPopover: React.FC<DateTimePickerPopoverProps> = ({
 
   const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
 
+  // Quick Preset Handlers
+  const applyPresetToday = () => {
+    const now = new Date();
+    setCurrentYear(now.getFullYear());
+    setCurrentMonth(now.getMonth());
+    setSelectedDay(now.getDate());
+  };
+
+  const applyPresetNow = () => {
+    const now = new Date();
+    setCurrentYear(now.getFullYear());
+    setCurrentMonth(now.getMonth());
+    setSelectedDay(now.getDate());
+    setHours(now.getHours());
+    setMinutes(now.getMinutes());
+    setSeconds(now.getSeconds());
+  };
+
   const handleConfirm = () => {
     const yyyy = currentYear;
     const mm = pad(currentMonth + 1);
@@ -87,10 +105,23 @@ export const DateTimePickerPopover: React.FC<DateTimePickerPopoverProps> = ({
     onClose();
   };
 
+  const handleClear = () => {
+    onChange("");
+    onClose();
+  };
+
+  const yearsRange = Array.from({ length: 30 }, (_, i) => new Date().getFullYear() - 15 + i);
+
   const renderCalendarGrid = () => {
     const days: React.ReactNode[] = [];
-    for (let i = 0; i < firstDayOfWeek; i++) {
-      days.push(<div key={`empty-${i}`} className="day-cell empty" />);
+    // Prev month padding
+    const prevMonthDays = new Date(currentYear, currentMonth, 0).getDate();
+    for (let i = firstDayOfWeek - 1; i >= 0; i--) {
+      days.push(
+        <div key={`prev-${i}`} className="day-cell muted">
+          {prevMonthDays - i}
+        </div>
+      );
     }
 
     const today = new Date();
@@ -111,13 +142,31 @@ export const DateTimePickerPopover: React.FC<DateTimePickerPopoverProps> = ({
         </button>
       );
     }
+
+    // Next month padding
+    const totalCells = days.length;
+    const remaining = 35 - totalCells > 0 ? 35 - totalCells : 42 - totalCells;
+    for (let i = 1; i <= remaining; i++) {
+      days.push(
+        <div key={`next-${i}`} className="day-cell muted">
+          {i}
+        </div>
+      );
+    }
+
     return days;
   };
 
   return (
     <div className="datetime-modal-overlay" onClick={onClose}>
       <div className="datetime-popover" ref={popoverRef} onClick={(e) => e.stopPropagation()}>
+        {/* Header Bar */}
         <div className="popover-header">
+          <div className="popover-title-badge">
+            <Sparkles size={13} className="sparkle-icon" />
+            <span>{isDateOnly ? "Date Picker" : "Date & Time Picker"}</span>
+          </div>
+
           <div className="popover-tabs">
             <button
               type="button"
@@ -134,29 +183,70 @@ export const DateTimePickerPopover: React.FC<DateTimePickerPopoverProps> = ({
                 onClick={() => setActiveTab("time")}
               >
                 <Clock size={12} />
-                <span>Time ({pad(hours)}:{pad(minutes)})</span>
+                <span>{pad(hours)}:{pad(minutes)}:{pad(seconds)}</span>
               </button>
             )}
+            <button type="button" className="close-btn" onClick={onClose}>
+              <X size={13} />
+            </button>
           </div>
-          <button type="button" className="close-btn" onClick={onClose}>
-            <X size={12} />
+        </div>
+
+        {/* Quick Presets Bar */}
+        <div className="presets-bar">
+          <button type="button" className="preset-chip" onClick={applyPresetToday}>
+            Today
+          </button>
+          {!isDateOnly && (
+            <button type="button" className="preset-chip highlight" onClick={applyPresetNow}>
+              Now (Current Time)
+            </button>
+          )}
+          <button type="button" className="preset-chip clear" onClick={handleClear}>
+            NULL / Clear
           </button>
         </div>
 
         {activeTab === "calendar" ? (
           <div className="calendar-view">
-            <div className="month-selector">
-              <button type="button" className="nav-btn" onClick={handlePrevMonth}>
+            {/* Month & Year Selectors */}
+            <div className="month-year-bar">
+              <button type="button" className="nav-btn" onClick={handlePrevMonth} title="Previous Month">
                 <ChevronLeft size={14} />
               </button>
-              <span className="month-title">
-                {monthNames[currentMonth]} {currentYear}
-              </span>
-              <button type="button" className="nav-btn" onClick={handleNextMonth}>
+
+              <div className="select-group">
+                <select
+                  className="month-select"
+                  value={currentMonth}
+                  onChange={(e) => setCurrentMonth(Number(e.target.value))}
+                >
+                  {monthNames.map((m, idx) => (
+                    <option key={m} value={idx}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  className="year-select"
+                  value={currentYear}
+                  onChange={(e) => setCurrentYear(Number(e.target.value))}
+                >
+                  {yearsRange.map((y) => (
+                    <option key={y} value={y}>
+                      {y}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <button type="button" className="nav-btn" onClick={handleNextMonth} title="Next Month">
                 <ChevronRight size={14} />
               </button>
             </div>
 
+            {/* Week Headers */}
             <div className="week-headers">
               <span>Su</span>
               <span>Mo</span>
@@ -167,12 +257,13 @@ export const DateTimePickerPopover: React.FC<DateTimePickerPopoverProps> = ({
               <span>Sa</span>
             </div>
 
+            {/* Days Grid */}
             <div className="days-grid">{renderCalendarGrid()}</div>
           </div>
         ) : (
           <div className="time-view">
             <div className="time-column">
-              <span className="time-label">Hours (00-23)</span>
+              <span className="time-label">Hour (00-23)</span>
               <div className="time-scroll">
                 {Array.from({ length: 24 }).map((_, h) => (
                   <button
@@ -188,7 +279,7 @@ export const DateTimePickerPopover: React.FC<DateTimePickerPopoverProps> = ({
             </div>
 
             <div className="time-column">
-              <span className="time-label">Minutes (00-59)</span>
+              <span className="time-label">Min (00-59)</span>
               <div className="time-scroll">
                 {Array.from({ length: 60 }).map((_, m) => (
                   <button
@@ -221,11 +312,13 @@ export const DateTimePickerPopover: React.FC<DateTimePickerPopoverProps> = ({
           </div>
         )}
 
+        {/* Footer */}
         <div className="popover-footer">
-          <span className="preview-val">
+          <div className="preview-val font-mono">
             {currentYear}-{pad(currentMonth + 1)}-{pad(selectedDay)}
             {!isDateOnly && ` ${pad(hours)}:${pad(minutes)}:${pad(seconds)}`}
-          </span>
+          </div>
+
           <div className="footer-actions">
             <button type="button" className="btn btn-secondary btn-sm" onClick={onClose}>
               Cancel
@@ -243,20 +336,25 @@ export const DateTimePickerPopover: React.FC<DateTimePickerPopoverProps> = ({
           position: fixed;
           inset: 0;
           z-index: 3000;
-          background: rgba(0, 0, 0, 0.4);
-          backdrop-filter: blur(2px);
+          background: rgba(0, 0, 0, 0.45);
+          backdrop-filter: blur(5px);
           display: flex;
           align-items: center;
           justify-content: center;
+          animation: fadeIn 0.15s ease-out;
+        }
+
+        @keyframes fadeIn {
+          from { opacity: 0; transform: scale(0.98); }
+          to { opacity: 1; transform: scale(1); }
         }
 
         .datetime-popover {
-          position: relative;
-          width: 310px;
+          width: 320px;
           background: var(--bg-card);
           border: 1px solid var(--border-light);
-          border-radius: var(--radius-md);
-          box-shadow: 0 15px 35px rgba(0, 0, 0, 0.5);
+          border-radius: 12px;
+          box-shadow: 0 20px 45px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05);
           display: flex;
           flex-direction: column;
           overflow: hidden;
@@ -269,11 +367,23 @@ export const DateTimePickerPopover: React.FC<DateTimePickerPopoverProps> = ({
           justify-content: space-between;
           background: var(--bg-tertiary);
           border-bottom: 1px solid var(--border-light);
-          padding: 6px 10px;
+          padding: 8px 12px;
         }
+
+        .popover-title-badge {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 11px;
+          font-weight: 700;
+          color: var(--accent-blue);
+        }
+
+        .sparkle-icon { color: var(--accent-blue); }
 
         .popover-tabs {
           display: flex;
+          align-items: center;
           gap: 4px;
         }
 
@@ -282,17 +392,25 @@ export const DateTimePickerPopover: React.FC<DateTimePickerPopoverProps> = ({
           align-items: center;
           gap: 4px;
           background: transparent;
-          border: none;
+          border: 1px solid transparent;
           color: var(--text-muted);
           font-size: 11px;
           font-weight: 600;
-          padding: 4px 8px;
-          border-radius: 4px;
+          padding: 3px 8px;
+          border-radius: 6px;
           cursor: pointer;
+          transition: all 0.15s ease;
         }
+
+        .tab-btn:hover {
+          color: var(--text-main);
+          background: var(--bg-hover);
+        }
+
         .tab-btn.active {
-          background: var(--bg-active);
-          color: var(--accent-blue);
+          background: var(--accent-blue);
+          color: #ffffff;
+          font-weight: 600;
         }
 
         .close-btn {
@@ -300,53 +418,124 @@ export const DateTimePickerPopover: React.FC<DateTimePickerPopoverProps> = ({
           border: none;
           color: var(--text-muted);
           cursor: pointer;
-          padding: 2px;
-          border-radius: 3px;
+          padding: 3px;
+          border-radius: 4px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin-left: 4px;
         }
-        .close-btn:hover { color: var(--text-main); }
+        .close-btn:hover {
+          color: var(--text-main);
+          background: var(--bg-hover);
+        }
+
+        .presets-bar {
+          display: flex;
+          gap: 6px;
+          padding: 8px 12px;
+          background: var(--bg-secondary);
+          border-bottom: 1px solid var(--border-light);
+          overflow-x: auto;
+        }
+
+        .preset-chip {
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-light);
+          color: var(--text-sub);
+          font-size: 10px;
+          font-weight: 600;
+          padding: 3px 8px;
+          border-radius: 12px;
+          cursor: pointer;
+          white-space: nowrap;
+          transition: all 0.15s ease;
+        }
+
+        .preset-chip:hover {
+          background: var(--bg-hover);
+          color: var(--text-main);
+          border-color: var(--accent-blue);
+        }
+
+        .preset-chip.highlight {
+          color: var(--accent-blue);
+          border-color: rgba(59, 130, 246, 0.4);
+          background: rgba(59, 130, 246, 0.1);
+        }
+
+        .preset-chip.clear {
+          color: var(--accent-red);
+          border-color: rgba(239, 68, 68, 0.3);
+        }
 
         .calendar-view {
-          padding: 10px;
+          padding: 10px 12px;
           display: flex;
           flex-direction: column;
           gap: 8px;
         }
 
-        .month-selector {
+        .month-year-bar {
           display: flex;
           align-items: center;
           justify-content: space-between;
         }
 
-        .month-title {
-          font-size: 12px;
-          font-weight: 700;
+        .select-group {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+
+        .month-select, .year-select {
+          background: var(--bg-secondary);
           color: var(--text-main);
+          border: 1px solid var(--border-light);
+          border-radius: 6px;
+          padding: 3px 6px;
+          font-size: 12px;
+          font-weight: 600;
+          cursor: pointer;
+          outline: none;
+        }
+
+        .month-select:hover, .year-select:hover {
+          border-color: var(--accent-blue);
         }
 
         .nav-btn {
-          background: transparent;
-          border: none;
+          background: var(--bg-secondary);
+          border: 1px solid var(--border-light);
           color: var(--text-sub);
           cursor: pointer;
-          padding: 2px 4px;
-          border-radius: 4px;
+          padding: 4px;
+          border-radius: 6px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: all 0.15s ease;
         }
-        .nav-btn:hover { background: var(--bg-hover); color: var(--text-main); }
+        .nav-btn:hover {
+          background: var(--bg-hover);
+          color: var(--text-main);
+          border-color: var(--accent-blue);
+        }
 
         .week-headers {
           display: grid;
           grid-template-columns: repeat(7, 1fr);
           text-align: center;
           font-size: 10px;
-          font-weight: 600;
+          font-weight: 700;
           color: var(--text-muted);
+          padding: 4px 0;
         }
 
         .days-grid {
           display: grid;
           grid-template-columns: repeat(7, 1fr);
-          gap: 2px;
+          gap: 3px;
         }
 
         .day-cell {
@@ -355,25 +544,42 @@ export const DateTimePickerPopover: React.FC<DateTimePickerPopoverProps> = ({
           align-items: center;
           justify-content: center;
           background: transparent;
-          border: none;
-          border-radius: 4px;
+          border: 1px solid transparent;
+          border-radius: 6px;
           font-size: 11px;
+          font-weight: 500;
           color: var(--text-main);
           cursor: pointer;
-          transition: all 0.1s ease;
+          transition: all 0.12s ease;
         }
-        .day-cell.empty { pointer-events: none; }
-        .day-cell:hover { background: var(--bg-hover); }
-        .day-cell.today { font-weight: 700; color: var(--accent-blue); }
-        .day-cell.selected {
-          background: var(--accent-blue);
-          color: #fff;
+
+        .day-cell.muted {
+          color: var(--text-muted);
+          opacity: 0.4;
+          cursor: default;
+        }
+
+        .day-cell:hover:not(.muted) {
+          background: var(--bg-hover);
+          border-color: var(--border-light);
+        }
+
+        .day-cell.today {
           font-weight: 700;
+          color: var(--accent-blue);
+          border-color: rgba(59, 130, 246, 0.4);
+        }
+
+        .day-cell.selected {
+          background: var(--accent-blue) !important;
+          color: #ffffff !important;
+          font-weight: 700;
+          box-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
         }
 
         .time-view {
           display: flex;
-          height: 180px;
+          height: 200px;
           border-bottom: 1px solid var(--border-light);
         }
 
@@ -390,9 +596,10 @@ export const DateTimePickerPopover: React.FC<DateTimePickerPopoverProps> = ({
           font-weight: 700;
           text-transform: uppercase;
           color: var(--text-muted);
-          padding: 4px;
+          padding: 6px;
           text-align: center;
           background: var(--bg-secondary);
+          border-bottom: 1px solid var(--border-light);
         }
 
         .time-scroll {
@@ -400,22 +607,30 @@ export const DateTimePickerPopover: React.FC<DateTimePickerPopoverProps> = ({
           overflow-y: auto;
           display: flex;
           flex-direction: column;
+          padding: 4px 2px;
         }
 
         .time-item {
           background: transparent;
           border: none;
-          padding: 4px;
+          padding: 5px 0;
           font-size: 11px;
           font-family: var(--font-mono);
           color: var(--text-sub);
           cursor: pointer;
           text-align: center;
+          border-radius: 4px;
+          transition: all 0.1s ease;
         }
-        .time-item:hover { background: var(--bg-hover); color: var(--text-main); }
+
+        .time-item:hover {
+          background: var(--bg-hover);
+          color: var(--text-main);
+        }
+
         .time-item.selected {
-          background: var(--bg-active);
-          color: var(--accent-blue);
+          background: var(--accent-blue);
+          color: #ffffff;
           font-weight: 700;
         }
 
@@ -423,27 +638,27 @@ export const DateTimePickerPopover: React.FC<DateTimePickerPopoverProps> = ({
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 8px 10px;
+          padding: 8px 12px;
           background: var(--bg-tertiary);
           border-top: 1px solid var(--border-light);
         }
 
         .preview-val {
           font-size: 10px;
-          font-family: var(--font-mono);
           color: var(--accent-blue);
-          font-weight: 600;
+          font-weight: 700;
+          background: rgba(59, 130, 246, 0.1);
+          padding: 2px 6px;
+          border-radius: 4px;
+          border: 1px solid rgba(59, 130, 246, 0.2);
         }
 
         .footer-actions {
           display: flex;
           gap: 6px;
         }
-        .btn-sm {
-          padding: 3px 8px;
-          font-size: 11px;
-        }
       `}</style>
     </div>
   );
 };
+

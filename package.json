@@ -63,14 +63,24 @@
         "height": 360
       }
     },
+    "compression": "maximum",
     "files": [
       "dist/**/*",
       "electron/**/*",
       "ui/out/**/*",
       "assets/**/*",
-      "package.json"
+      "package.json",
+      "!ui/node_modules/**/*",
+      "!ui/src/**/*",
+      "!ui/.next/**/*",
+      "!src/**/*",
+      "!data/**/*",
+      "!dist-builds/**/*"
     ],
-    "asar": false
+    "asar": true,
+    "asarUnpack": [
+      "**/node_modules/better-sqlite3/**/*"
+    ]
   },
   "dependencies": {
     "@types/body-parser": "^1.19.6",
