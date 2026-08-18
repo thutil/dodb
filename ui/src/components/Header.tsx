@@ -33,6 +33,7 @@ export const Header: React.FC<HeaderProps> = ({
     <header className="app-header">
       <div className="header-drag-region">
         <div className="brand">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/mascot.jpg" alt="dodb mascot" className="brand-mascot-img" />
           <span className="brand-title">dodb</span>
           <span className="brand-badge">macOS</span>

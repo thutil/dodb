@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useState, useEffect, useCallback } from "react";
 import Head from "next/head";
 import pkg from "../../../package.json";
@@ -11,6 +12,7 @@ import { SqlConsole } from "../components/SqlConsole";
 import { AdminPanel } from "../components/AdminPanel";
 import { SchemaDiagram } from "../components/SchemaDiagram";
 import { ConnectionProfile, ColumnInfo, TableRowData, QueryExecutionResult, ColumnFilter } from "../types";
+import { apiClient } from "../utils/apiClient";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:5820/api";
 
@@ -105,16 +107,12 @@ export default function Home() {
     document.documentElement.setAttribute("data-theme", nextTheme);
   };
 
-  // Fetch connection profiles
   const fetchProfiles = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/profile`);
-      if (res.ok) {
-        const data: ConnectionProfile[] = await res.json();
-        setProfiles(data);
-        if (data.length > 0 && !activeProfile) {
-          setActiveProfile(data[0]);
-        }
+      const data: any = await apiClient.getProfiles();
+      setProfiles(data);
+      if (data.length > 0 && !activeProfile) {
+        setActiveProfile(data[0]);
       }
     } catch {
       // Backend service offline or initial launch
@@ -125,24 +123,16 @@ export default function Home() {
     fetchProfiles();
   }, [fetchProfiles]);
 
-  // Fetch Databases when activeProfile changes
   const fetchDatabases = useCallback(async () => {
     if (!activeProfile) return;
     try {
-      const res = await fetch(`${API_BASE}/list/databases`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(activeProfile),
-      });
-      if (res.ok) {
-        const dbList: string[] = await res.json();
-        setDatabases(dbList);
-        if (dbList.length > 0) {
-          const defaultDb = dbList.includes(activeProfile.database)
-            ? activeProfile.database
-            : dbList[0];
-          setActiveDatabase(defaultDb);
-        }
+      const dbList: any = await apiClient.getDatabases(activeProfile.id);
+      setDatabases(dbList);
+      if (dbList.length > 0) {
+        const defaultDb = dbList.includes(activeProfile.database)
+          ? activeProfile.database
+          : dbList[0];
+        setActiveDatabase(defaultDb);
       }
     } catch (err) {
       console.error("Fetch databases error", err);
@@ -155,7 +145,6 @@ export default function Home() {
     }
   }, [activeProfile, fetchDatabases]);
 
-  // Fetch Tables when activeDatabase changes
   const fetchTables = useCallback(async () => {
     if (!activeProfile || !activeDatabase) return;
     setLoadingTables(true);
@@ -165,20 +154,13 @@ export default function Home() {
     setColumns([]);
     setTotalRows(0);
     try {
-      const res = await fetch(`${API_BASE}/list/tables`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...activeProfile, database: activeDatabase }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const newTables: string[] = data.tables || [];
-        setTables(newTables);
-        if (newTables.length > 0) {
-          setActiveTable(newTables[0]);
-        } else {
-          setActiveTable(null);
-        }
+      const data: any = await apiClient.getTables(activeProfile.id, activeDatabase);
+      const newTables: string[] = data.tables || [];
+      setTables(newTables);
+      if (newTables.length > 0) {
+        setActiveTable(newTables[0]);
+      } else {
+        setActiveTable(null);
       }
     } catch (err) {
       console.error("Fetch tables error", err);
@@ -193,43 +175,29 @@ export default function Home() {
     }
   }, [activeDatabase, fetchTables]);
 
-  // Fetch Table Data & Columns when activeTable, page, sort, search, or filters change
   const fetchTableData = useCallback(async () => {
     if (!activeProfile || !activeDatabase || !activeTable) return;
     setLoadingData(true);
     try {
       // 1. Fetch columns metadata
-      const colRes = await fetch(`${API_BASE}/list/columns`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...activeProfile, database: activeDatabase, table: activeTable }),
-      });
-      if (colRes.ok) {
-        const colData = await colRes.json();
-        setColumns(colData.columns || []);
-      }
+      const colData: any = await apiClient.getColumns(activeProfile.id, activeDatabase, activeTable);
+      setColumns(colData.columns || []);
 
       // 2. Fetch paginated rows with sorting, search, and filtering
-      const rowRes = await fetch(`${API_BASE}/list/rows`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...activeProfile,
-          database: activeDatabase,
-          table: activeTable,
-          limit: pageSize,
-          offset: page * pageSize,
-          sortColumn: sortColumn || undefined,
-          sortOrder,
-          search: searchQuery || undefined,
-          filters: filters.map((f) => ({ column: f.column, operator: f.operator, value: f.value })),
-        }),
-      });
-      if (rowRes.ok) {
-        const rowData = await rowRes.json();
-        setRows(rowData.rows || []);
-        setTotalRows(rowData.total || 0);
-      }
+      const rowData: any = await apiClient.getRows(
+        activeProfile.id,
+        activeDatabase,
+        activeTable,
+        pageSize,
+        page * pageSize,
+        sortColumn,
+        sortOrder,
+        searchQuery,
+        filters
+      );
+      
+      setRows(rowData.rows || []);
+      setTotalRows(rowData.total || 0);
     } catch (err) {
       console.error("Fetch table data error", err);
     } finally {
@@ -243,89 +211,70 @@ export default function Home() {
     }
   }, [activeDatabase, activeTable, page, sortColumn, sortOrder, searchQuery, filters, fetchTableData]);
 
-  // Handle Save Profile
   const handleSaveProfile = async (profileData: Partial<ConnectionProfile>) => {
-    const isEdit = !!profileData.id;
-    const url = isEdit ? `${API_BASE}/profile/${profileData.id}` : `${API_BASE}/profile`;
-    const method = isEdit ? "PUT" : "POST";
-
-    const res = await fetch(url, {
-      method,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(profileData),
-    });
-
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error || "Save profile failed");
+    try {
+      const saved: any = await apiClient.saveProfile(profileData);
+      await fetchProfiles();
+      setActiveProfile(saved);
+    } catch (err: any) {
+      throw new Error(err.message || "Save profile failed");
     }
-
-    const saved: ConnectionProfile = await res.json();
-    await fetchProfiles();
-    setActiveProfile(saved);
   };
 
-  // Handle Delete Profile
   const handleDeleteProfile = async (id: string) => {
-    await fetch(`${API_BASE}/profile/${id}`, { method: "DELETE" });
+    await apiClient.deleteProfile(id);
     if (activeProfile?.id === id) {
       setActiveProfile(null);
     }
     await fetchProfiles();
   };
 
-  // Handle Test Connection
-  const handleTestConnection = async (profileData: Partial<ConnectionProfile>) => {
-    const res = await fetch(`${API_BASE}/profile/test`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(profileData),
-    });
-    return await res.json();
+  const handleTestConnection = async (profileData: Partial<ConnectionProfile>): Promise<{ success: boolean; message?: string; error?: string }> => {
+    try {
+      const msg: any = await apiClient.testConnection(profileData);
+      return { success: true, message: msg };
+    } catch (err: any) {
+      return { success: false, error: err.message || String(err) };
+    }
   };
 
-  // Handle Execute SQL
   const handleExecuteSql = async (sql: string): Promise<QueryExecutionResult> => {
     if (!activeProfile) {
       throw new Error("โปรดเลือกการเชื่อมต่อฐานข้อมูลก่อนรันคำสั่ง");
     }
-    const res = await fetch(`${API_BASE}/command`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...activeProfile,
-        database: activeDatabase || activeProfile.database,
-        sql,
-      }),
-    });
-
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.error || "Execution failed");
+    
+    try {
+      const data: any = await apiClient.executeCommand(
+        activeProfile.id,
+        activeDatabase || activeProfile.database,
+        sql
+      );
+      if (Array.isArray(data)) {
+        return { rows: data };
+      }
+      return { rows: data.rows || [], affectedRows: data.affectedRows || data.rowCount };
+    } catch (err: any) {
+      throw new Error(err.message || "Execution failed");
     }
-
-    if (Array.isArray(data)) {
-      return { rows: data };
-    }
-    return { rows: data.rows || [], affectedRows: data.affectedRows || data.rowCount };
   };
 
   // Handle Commit Changes (Atomic Database Transaction)
-  const handleCommitChanges = async (changes: PendingChanges) => {
+  const handleCommitChanges = async (changes: PendingChanges): Promise<{ success: boolean; error?: string }> => {
     if (!activeProfile || !activeTable) {
-      throw new Error("Missing active database connection or table");
+      return { success: false, error: "Missing active database connection or table" };
     }
-    const res = await fetch(`${API_BASE}/database/commit-changes`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...activeProfile,
-        database: activeDatabase || activeProfile.database,
-        table: activeTable,
-        changes,
-      }),
-    });
-    return await res.json();
+    
+    try {
+      await apiClient.commitChanges(
+          activeProfile.id,
+          activeDatabase || activeProfile.database,
+          activeTable,
+          changes
+      );
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
   };
 
   return (

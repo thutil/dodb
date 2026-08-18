@@ -9,15 +9,10 @@
     "email": "thutil@users.noreply.github.com"
   },
   "scripts": {
-    "start": "ts-node src/server.ts",
-    "build": "pnpm build:backend && pnpm build:ui",
-    "build:backend": "tsc",
     "build:ui": "pnpm --prefix ui build",
-    "dev": "nodemon src/server.ts",
     "ui:dev": "pnpm --prefix ui dev",
-    "desktop": "electron electron/main.js",
-    "dist": "pnpm build && electron-builder --mac --publish never",
-    "dist:mac": "pnpm build && electron-builder --mac --publish never"
+    "dev": "tauri dev",
+    "build": "tauri build"
   },
   "build": {
     "appId": "com.thutil.dodb",
@@ -33,11 +28,17 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["x64", "arm64"]
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         },
         {
           "target": "zip",
-          "arch": ["x64", "arm64"]
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         }
       ],
       "hardenedRuntime": false
@@ -83,24 +84,11 @@
     ]
   },
   "dependencies": {
-    "@types/body-parser": "^1.19.6",
-    "@types/pg": "^8.15.4",
-    "better-sqlite3": "^13.0.3",
-    "body-parser": "^2.2.0",
-    "express": "^5.1.0",
-    "mariadb": "^3.4.2",
-    "pg": "^8.16.0",
     "uuid": "^11.1.0"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^9.6.0",
-    "@types/express": "^5.0.3",
-    "@types/node": "^24.0.1",
-    "@types/uuid": "^10.0.0",
-    "electron": "^43.4.0",
-    "electron-builder": "^26.15.3",
-    "nodemon": "^3.1.10",
-    "ts-node": "^10.9.2",
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/cli": "^2.11.4",
     "typescript": "^5.8.3"
   }
 }

@@ -19,11 +19,10 @@ import {
   Filter,
   ArrowUp,
   ArrowDown,
-  ArrowUpDown,
-  Calendar as CalendarIcon,
+  ArrowUpDown
 } from "lucide-react";
 import { ColumnInfo, TableRowData, ConnectionProfile, ColumnFilter, FilterOperator } from "../types";
-import { DateTimePickerPopover } from "./DateTimePickerPopover";
+
 
 export interface PendingChanges {
   inserts: TableRowData[];
@@ -91,13 +90,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
   const [editingCell, setEditingCell] = useState<{ pkKey: string; isNew: boolean; nIdx?: number; colName: string } | null>(null);
   const [editValue, setEditValue] = useState<string>("");
 
-  // DateTime Picker Popover state
-  const [activePicker, setActivePicker] = useState<{
-    colName: string;
-    colType: string;
-    value: string;
-    onApply: (val: string) => void;
-  } | null>(null);
+
 
   const isDateTimeColumn = (colType: string = ""): boolean => {
     const t = colType.toLowerCase();
@@ -125,7 +118,8 @@ export const DataGrid: React.FC<DataGridProps> = ({
     return (
       <div className="grid-placeholder">
         <div className="placeholder-card">
-          <img src="/mascot.jpg" alt="dodb mascot" className="mascot-placeholder-img" />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/elephant.png" alt="Database Elephant" width={48} height={48} className="opacity-80" />
           <h3>dodb Database Manager</h3>
           <p>Select a table from the sidebar to inspect records or open SQL Console</p>
         </div>
@@ -713,48 +707,16 @@ export const DataGrid: React.FC<DataGridProps> = ({
                               <div className="input-with-picker inline-edit-wrap">
                                 <input
                                   autoFocus
+                                  type={isDateCol ? (col.type.toLowerCase().includes("timestamp") || col.type.toLowerCase().includes("datetime") ? "datetime-local" : "date") : "text"}
                                   className="input cell-edit-input"
                                   value={editValue}
                                   onChange={(e) => setEditValue(e.target.value)}
-                                  onBlur={(e) => {
-                                    // Prevent blur when clicking calendar picker trigger
-                                    if (!e.relatedTarget || !(e.relatedTarget as HTMLElement).classList.contains("btn-picker-trigger")) {
-                                      saveCellEdit();
-                                    }
-                                  }}
+                                  onBlur={() => saveCellEdit()}
                                   onKeyDown={(e) => {
                                     if (e.key === "Enter") saveCellEdit();
                                     if (e.key === "Escape") setEditingCell(null);
                                   }}
                                 />
-                                {isDateCol && (
-                                  <button
-                                    type="button"
-                                    className="btn-picker-trigger"
-                                    onMouseDown={(e) => e.preventDefault()}
-                                    onClick={() => {
-                                      setActivePicker({
-                                        colName: col.name,
-                                        colType: col.type,
-                                        value: editValue,
-                                        onApply: (selectedVal) => {
-                                          setEditValue(selectedVal);
-                                          setEditedCells((prev) => ({
-                                            ...prev,
-                                            [pkKey]: {
-                                              ...(prev[pkKey] || {}),
-                                              [col.name]: selectedVal,
-                                            },
-                                          }));
-                                          setEditingCell(null);
-                                        },
-                                      });
-                                    }}
-                                    title="Pick Date & Time"
-                                  >
-                                    <CalendarIcon size={12} />
-                                  </button>
-                                )}
                               </div>
                             ) : isNull ? (
                               "NULL"
@@ -829,7 +791,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                     </label>
                     <div className="input-with-picker">
                       <input
-                        type="text"
+                        type={isDate ? (col.type.toLowerCase().includes("timestamp") || col.type.toLowerCase().includes("datetime") ? "datetime-local" : "date") : "text"}
                         className="input font-mono"
                         value={curVal}
                         onChange={(e) => {
@@ -839,27 +801,6 @@ export const DataGrid: React.FC<DataGridProps> = ({
                           );
                         }}
                       />
-                      {isDate && (
-                        <button
-                          type="button"
-                          className="btn-picker-trigger"
-                          onClick={() => {
-                            setActivePicker({
-                              colName: col.name,
-                              colType: col.type,
-                              value: curVal,
-                              onApply: (selectedVal) => {
-                                setRowEditModal((prev) =>
-                                  prev ? { ...prev, data: { ...prev.data, [col.name]: selectedVal } } : null
-                                );
-                              },
-                            });
-                          }}
-                          title="Pick Date & Time"
-                        >
-                          <CalendarIcon size={14} />
-                        </button>
-                      )}
                     </div>
                   </div>
                 );
@@ -1339,18 +1280,6 @@ export const DataGrid: React.FC<DataGridProps> = ({
           background: rgba(59, 130, 246, 0.15);
         }
       `}</style>
-
-      {activePicker && (
-        <DateTimePickerPopover
-          value={activePicker.value}
-          type={activePicker.colType}
-          onChange={(val) => {
-            activePicker.onApply(val);
-            setActivePicker(null);
-          }}
-          onClose={() => setActivePicker(null)}
-        />
-      )}
     </div>
   );
 };
