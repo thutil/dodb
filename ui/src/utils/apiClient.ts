@@ -55,5 +55,36 @@ export const apiClient = {
   },
   executeCommand: async (id: string, database: string, command: string) => {
     return await invoke("execute_command", { id, database, command });
+  },
+  getSchemaDiagram: async (id: string, database: string) => {
+    return await invoke("get_schema_diagram", { id, database });
+  },
+  selectFile: async (): Promise<string | null> => {
+    return await invoke("select_file");
+  },
+  // Admin Operations
+  adminGetUsers: async (id: string, database: string) => {
+    return await invoke("admin_get_users", { id, database });
+  },
+  adminGetProcesses: async (id: string, database: string) => {
+    return await invoke("admin_get_processes", { id, database });
+  },
+  adminCreateDatabase: async (id: string, database: string, name: string) => {
+    return await invoke("admin_create_database", { id, database, name });
+  },
+  adminDropDatabase: async (id: string, database: string, name: string) => {
+    return await invoke("admin_drop_database", { id, database, name });
+  },
+  adminCreateUser: async (id: string, database: string, username: string, password: string, isSuperuser: boolean) => {
+    return await invoke("admin_create_user", { id, database, username, password, isSuperuser });
+  },
+  adminDropUser: async (id: string, database: string, username: string, host?: string) => {
+    return await invoke("admin_drop_user", { id, database, username, host });
+  },
+  adminKillProcess: async (id: string, database: string, pid: string) => {
+    return await invoke("admin_kill_process", { id, database, pid });
   }
 };
+
+
+

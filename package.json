@@ -9,11 +9,12 @@
     "email": "thutil@users.noreply.github.com"
   },
   "scripts": {
-    "build:ui": "pnpm --prefix ui build",
-    "ui:dev": "pnpm --prefix ui dev",
+    "build:ui": "pnpm --filter dodb-ui build",
+    "ui:dev": "pnpm --filter dodb-ui dev",
     "dev": "tauri dev",
     "build": "tauri build"
   },
+
   "build": {
     "appId": "com.thutil.dodb",
     "productName": "dodb",
@@ -90,5 +91,11 @@
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/cli": "^2.11.4",
     "typescript": "^5.8.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "sharp",
+      "unrs-resolver"
+    ]
   }
 }

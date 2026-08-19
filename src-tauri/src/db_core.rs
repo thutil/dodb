@@ -17,30 +17,67 @@ impl Default for DbState {
     }
 }
 
-pub async fn get_pool(state: &State<'_, DbState>, profile: &ConnectionProfile) -> Result<AnyPool, String> {
+pub async fn get_pool(
+    state: &State<'_, DbState>,
+    profile: &ConnectionProfile,
+    database_override: Option<&str>,
+) -> Result<AnyPool, String> {
+    let db_name = match database_override {
+        Some(db) if !db.trim().is_empty() => db.trim().to_string(),
+        _ => {
+            if !profile.database.trim().is_empty() {
+                profile.database.trim().to_string()
+            } else if profile.r#type == SupportedDB::Postgres {
+                "postgres".to_string()
+            } else if profile.r#type == SupportedDB::Mariadb {
+                "mysql".to_string()
+            } else {
+                "".to_string()
+            }
+        }
+    };
+
+    let cache_key = match profile.r#type {
+        SupportedDB::Sqlite => {
+            let path = if !db_name.is_empty() && db_name != "main" && db_name != ":memory:" {
+                db_name.clone()
+            } else {
+                profile.file_path.clone().unwrap_or_else(|| ":memory:".to_string())
+            };
+            format!("{}:sqlite:{}", profile.id, path)
+        }
+        _ => format!("{}:{:?}:{}", profile.id, profile.r#type, db_name),
+    };
+
     {
         let pools = state.pools.lock().map_err(|e| e.to_string())?;
-        if let Some(pool) = pools.get(&profile.id) {
+        if let Some(pool) = pools.get(&cache_key) {
             return Ok(pool.clone());
         }
     }
+
     let url = match profile.r#type {
         SupportedDB::Sqlite => {
-            let path = profile.file_path.as_deref().unwrap_or(":memory:");
+            let path = if !db_name.is_empty() && db_name != "main" && db_name != ":memory:" {
+                db_name.clone()
+            } else {
+                profile.file_path.clone().unwrap_or_else(|| ":memory:".to_string())
+            };
             format!("sqlite://{}", path)
         }
         SupportedDB::Postgres => {
             format!(
                 "postgres://{}:{}@{}:{}/{}",
-                profile.user, profile.password, profile.host, profile.port, profile.database
+                profile.user, profile.password, profile.host, profile.port, db_name
             )
         }
         SupportedDB::Mariadb => {
             format!(
                 "mysql://{}:{}@{}:{}/{}",
-                profile.user, profile.password, profile.host, profile.port, profile.database
+                profile.user, profile.password, profile.host, profile.port, db_name
             )
         }
+
     };
 
     sqlx::any::install_default_drivers();
@@ -48,13 +85,14 @@ pub async fn get_pool(state: &State<'_, DbState>, profile: &ConnectionProfile) -
         .max_connections(5)
         .connect(&url)
         .await
-        .map_err(|e| format!("Failed to connect to database: {}", e))?;
-        
+        .map_err(|e| format!("Failed to connect to database '{}': {}", db_name, e))?;
+
     let mut pools = state.pools.lock().map_err(|e| e.to_string())?;
-    pools.insert(profile.id.clone(), pool.clone());
-    
+    pools.insert(cache_key, pool.clone());
+
     Ok(pool)
 }
+
 
 pub async fn execute_query(pool: &AnyPool, query: &str) -> Result<Vec<serde_json::Value>, String> {
     let rows = sqlx::query(query).fetch_all(pool).await.map_err(|e| e.to_string())?;
@@ -84,6 +122,8 @@ pub async fn execute_query(pool: &AnyPool, query: &str) -> Result<Vec<serde_json
                 map.insert(column.name().to_string(), serde_json::Value::Number(n.into()));
             } else if let Ok(n) = row.try_get::<i32, _>(i) {
                 map.insert(column.name().to_string(), serde_json::Value::Number(n.into()));
+            } else if let Ok(n) = row.try_get::<i16, _>(i) {
+                map.insert(column.name().to_string(), serde_json::Value::Number(n.into()));
             } else if let Ok(f) = row.try_get::<f64, _>(i) {
                 if let Some(num) = serde_json::Number::from_f64(f) {
                     map.insert(column.name().to_string(), serde_json::Value::Number(num));
@@ -100,14 +140,16 @@ pub async fn execute_query(pool: &AnyPool, query: &str) -> Result<Vec<serde_json
                 let text = String::from_utf8_lossy(&bytes).into_owned();
                 map.insert(column.name().to_string(), serde_json::Value::String(text));
             } else {
-                map.insert(column.name().to_string(), serde_json::Value::String("[Unsupported Type]".to_string()));
+                map.insert(column.name().to_string(), serde_json::Value::Null);
             }
+
         }
         result.push(serde_json::Value::Object(map));
     }
     
     Ok(result)
 }
+
 
 pub async fn execute_transaction(pool: &AnyPool, queries: &[String]) -> Result<(), String> {
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;

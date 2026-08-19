@@ -105,12 +105,14 @@ html, body {
   color: var(--text-main);
   padding: 6px 10px;
   outline: none;
+  box-sizing: border-box;
   transition: all 0.15s ease;
 }
 .input:focus, .select:focus, .textarea:focus {
   border-color: var(--border-focus);
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
 }
+
 
 .btn {
   font-family: var(--font-sans);

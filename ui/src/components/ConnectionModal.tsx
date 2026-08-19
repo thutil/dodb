@@ -1,6 +1,22 @@
 import React, { useState, useEffect } from "react";
-import { Server, Plus, Trash2, Zap, CheckCircle2, XCircle, X, Database, HardDrive, RefreshCw, Folder, ChevronDown, ChevronRight } from "lucide-react";
+import {
+  Server,
+  Plus,
+  Trash2,
+  Zap,
+  CheckCircle2,
+  XCircle,
+  X,
+  Database,
+  HardDrive,
+  RefreshCw,
+  Folder,
+  FolderOpen,
+  ChevronDown,
+  ChevronRight,
+} from "lucide-react";
 import { ConnectionProfile, DBType } from "../types";
+import { apiClient } from "../utils/apiClient";
 
 interface ConnectionModalProps {
   isOpen: boolean;
@@ -33,6 +49,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
     database: "postgres",
     filePath: "",
   });
+  const [portText, setPortText] = useState<string>("5432");
   const [testResult, setTestResult] = useState<{ success: boolean; text: string } | null>(null);
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -56,6 +73,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
       const p = profiles.find((item) => item.id === selectedId);
       if (p) {
         setForm(p);
+        setPortText(p.port ? String(p.port) : (p.type === "postgres" ? "5432" : "3306"));
         const defaults = ["Default", "Production", "Staging", "Development", "Local"];
         const existing = profiles.map((pr) => pr.group).filter(Boolean);
         const allGroups = new Set([...defaults, ...existing]);
@@ -80,13 +98,39 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
         database: prev.filePath || "./data/database.sqlite",
       }));
     } else {
+      const defaultPort = type === "postgres" ? 5432 : 3306;
+      setPortText(String(defaultPort));
       setForm((prev) => ({
         ...prev,
         type,
-        port: type === "postgres" ? 5432 : 3306,
+        port: defaultPort,
         user: type === "postgres" ? "postgres" : "root",
         database: type === "postgres" ? "postgres" : "mysql",
       }));
+    }
+  };
+
+  const getCleanForm = (): Partial<ConnectionProfile> => {
+    const finalPort = portText ? parseInt(portText, 10) : (form.type === "postgres" ? 5432 : 3306);
+    return {
+      ...form,
+      port: isNaN(finalPort) ? (form.type === "postgres" ? 5432 : 3306) : finalPort,
+      group: form.group ? form.group.trim() : "Default",
+    };
+  };
+
+  const handleBrowseSqliteFile = async () => {
+    try {
+      const selectedPath = await apiClient.selectFile();
+      if (selectedPath) {
+        setForm((prev) => ({
+          ...prev,
+          filePath: selectedPath,
+          database: selectedPath,
+        }));
+      }
+    } catch (err) {
+      console.error("Browse file error", err);
     }
   };
 
@@ -94,7 +138,8 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
     setTesting(true);
     setTestResult(null);
     try {
-      const res = await onTestConnection(form);
+      const cleanData = getCleanForm();
+      const res = await onTestConnection(cleanData);
       if (res.success) {
         setTestResult({ success: true, text: "Connection test successful" });
       } else {
@@ -111,10 +156,8 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
   const handleSave = async () => {
     setSaving(true);
     try {
-      await onSaveProfile({
-        ...form,
-        group: form.group ? form.group.trim() : "Default",
-      });
+      const cleanData = getCleanForm();
+      await onSaveProfile(cleanData);
       setTestResult({ success: true, text: "Profile saved successfully" });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -125,16 +168,17 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
   };
 
   const handleConnect = async () => {
-    if (form.type !== "sqlite" && !form.host) return;
-    if (form.type === "sqlite" && !form.filePath && !form.database) return;
+    const cleanData = getCleanForm();
+    if (cleanData.type !== "sqlite" && !cleanData.host) return;
+    if (cleanData.type === "sqlite" && !cleanData.filePath && !cleanData.database) return;
 
     setConnecting(true);
     setTestResult(null);
     try {
-      const res = await onTestConnection(form);
+      const res = await onTestConnection(cleanData);
       if (res.success) {
         setTestResult({ success: true, text: "Connected successfully!" });
-        onConnect(form as ConnectionProfile);
+        onConnect(cleanData as ConnectionProfile);
         setTimeout(() => {
           setConnecting(false);
           onClose();
@@ -152,6 +196,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
 
   const handleCreateNew = () => {
     setSelectedId(null);
+    setPortText("5432");
     setForm({
       name: "New Connection",
       type: "postgres",
@@ -248,7 +293,8 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
               <div className="field-group flex-2">
                 <label className="field-label">Profile Name</label>
                 <input
-                  className="input"
+                  className="input form-control"
+                  placeholder="e.g. Production Postgres"
                   value={form.name || ""}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
                 />
@@ -258,8 +304,8 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
                 {isCustomGroup ? (
                   <div className="group-input-wrap">
                     <input
-                      className="input"
-                      placeholder="Type new group name..."
+                      className="input form-control"
+                      placeholder="New group..."
                       value={form.group || ""}
                       onChange={(e) => setForm({ ...form, group: e.target.value })}
                       autoFocus
@@ -273,30 +319,33 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
                       }}
                       title="Select existing group"
                     >
-                      Select Group
+                      Choose
                     </button>
                   </div>
                 ) : (
-                  <select
-                    className="select"
-                    value={availableGroups.includes(form.group || "Default") ? (form.group || "Default") : "__NEW__"}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      if (val === "__NEW__") {
-                        setIsCustomGroup(true);
-                        setForm({ ...form, group: "" });
-                      } else {
-                        setForm({ ...form, group: val });
-                      }
-                    }}
-                  >
-                    {availableGroups.map((g) => (
-                      <option key={g} value={g}>
-                        📁 {g}
-                      </option>
-                    ))}
-                    <option value="__NEW__">➕ Create New Group...</option>
-                  </select>
+                  <div className="select-container">
+                    <select
+                      className="select form-control custom-select"
+                      value={availableGroups.includes(form.group || "Default") ? (form.group || "Default") : "__NEW__"}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === "__NEW__") {
+                          setIsCustomGroup(true);
+                          setForm({ ...form, group: "" });
+                        } else {
+                          setForm({ ...form, group: val });
+                        }
+                      }}
+                    >
+                      {availableGroups.map((g) => (
+                        <option key={g} value={g}>
+                          📁 {g}
+                        </option>
+                      ))}
+                      <option value="__NEW__">➕ Create New Group...</option>
+                    </select>
+                    <ChevronDown size={14} className="select-chevron" />
+                  </div>
                 )}
               </div>
             </div>
@@ -334,16 +383,27 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
             {form.type === "sqlite" ? (
               <div className="field-group">
                 <label className="field-label">SQLite File Path (.db, .sqlite, .sqlite3)</label>
-                <input
-                  className="input font-mono"
-                  placeholder="/Users/username/data/database.db or ./data/db.sqlite"
-                  value={form.filePath || form.database || ""}
-                  onChange={(e) => setForm({ ...form, filePath: e.target.value, database: e.target.value })}
-                />
+                <div className="file-input-wrapper">
+                  <input
+                    className="input font-mono form-control file-path-input"
+                    placeholder="/Users/name/data/db.sqlite or ./data/db.sqlite"
+                    value={form.filePath || form.database || ""}
+                    onChange={(e) => setForm({ ...form, filePath: e.target.value, database: e.target.value })}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-secondary browse-btn"
+                    onClick={handleBrowseSqliteFile}
+                    title="Click to browse SQLite file"
+                  >
+                    <FolderOpen size={14} />
+                    <span>Browse...</span>
+                  </button>
+                </div>
                 <div className="sqlite-info-box">
                   <Folder size={13} className="info-icon" />
                   <span>
-                    <strong>Browser / Server File Path Guidance:</strong> Please enter the absolute file path on your server (e.g. <code>/Users/name/data/database.sqlite</code>) or relative path (e.g. <code>./data/database.sqlite</code>).
+                    Click <strong>Browse...</strong> to select a <code>.sqlite</code>, <code>.db</code>, or <code>.sqlite3</code> file from your computer.
                   </span>
                 </div>
               </div>
@@ -353,7 +413,8 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
                   <div className="field-group flex-2">
                     <label className="field-label">Host</label>
                     <input
-                      className="input font-mono"
+                      className="input font-mono form-control"
+                      placeholder="localhost"
                       value={form.host || ""}
                       onChange={(e) => setForm({ ...form, host: e.target.value })}
                     />
@@ -361,28 +422,37 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
                   <div className="field-group flex-1">
                     <label className="field-label">Port</label>
                     <input
-                      type="number"
-                      className="input font-mono"
-                      value={form.port || (form.type === "postgres" ? 5432 : 3306)}
-                      onChange={(e) => setForm({ ...form, port: Number(e.target.value) })}
+                      type="text"
+                      inputMode="numeric"
+                      className="input font-mono form-control"
+                      placeholder={form.type === "postgres" ? "5432" : "3306"}
+                      value={portText}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === "" || /^\d+$/.test(val)) {
+                          setPortText(val);
+                        }
+                      }}
                     />
                   </div>
                 </div>
 
                 <div className="field-row">
-                  <div className="field-group">
+                  <div className="field-group flex-1">
                     <label className="field-label">User</label>
                     <input
-                      className="input"
+                      className="input form-control"
+                      placeholder="postgres"
                       value={form.user || ""}
                       onChange={(e) => setForm({ ...form, user: e.target.value })}
                     />
                   </div>
-                  <div className="field-group">
+                  <div className="field-group flex-1">
                     <label className="field-label">Password</label>
                     <input
                       type="password"
-                      className="input"
+                      className="input form-control"
+                      placeholder="••••••••"
                       value={form.password || ""}
                       onChange={(e) => setForm({ ...form, password: e.target.value })}
                     />
@@ -392,7 +462,8 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
                 <div className="field-group">
                   <label className="field-label">Database Name</label>
                   <input
-                    className="input font-mono"
+                    className="input font-mono form-control"
+                    placeholder={form.type === "postgres" ? "postgres" : "mysql"}
                     value={form.database || ""}
                     onChange={(e) => setForm({ ...form, database: e.target.value })}
                   />
@@ -432,6 +503,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
                     handleCreateNew();
                   }}
                   disabled={connecting}
+                  title="Delete Profile"
                 >
                   <Trash2 size={13} />
                 </button>
@@ -583,28 +655,75 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
 
         .profile-editor-panel {
           flex: 1;
-          padding: 16px;
+          padding: 18px 20px;
           display: flex;
           flex-direction: column;
-          gap: 12px;
+          gap: 14px;
           overflow-y: auto;
         }
 
-        .field-group { display: flex; flex-direction: column; gap: 4px; }
-        .field-label { font-size: 10px; font-weight: 600; color: var(--text-sub); text-transform: uppercase; }
+        .field-group { display: flex; flex-direction: column; gap: 5px; }
+        .field-label { font-size: 10px; font-weight: 600; color: var(--text-sub); text-transform: uppercase; letter-spacing: 0.3px; }
 
-        .field-row { display: flex; gap: 10px; }
+        .field-row { display: flex; gap: 12px; align-items: flex-start; }
         .flex-1 { flex: 1; }
         .flex-2 { flex: 2; }
+
+        .form-control {
+          height: 34px !important;
+          min-height: 34px !important;
+          box-sizing: border-box !important;
+          width: 100%;
+        }
+
+        .select-container {
+          position: relative;
+          width: 100%;
+          display: flex;
+          align-items: center;
+        }
+
+        .custom-select {
+          appearance: none;
+          -webkit-appearance: none;
+          padding-right: 28px !important;
+          cursor: pointer;
+          background-color: var(--bg-card);
+        }
+
+        .select-chevron {
+          position: absolute;
+          right: 8px;
+          pointer-events: none;
+          color: var(--text-muted);
+        }
+
+        .file-input-wrapper {
+          display: flex;
+          gap: 8px;
+          align-items: center;
+        }
+
+        .file-path-input {
+          flex: 1;
+        }
+
+        .browse-btn {
+          height: 34px;
+          padding: 0 12px;
+          white-space: nowrap;
+          flex-shrink: 0;
+        }
 
         .engine-options { display: flex; gap: 10px; }
         .engine-card {
           flex: 1;
+          height: 36px;
           display: flex;
           align-items: center;
           justify-content: center;
           gap: 8px;
-          padding: 8px;
+          padding: 0 10px;
           border-radius: var(--radius-sm);
           border: 1px solid var(--border-light);
           background: var(--bg-tertiary);
@@ -651,6 +770,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
         .group-input-wrap {
           display: flex;
           gap: 6px;
+          height: 34px;
         }
 
         .btn-toggle-group {
@@ -662,6 +782,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           border-radius: var(--radius-sm);
           cursor: pointer;
           white-space: nowrap;
+          height: 34px;
         }
         .btn-toggle-group:hover {
           color: var(--text-main);

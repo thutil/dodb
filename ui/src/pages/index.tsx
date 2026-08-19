@@ -1,7 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useState, useEffect, useCallback } from "react";
 import Head from "next/head";
-import pkg from "../../../package.json";
 import { Header } from "../components/Header";
 import { SidebarExplorer } from "../components/SidebarExplorer";
 import { ConnectionModal } from "../components/ConnectionModal";
@@ -14,7 +13,9 @@ import { SchemaDiagram } from "../components/SchemaDiagram";
 import { ConnectionProfile, ColumnInfo, TableRowData, QueryExecutionResult, ColumnFilter } from "../types";
 import { apiClient } from "../utils/apiClient";
 
+const APP_VERSION = "1.0.0";
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:5820/api";
+
 
 export default function Home() {
   const [theme, setTheme] = useState<"dark" | "light">("dark");
@@ -364,13 +365,18 @@ export default function Home() {
                 onSearchChange={setSearchQuery}
                 filters={filters}
                 onFiltersChange={setFilters}
+                theme={theme}
               />
             ) : activeView === "sql" ? (
               <SqlConsole
                 activeDatabase={activeDatabase}
                 activeTable={activeTable}
+                tables={tables}
+                columns={columns}
+                theme={theme}
                 onExecuteSql={handleExecuteSql}
               />
+
             ) : activeView === "diagram" ? (
               <SchemaDiagram
                 activeProfile={activeProfile}
@@ -381,10 +387,11 @@ export default function Home() {
             ) : (
               <AdminPanel
                 activeProfile={activeProfile}
+                activeDatabase={activeDatabase}
                 databases={databases}
                 onRefreshDatabases={fetchDatabases}
-                apiBase={API_BASE}
               />
+
             )}
           </main>
         </div>
@@ -417,16 +424,17 @@ export default function Home() {
 
         <footer className="app-footer">
           <div className="footer-left">
-            <span className="footer-version">dodb v{pkg.version}</span>
+            <span className="footer-version">dodb v{APP_VERSION}</span>
             <span className="footer-dot">•</span>
             <span className="footer-status">
               DB Engine: {activeProfile ? activeProfile.type.toUpperCase() : "Offline"}
             </span>
           </div>
           <div className="footer-right">
-            <span className="footer-text">Local API: http://localhost:5820</span>
+            <span className="footer-text">Native Tauri IPC</span>
           </div>
         </footer>
+
       </div>
 
       <style jsx>{`

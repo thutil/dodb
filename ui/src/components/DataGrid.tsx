@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import Editor from "@monaco-editor/react";
 import {
   Table2,
   RefreshCw,
@@ -19,7 +20,11 @@ import {
   Filter,
   ArrowUp,
   ArrowDown,
-  ArrowUpDown
+  ArrowUpDown,
+  Copy,
+  Code2,
+  FileJson,
+  WrapText
 } from "lucide-react";
 import { ColumnInfo, TableRowData, ConnectionProfile, ColumnFilter, FilterOperator } from "../types";
 
@@ -50,6 +55,7 @@ interface DataGridProps {
   onSearchChange?: (query: string) => void;
   filters?: ColumnFilter[];
   onFiltersChange?: (filters: ColumnFilter[]) => void;
+  theme?: "dark" | "light";
 }
 
 export const DataGrid: React.FC<DataGridProps> = ({
@@ -72,12 +78,20 @@ export const DataGrid: React.FC<DataGridProps> = ({
   onSearchChange,
   filters = [],
   onFiltersChange,
+  theme = "dark",
 }) => {
   const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
 
+  // View Mode: Table vs JSON
+  const [viewMode, setViewMode] = useState<"table" | "json">("table");
+  const [jsonFormat, setJsonFormat] = useState<"pretty" | "compact">("pretty");
+  const [jsonWrap, setJsonWrap] = useState(true);
+  const [copied, setCopied] = useState(false);
+  const [cellCopied, setCellCopied] = useState(false);
+
   const [selectedCell, setSelectedCell] = useState<{ row: number; col: string; val: unknown } | null>(null);
   const [exportModalOpen, setExportModalOpen] = useState(false);
-  const [exportType, setExportType] = useState<"sql" | "csv">("sql");
+  const [exportType, setExportType] = useState<"sql" | "csv" | "json">("sql");
   const [exportContent, setExportContent] = useState<string>("");
   const [exporting, setExporting] = useState(false);
   
@@ -317,10 +331,56 @@ export const DataGrid: React.FC<DataGridProps> = ({
     }
   };
 
-  const handleFetchExport = async (type: "sql" | "csv") => {
+  // Active merged data for JSON view
+  const activeMergedRows = rows
+    .map((r, idx) => {
+      const pkKey = getPkKey(r, idx);
+      if (deletedRowKeys.has(pkKey)) return null;
+      return { ...r, ...(editedCells[pkKey] || {}) };
+    })
+    .filter((r): r is TableRowData => r !== null);
+  
+  const allJsonRows = [...activeMergedRows, ...newRows];
+  const formattedJson = jsonFormat === "pretty"
+    ? JSON.stringify(allJsonRows, null, 2)
+    : JSON.stringify(allJsonRows);
+
+  const handleCopyJson = (text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleCopyCell = (text: string) => {
+    navigator.clipboard.writeText(text);
+    setCellCopied(true);
+    setTimeout(() => setCellCopied(false), 2000);
+  };
+
+  const handleDownloadJson = (filename?: string, content?: string) => {
+    const dataToDownload = content || formattedJson;
+    const name = filename || `${tableName || "data"}_page_${page + 1}.json`;
+    const blob = new Blob([dataToDownload], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleFetchExport = async (type: "sql" | "csv" | "json") => {
     if (!activeProfile || !activeDatabase || !tableName) return;
     setExporting(true);
     setExportType(type);
+    setExportModalOpen(true);
+    if (type === "json") {
+      setExportContent(JSON.stringify(allJsonRows, null, 2));
+      setExporting(false);
+      return;
+    }
     try {
       const endpoint = type === "sql" ? "export-sql" : "export-csv";
       const apiBase = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:5820/api";
@@ -336,6 +396,8 @@ export const DataGrid: React.FC<DataGridProps> = ({
       if (res.ok) {
         const data = await res.json();
         setExportContent(type === "sql" ? data.sql : data.csv);
+      } else {
+        setExportContent(`Failed to export ${type.toUpperCase()}`);
       }
     } catch {
       setExportContent("Export error");
@@ -346,7 +408,8 @@ export const DataGrid: React.FC<DataGridProps> = ({
 
   const downloadExportFile = () => {
     const element = document.createElement("a");
-    const file = new Blob([exportContent], { type: "text/plain" });
+    const mimeType = exportType === "json" ? "application/json" : "text/plain";
+    const file = new Blob([exportContent], { type: mimeType });
     element.href = URL.createObjectURL(file);
     element.download = `${tableName}_export.${exportType}`;
     document.body.appendChild(element);
@@ -408,30 +471,105 @@ export const DataGrid: React.FC<DataGridProps> = ({
           <Table2 size={15} className="table-icon" />
           <h2 className="table-name-text">{tableName}</h2>
           <span className="count-pill">{totalRows.toLocaleString()} rows</span>
+
+          {/* View Mode Segmented Control (Table vs JSON) */}
+          <div className="view-mode-toggle">
+            <button
+              className={`view-toggle-btn ${viewMode === "table" ? "active" : ""}`}
+              onClick={() => setViewMode("table")}
+              title="Table Grid View"
+            >
+              <Table2 size={12} />
+              <span>Table</span>
+            </button>
+            <button
+              className={`view-toggle-btn ${viewMode === "json" ? "active" : ""}`}
+              onClick={() => setViewMode("json")}
+              title="JSON View"
+            >
+              <Code2 size={12} />
+              <span>JSON</span>
+            </button>
+          </div>
         </div>
 
         <div className="bar-actions">
-          <button
-            className={`btn btn-secondary ${filters.length > 0 ? "filter-active-btn" : ""}`}
-            onClick={() => setIsFilterPanelOpen(!isFilterPanelOpen)}
-          >
-            <Filter size={12} />
-            <span>Filter {filters.length > 0 ? `(${filters.length})` : ""}</span>
-          </button>
+          {viewMode === "json" ? (
+            <div className="json-toolbar-group">
+              <div className="json-format-toggle">
+                <button
+                  className={`btn btn-secondary btn-sm ${jsonFormat === "pretty" ? "active-format" : ""}`}
+                  onClick={() => setJsonFormat("pretty")}
+                  title="Pretty Format (Indented)"
+                >
+                  Pretty
+                </button>
+                <button
+                  className={`btn btn-secondary btn-sm ${jsonFormat === "compact" ? "active-format" : ""}`}
+                  onClick={() => setJsonFormat("compact")}
+                  title="Compact Format (Minified)"
+                >
+                  Compact
+                </button>
+              </div>
 
-          <button className="btn btn-secondary" onClick={handleAddRow}>
-            <Plus size={12} />
-            <span>Add Row</span>
-          </button>
+              <button
+                className={`btn btn-secondary btn-sm ${jsonWrap ? "active-format" : ""}`}
+                onClick={() => setJsonWrap(!jsonWrap)}
+                title="Toggle Word Wrap"
+              >
+                <WrapText size={12} />
+                <span>Wrap</span>
+              </button>
 
-          <button className="btn btn-secondary" onClick={() => handleFetchExport("sql")}>
-            <Download size={12} />
-            <span>Export SQL</span>
-          </button>
-          <button className="btn btn-secondary" onClick={() => handleFetchExport("csv")}>
-            <FileCode size={12} />
-            <span>Export CSV</span>
-          </button>
+              <button
+                className="btn btn-secondary"
+                onClick={() => handleCopyJson(formattedJson)}
+                title="Copy formatted JSON to clipboard"
+              >
+                {copied ? <Check size={12} className="copy-check-icon" /> : <Copy size={12} />}
+                <span>{copied ? "Copied!" : "Copy JSON"}</span>
+              </button>
+
+              <button
+                className="btn btn-secondary"
+                onClick={() => handleDownloadJson()}
+                title="Download JSON file"
+              >
+                <Download size={12} />
+                <span>Download .json</span>
+              </button>
+            </div>
+          ) : (
+            <>
+              <button
+                className={`btn btn-secondary ${filters.length > 0 ? "filter-active-btn" : ""}`}
+                onClick={() => setIsFilterPanelOpen(!isFilterPanelOpen)}
+              >
+                <Filter size={12} />
+                <span>Filter {filters.length > 0 ? `(${filters.length})` : ""}</span>
+              </button>
+
+              <button className="btn btn-secondary" onClick={handleAddRow}>
+                <Plus size={12} />
+                <span>Add Row</span>
+              </button>
+
+              <button className="btn btn-secondary" onClick={() => handleFetchExport("json")}>
+                <FileJson size={12} />
+                <span>Export JSON</span>
+              </button>
+              <button className="btn btn-secondary" onClick={() => handleFetchExport("sql")}>
+                <Download size={12} />
+                <span>Export SQL</span>
+              </button>
+              <button className="btn btn-secondary" onClick={() => handleFetchExport("csv")}>
+                <FileCode size={12} />
+                <span>Export CSV</span>
+              </button>
+            </>
+          )}
+
           <div className="search-wrap">
             <Search size={12} className="search-icon" />
             <input
@@ -565,6 +703,30 @@ export const DataGrid: React.FC<DataGridProps> = ({
       <div className="grid-table-area">
         {loading ? (
           <div className="grid-state-msg">Loading records...</div>
+        ) : viewMode === "json" ? (
+          <div className="json-view-wrapper">
+            <Editor
+              height="100%"
+              language="json"
+              theme={theme === "dark" ? "vs-dark" : "light"}
+              value={formattedJson}
+              options={{
+                readOnly: true,
+                fontSize: 12,
+                fontFamily: "JetBrains Mono, Menlo, Monaco, 'Courier New', monospace",
+                lineNumbers: "on",
+                minimap: { enabled: false },
+                scrollBeyondLastLine: false,
+                automaticLayout: true,
+                tabSize: 2,
+                wordWrap: jsonWrap ? "on" : "off",
+                folding: true,
+                padding: { top: 10, bottom: 10 },
+                renderLineHighlight: "all",
+                smoothScrolling: true,
+              }}
+            />
+          </div>
         ) : (
           <table className="pro-table">
             <thead>
@@ -825,12 +987,29 @@ export const DataGrid: React.FC<DataGridProps> = ({
           <div className="cell-card" onClick={(e) => e.stopPropagation()}>
             <div className="cell-card-header">
               <div className="cell-card-title">
-                <FileText size={14} />
+                <FileText size={14} className="cell-modal-icon" />
                 <span>Column: {selectedCell.col}</span>
               </div>
-              <button className="icon-close-btn" onClick={() => setSelectedCell(null)}>
-                ×
-              </button>
+              <div className="cell-card-actions">
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    const text = selectedCell.val === null
+                      ? "null"
+                      : typeof selectedCell.val === "object"
+                      ? JSON.stringify(selectedCell.val, null, 2)
+                      : String(selectedCell.val);
+                    handleCopyCell(text);
+                  }}
+                  title="Copy value to clipboard"
+                >
+                  {cellCopied ? <Check size={11} className="copy-check-icon" /> : <Copy size={11} />}
+                  <span>{cellCopied ? "Copied!" : "Copy"}</span>
+                </button>
+                <button className="icon-close-btn" onClick={() => setSelectedCell(null)}>
+                  ×
+                </button>
+              </div>
             </div>
             <textarea
               readOnly
@@ -913,7 +1092,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
         .meta-group {
           display: flex;
           align-items: center;
-          gap: 8px;
+          gap: 10px;
         }
         .table-icon { color: var(--accent-blue); }
         .table-name-text { font-size: 14px; font-weight: 700; }
@@ -926,7 +1105,64 @@ export const DataGrid: React.FC<DataGridProps> = ({
           font-weight: 500;
         }
 
+        /* View Mode Segmented Switch */
+        .view-mode-toggle {
+          display: inline-flex;
+          background: var(--bg-tertiary);
+          padding: 2px;
+          border-radius: 6px;
+          border: 1px solid var(--border-light);
+          gap: 2px;
+          margin-left: 4px;
+        }
+        .view-toggle-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          background: transparent;
+          border: none;
+          color: var(--text-muted);
+          padding: 3px 8px;
+          border-radius: 4px;
+          font-size: 11px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.15s ease;
+        }
+        .view-toggle-btn:hover {
+          color: var(--text-main);
+        }
+        .view-toggle-btn.active {
+          background: var(--accent-blue);
+          color: #ffffff;
+          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+        }
+
         .bar-actions { display: flex; gap: 8px; align-items: center; }
+        
+        .json-toolbar-group {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .json-format-toggle {
+          display: inline-flex;
+          background: var(--bg-tertiary);
+          padding: 2px;
+          border-radius: 5px;
+          border: 1px solid var(--border-light);
+          gap: 2px;
+        }
+        .active-format {
+          background: rgba(59, 130, 246, 0.2) !important;
+          color: var(--accent-blue) !important;
+          border-color: rgba(59, 130, 246, 0.4) !important;
+          font-weight: 600;
+        }
+        .copy-check-icon {
+          color: var(--accent-green);
+        }
+
         .search-wrap { position: relative; display: flex; align-items: center; }
         .search-icon { position: absolute; left: 8px; color: var(--text-muted); }
         .search-input { padding-left: 26px; width: 160px; font-size: 11px; }
@@ -959,6 +1195,13 @@ export const DataGrid: React.FC<DataGridProps> = ({
         .grid-table-area {
           flex: 1;
           overflow: auto;
+          position: relative;
+        }
+
+        .json-view-wrapper {
+          width: 100%;
+          height: 100%;
+          background: var(--bg-content);
           position: relative;
         }
 
@@ -1145,6 +1388,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
         }
 
         .edit-icon { color: var(--accent-blue); }
+        .cell-modal-icon { color: var(--accent-blue); }
         .cell-card-header {
           display: flex;
           justify-content: space-between;
@@ -1155,6 +1399,11 @@ export const DataGrid: React.FC<DataGridProps> = ({
           align-items: center;
           gap: 6px;
           font-weight: 600;
+        }
+        .cell-card-actions {
+          display: flex;
+          align-items: center;
+          gap: 6px;
         }
         .icon-close-btn {
           background: transparent;
