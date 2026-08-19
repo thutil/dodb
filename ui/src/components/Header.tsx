@@ -4,6 +4,8 @@ import { ConnectionProfile } from "../types";
 
 interface HeaderProps {
   activeProfile: ConnectionProfile | null;
+  profiles?: ConnectionProfile[];
+  onSelectProfile?: (profile: ConnectionProfile) => void;
   activeDatabase: string;
   databases: string[];
   onSelectDatabase: (db: string) => void;
@@ -18,6 +20,8 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({
   activeProfile,
+  profiles,
+  onSelectProfile,
   activeDatabase,
   databases,
   onSelectDatabase,
@@ -36,8 +40,7 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="brand" title="dodb Database Manager">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/icon.png" alt="dodb mascot" className="brand-mascot-img" />
-          <span className="brand-title">dodb</span>
-          <span className="brand-badge">macOS</span>
+          <span className="brand-title">DODB</span>
         </div>
       </div>
 
@@ -88,9 +91,32 @@ export const Header: React.FC<HeaderProps> = ({
         {activeProfile ? (
           <div className="active-conn-chip">
             <span className="status-indicator online" />
-            <span className="profile-title" title={activeProfile.name}>
-              {activeProfile.name}
-            </span>
+
+            {profiles && profiles.length > 1 ? (
+              <div className="profile-select-wrap">
+                <select
+                  className="profile-switcher-select"
+                  value={activeProfile.id}
+                  onChange={(e) => {
+                    const found = profiles.find((p) => p.id === e.target.value);
+                    if (found && onSelectProfile) onSelectProfile(found);
+                  }}
+                  title="Switch Connection Profile"
+                >
+                  {profiles.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={10} className="profile-select-chevron" />
+              </div>
+            ) : (
+              <span className="profile-title" title={activeProfile.name}>
+                {activeProfile.name}
+              </span>
+            )}
+
             <span className={`db-type-badge ${activeProfile.type}`}>
               {activeProfile.type.toUpperCase()}
             </span>
@@ -335,6 +361,39 @@ export const Header: React.FC<HeaderProps> = ({
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
+        }
+
+        .profile-select-wrap {
+          position: relative;
+          display: flex;
+          align-items: center;
+        }
+
+        .profile-switcher-select {
+          background: transparent;
+          border: none;
+          color: var(--text-main);
+          font-size: 11px;
+          font-weight: 600;
+          padding: 0 16px 0 0;
+          outline: none;
+          appearance: none;
+          -webkit-appearance: none;
+          cursor: pointer;
+          max-width: 120px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .profile-switcher-select:hover {
+          color: var(--accent-blue);
+        }
+
+        :global(.profile-select-chevron) {
+          position: absolute;
+          right: 2px;
+          color: var(--text-muted);
+          pointer-events: none;
         }
 
         .db-type-badge {

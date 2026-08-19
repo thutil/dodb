@@ -63,6 +63,22 @@ export const AuditLogDrawer: React.FC<AuditLogDrawerProps> = ({
     }
   }, [isOpen, fetchLogs]);
 
+  // Handle ESC key to close
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (selectedLog) {
+          setSelectedLog(null);
+        } else {
+          onClose();
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, selectedLog, onClose]);
+
   if (!isOpen) return null;
 
   const handleClearLogs = () => {

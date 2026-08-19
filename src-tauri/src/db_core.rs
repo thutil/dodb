@@ -91,7 +91,7 @@ pub async fn get_pool(
             };
             format!("{}:sqlite:{}", profile.id, path)
         }
-        _ => format!("{}:{:?}:{}", profile.id, profile.r#type, db_name),
+        _ => format!("{}:{}:{}:{}:{:?}:{}", profile.id, profile.host, profile.port, profile.user, profile.r#type, db_name),
     };
 
     {
@@ -179,6 +179,89 @@ pub async fn get_pool(
     pools.insert(cache_key, pool.clone());
 
     Ok(pool)
+}
+
+pub async fn test_connection_standalone(profile: &ConnectionProfile) -> Result<bool, String> {
+    let timeout = std::time::Duration::from_secs(10);
+    match profile.r#type {
+        SupportedDB::Postgres => {
+            let db_name = if !profile.database.trim().is_empty() {
+                profile.database.trim().to_string()
+            } else {
+                "postgres".to_string()
+            };
+            let url = format!(
+                "postgres://{}:{}@{}:{}/{}",
+                profile.user, profile.password, profile.host, profile.port, db_name
+            );
+            let connect_opts = url.parse::<sqlx::postgres::PgConnectOptions>()
+                .unwrap_or_else(|_| {
+                    sqlx::postgres::PgConnectOptions::new()
+                        .host(&profile.host)
+                        .port(profile.port)
+                        .username(&profile.user)
+                        .password(&profile.password)
+                        .database(&db_name)
+                });
+            let pool = match sqlx::postgres::PgPoolOptions::new()
+                .max_connections(1)
+                .acquire_timeout(timeout)
+                .connect_with(connect_opts.clone().ssl_mode(sqlx::postgres::PgSslMode::Prefer))
+                .await {
+                    Ok(p) => p,
+                    Err(err) => {
+                        let err_msg = err.to_string();
+                        if err_msg.contains("SSLRequest") || err_msg.contains("tls") || err_msg.contains("ssl") || err_msg.contains("0x5a") {
+                            sqlx::postgres::PgPoolOptions::new()
+                                .max_connections(1)
+                                .acquire_timeout(timeout)
+                                .connect_with(connect_opts.ssl_mode(sqlx::postgres::PgSslMode::Disable))
+                                .await
+                                .map_err(|e2| format!("Failed to connect to Postgres database '{}': {}", db_name, e2))?
+                        } else {
+                            return Err(format!("Failed to connect to Postgres database '{}': {}", db_name, err));
+                        }
+                    }
+                };
+            pool.close().await;
+            Ok(true)
+        }
+        SupportedDB::Mariadb => {
+            let db_name = if !profile.database.trim().is_empty() {
+                profile.database.trim().to_string()
+            } else {
+                "mysql".to_string()
+            };
+            let url = format!(
+                "mysql://{}:{}@{}:{}/{}",
+                profile.user, profile.password, profile.host, profile.port, db_name
+            );
+            let pool = sqlx::mysql::MySqlPoolOptions::new()
+                .max_connections(1)
+                .acquire_timeout(timeout)
+                .connect(&url)
+                .await
+                .map_err(|e| format!("Failed to connect to MySQL database '{}': {}", db_name, e))?;
+            pool.close().await;
+            Ok(true)
+        }
+        SupportedDB::Sqlite => {
+            let path = if !profile.database.trim().is_empty() && profile.database.trim() != "main" && profile.database.trim() != ":memory:" {
+                profile.database.trim()
+            } else {
+                profile.file_path.as_deref().unwrap_or(":memory:")
+            };
+            let url = format!("sqlite://{}", path);
+            let pool = sqlx::sqlite::SqlitePoolOptions::new()
+                .max_connections(1)
+                .acquire_timeout(timeout)
+                .connect(&url)
+                .await
+                .map_err(|e| format!("Failed to open SQLite database '{}': {}", path, e))?;
+            pool.close().await;
+            Ok(true)
+        }
+    }
 }
 
 pub async fn execute_query(pool: &DbPool, query: &str) -> Result<Vec<serde_json::Value>, String> {

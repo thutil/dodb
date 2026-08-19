@@ -8,6 +8,10 @@ export const apiClient = {
   saveProfile: async (profile: any) => {
     return await invoke("save_profile", { profile });
   },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  saveAllProfiles: async (profiles: any[]) => {
+    return await invoke("save_all_profiles", { profiles });
+  },
   deleteProfile: async (id: string) => {
     return await invoke("delete_profile", { id });
   },

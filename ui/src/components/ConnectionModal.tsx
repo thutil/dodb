@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   Server,
   Plus,
@@ -7,7 +7,6 @@ import {
   CheckCircle2,
   XCircle,
   X,
-  Database,
   HardDrive,
   RefreshCw,
   Folder,
@@ -15,6 +14,11 @@ import {
   ChevronDown,
   ChevronRight,
   LogOut,
+  Edit2,
+  ArrowUp,
+  ArrowDown,
+  FolderPlus,
+  AlertTriangle,
 } from "lucide-react";
 import { ConnectionProfile, DBType } from "../types";
 import { apiClient } from "../utils/apiClient";
@@ -25,6 +29,7 @@ interface ConnectionModalProps {
   profiles: ConnectionProfile[];
   activeProfile?: ConnectionProfile | null;
   onSaveProfile: (profile: Partial<ConnectionProfile>) => Promise<void>;
+  onSaveAllProfiles?: (profiles: ConnectionProfile[]) => Promise<void>;
   onDeleteProfile: (id: string) => Promise<void>;
   onConnect: (profile: ConnectionProfile) => void;
   onDisconnect?: () => Promise<void> | void;
@@ -37,6 +42,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
   profiles,
   activeProfile,
   onSaveProfile,
+  onSaveAllProfiles,
   onDeleteProfile,
   onConnect,
   onDisconnect,
@@ -63,17 +69,67 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
   const [isCustomGroup, setIsCustomGroup] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
 
-  const availableGroups = Array.from(
-    new Set([
-      "Default",
-      "Production",
-      "Staging",
-      "Development",
-      "Local",
-      ...profiles.map((p) => p.group || "Default").filter(Boolean),
-    ])
-  );
+  // Group Management State
+  const [groupOrder, setGroupOrder] = useState<string[]>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("dodb_group_order");
+        if (saved) return JSON.parse(saved);
+      } catch {
+        // ignore
+      }
+    }
+    return [];
+  });
 
+  const [groupContextMenu, setGroupContextMenu] = useState<{ x: number; y: number; groupName: string } | null>(null);
+  const [renamingGroup, setRenamingGroup] = useState<{ oldName: string; newName: string } | null>(null);
+  const [deletingGroup, setDeletingGroup] = useState<string | null>(null);
+  const [confirmDeleteProfile, setConfirmDeleteProfile] = useState<ConnectionProfile | null>(null);
+
+  // Close context menu when clicking outside
+  useEffect(() => {
+    const handleWindowClick = () => setGroupContextMenu(null);
+    window.addEventListener("click", handleWindowClick);
+    return () => window.removeEventListener("click", handleWindowClick);
+  }, []);
+
+  // Escape key handler for all submodals and modal
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (confirmDeleteProfile) {
+          setConfirmDeleteProfile(null);
+        } else if (deletingGroup) {
+          setDeletingGroup(null);
+        } else if (renamingGroup) {
+          setRenamingGroup(null);
+        } else if (groupContextMenu) {
+          setGroupContextMenu(null);
+        } else {
+          onClose();
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, confirmDeleteProfile, deletingGroup, renamingGroup, groupContextMenu, onClose]);
+
+  const availableGroups = useMemo(() => {
+    return Array.from(
+      new Set([
+        "Default",
+        "Production",
+        "Staging",
+        "Development",
+        "Local",
+        ...profiles.map((p) => p.group || "Default").filter(Boolean),
+      ])
+    );
+  }, [profiles]);
+
+  // Initialize selected profile once when modal opens
   useEffect(() => {
     if (isOpen) {
       if (activeProfile) {
@@ -82,10 +138,11 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
         setSelectedId(profiles[0].id);
       }
     }
-  }, [isOpen, activeProfile, profiles, selectedId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
 
   useEffect(() => {
-    if (selectedId) {
+    if (selectedId && selectedId !== "__NEW__") {
       const p = profiles.find((item) => item.id === selectedId);
       if (p) {
         setForm(p);
@@ -101,8 +158,6 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
       }
     }
   }, [selectedId, profiles]);
-
-  if (!isOpen) return null;
 
   const handleTypeChange = (type: DBType) => {
     if (type === "sqlite") {
@@ -128,11 +183,15 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
 
   const getCleanForm = (): Partial<ConnectionProfile> => {
     const finalPort = portText ? parseInt(portText, 10) : (form.type === "postgres" ? 5432 : 3306);
-    return {
+    const data: Partial<ConnectionProfile> = {
       ...form,
       port: isNaN(finalPort) ? (form.type === "postgres" ? 5432 : 3306) : finalPort,
       group: form.group ? form.group.trim() : "Default",
     };
+    if (selectedId === "__NEW__") {
+      delete data.id;
+    }
+    return data;
   };
 
   const handleBrowseSqliteFile = async () => {
@@ -173,7 +232,10 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
     setSaving(true);
     try {
       const cleanData = getCleanForm();
-      await onSaveProfile(cleanData);
+      const saved = (await onSaveProfile(cleanData)) as ConnectionProfile | undefined;
+      if (saved && saved.id) {
+        setSelectedId(saved.id);
+      }
       setTestResult({ success: true, text: "Profile saved successfully" });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -196,22 +258,42 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
         setTestResult({ success: true, text: "Connected successfully!" });
         onConnect(cleanData as ConnectionProfile);
         setTimeout(() => {
-          setConnecting(false);
           onClose();
         }, 300);
       } else {
         setTestResult({ success: false, text: `Connection failed: ${res.error || "Could not reach database"}` });
-        setConnecting(false);
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setTestResult({ success: false, text: `Connection error: ${msg}` });
       setConnecting(false);
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  const handleConnectDirectly = async (profile: ConnectionProfile) => {
+    setConnecting(true);
+    setSelectedId(profile.id);
+    setTestResult(null);
+    try {
+      const res = await onTestConnection(profile);
+      if (res.success) {
+        onConnect(profile);
+        onClose();
+      } else {
+        setTestResult({ success: false, text: `Connection failed: ${res.error || "Could not reach database"}` });
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setTestResult({ success: false, text: `Connection error: ${msg}` });
+    } finally {
+      setConnecting(false);
     }
   };
 
   const handleCreateNew = () => {
-    setSelectedId(null);
+    setSelectedId("__NEW__");
     setPortText("5432");
     setForm({
       name: "New Connection",
@@ -224,7 +306,112 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
       database: "postgres",
       filePath: "",
     });
+    setIsCustomGroup(false);
     setTestResult(null);
+  };
+
+  const handleCreateNewInGroup = (groupName: string) => {
+    setSelectedId("__NEW__");
+    setPortText("5432");
+    setForm({
+      name: `New ${groupName} Connection`,
+      type: "postgres",
+      group: groupName,
+      host: "localhost",
+      port: 5432,
+      user: "postgres",
+      password: "",
+      database: "postgres",
+      filePath: "",
+    });
+    setIsCustomGroup(false);
+    setTestResult(null);
+  };
+
+  // Group Management Handlers
+  const handleRenameGroup = async (oldName: string, newName: string) => {
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === oldName) {
+      setRenamingGroup(null);
+      return;
+    }
+    const updated = profiles.map((p) => {
+      const currentG = p.group && p.group.trim() !== "" ? p.group : "Default";
+      if (currentG === oldName) {
+        return { ...p, group: trimmed };
+      }
+      return p;
+    });
+
+    if (onSaveAllProfiles) {
+      await onSaveAllProfiles(updated);
+    } else {
+      for (const p of updated) {
+        if (p.group === trimmed) {
+          await onSaveProfile(p);
+        }
+      }
+    }
+
+    const newOrder = groupOrder.map((g) => (g === oldName ? trimmed : g));
+    if (!newOrder.includes(trimmed)) newOrder.push(trimmed);
+    setGroupOrder(newOrder);
+    try {
+      localStorage.setItem("dodb_group_order", JSON.stringify(newOrder));
+    } catch {}
+
+    if ((form.group || "Default") === oldName) {
+      setForm((prev) => ({ ...prev, group: trimmed }));
+    }
+    setRenamingGroup(null);
+  };
+
+  const handleDeleteGroupConfirm = async (groupName: string, mode: "delete_all" | "move_default") => {
+    if (mode === "delete_all") {
+      const targets = profiles.filter((p) => (p.group || "Default") === groupName);
+      for (const p of targets) {
+        await onDeleteProfile(p.id);
+      }
+    } else {
+      const updated = profiles.map((p) => {
+        if ((p.group || "Default") === groupName) {
+          return { ...p, group: "Default" };
+        }
+        return p;
+      });
+      if (onSaveAllProfiles) {
+        await onSaveAllProfiles(updated);
+      } else {
+        for (const p of updated) {
+          if (p.group === "Default") {
+            await onSaveProfile(p);
+          }
+        }
+      }
+    }
+
+    const newOrder = groupOrder.filter((g) => g !== groupName);
+    setGroupOrder(newOrder);
+    try {
+      localStorage.setItem("dodb_group_order", JSON.stringify(newOrder));
+    } catch {}
+    setDeletingGroup(null);
+  };
+
+  const handleMoveGroup = (groupName: string, direction: -1 | 1) => {
+    const currentGroups = sortedGroupNames;
+    const idx = currentGroups.indexOf(groupName);
+    if (idx === -1) return;
+    const targetIdx = idx + direction;
+    if (targetIdx < 0 || targetIdx >= currentGroups.length) return;
+
+    const newOrder = [...currentGroups];
+    const [removed] = newOrder.splice(idx, 1);
+    newOrder.splice(targetIdx, 0, removed);
+    setGroupOrder(newOrder);
+    try {
+      localStorage.setItem("dodb_group_order", JSON.stringify(newOrder));
+    } catch {}
   };
 
   // Group profiles
@@ -237,78 +424,195 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
     groupedProfiles[gName].push(p);
   });
 
+  // Sort groups based on groupOrder
+  const allGroupKeys = Object.keys(groupedProfiles);
+  const sortedGroupNames = useMemo(() => {
+    return [...allGroupKeys].sort((a, b) => {
+      const idxA = groupOrder.indexOf(a);
+      const idxB = groupOrder.indexOf(b);
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      if (idxA !== -1) return -1;
+      if (idxB !== -1) return 1;
+      return a.localeCompare(b);
+    });
+  }, [allGroupKeys, groupOrder]);
+
   const toggleGroupCollapse = (gName: string) => {
     setCollapsedGroups((prev) => ({ ...prev, [gName]: !prev[gName] }));
   };
 
   const isCurrentActive = Boolean(activeProfile && selectedId === activeProfile.id);
+if (!isOpen) return null;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-top">
-          <div className="modal-title">
-            <Server size={16} className="modal-title-icon" />
-            <span>Database Connection Profiles</span>
+      <div className="modal-window" onClick={(e) => e.stopPropagation()}>
+        {/* macOS Style Window Top Bar */}
+        <div className="window-header">
+          <div className="window-title-left">
+            <div className="app-icon-badge">
+              <Server size={15} />
+            </div>
+            <div className="title-text-group">
+              <span className="window-main-title">Database Connections</span>
+              <span className="window-sub-title">Manage connection profiles and environments</span>
+            </div>
             {activeProfile && (
-              <span className="active-indicator-tag">
-                <span className="mini-pulse-dot" />
+              <span className="active-conn-pill">
+                <span className="pulse-green-dot" />
                 Active: {activeProfile.name}
               </span>
             )}
           </div>
-          <button className="icon-close-btn" onClick={onClose}>
-            <X size={16} />
+          <button className="window-close-btn" onClick={onClose} title="Close (Esc)">
+            <X size={15} />
           </button>
         </div>
 
-        <div className="modal-main">
-          <div className="profile-list-panel">
-            <button className="btn btn-primary new-btn" onClick={handleCreateNew}>
-              <Plus size={13} />
-              <span>New Profile</span>
-            </button>
-            <div className="profile-items-wrapper">
-              {Object.keys(groupedProfiles).length === 0 ? (
-                <div className="empty-profiles-notice">No profiles saved yet</div>
+        <div className="window-body">
+          {/* Left Master Sidebar */}
+          <aside className="conn-sidebar">
+            <div className="sidebar-top-action">
+              <button className="btn btn-primary new-conn-btn" onClick={handleCreateNew}>
+                <Plus size={14} />
+                <span>New Connection</span>
+              </button>
+            </div>
+
+            <div className="sidebar-scrollable-list">
+              {sortedGroupNames.length === 0 ? (
+                <div className="empty-profiles-notice">
+                  <FolderOpen size={24} className="empty-icon" />
+                  <span>No connection profiles</span>
+                </div>
               ) : (
-                Object.entries(groupedProfiles).map(([groupName, groupItems]) => {
+                sortedGroupNames.map((groupName) => {
+                  const groupItems = groupedProfiles[groupName] || [];
                   const isCollapsed = collapsedGroups[groupName];
                   return (
-                    <div key={groupName} className="group-folder-container">
+                    <div key={groupName} className="conn-group-section">
                       <div
-                        className="group-folder-header"
+                        className="conn-group-header"
                         onClick={() => toggleGroupCollapse(groupName)}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setGroupContextMenu({
+                            x: Math.min(e.clientX, window.innerWidth - 220),
+                            y: Math.min(e.clientY, window.innerHeight - 240),
+                            groupName,
+                          });
+                        }}
+                        title="Right-click for group options"
                       >
-                        {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
-                        <Folder size={13} className="folder-icon" />
-                        <span className="folder-title">{groupName}</span>
-                        <span className="folder-count">({groupItems.length})</span>
+                        <div className="group-header-left">
+                          <span className="group-arrow-icon">
+                            {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+                          </span>
+                          <Folder size={13} className="group-folder-icon" />
+                          <span className="group-name-text">{groupName}</span>
+                          <span className="group-count-badge">{groupItems.length}</span>
+                        </div>
+
+                        <div className="group-quick-actions" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            className="group-tool-btn"
+                            title="Move Group Up"
+                            onClick={() => handleMoveGroup(groupName, -1)}
+                          >
+                            <ArrowUp size={11} />
+                          </button>
+                          <button
+                            className="group-tool-btn"
+                            title="Move Group Down"
+                            onClick={() => handleMoveGroup(groupName, 1)}
+                          >
+                            <ArrowDown size={11} />
+                          </button>
+                          <button
+                            className="group-tool-btn"
+                            title="Add Connection in this Group"
+                            onClick={() => handleCreateNewInGroup(groupName)}
+                          >
+                            <FolderPlus size={11} />
+                          </button>
+                          <button
+                            className="group-tool-btn"
+                            title="Rename Group"
+                            onClick={() => setRenamingGroup({ oldName: groupName, newName: groupName })}
+                          >
+                            <Edit2 size={11} />
+                          </button>
+                          <button
+                            className="group-tool-btn danger-tool"
+                            title="Delete Group"
+                            onClick={() => setDeletingGroup(groupName)}
+                          >
+                            <Trash2 size={11} />
+                          </button>
+                        </div>
                       </div>
 
                       {!isCollapsed && (
-                        <div className="group-folder-items">
+                        <div className="conn-items-list">
+                          {selectedId === "__NEW__" && (form.group || "Default") === groupName && (
+                            <div className="conn-card-item active is-draft-card">
+                              <div className="engine-avatar new-avatar">
+                                <Plus size={13} />
+                              </div>
+                              <div className="conn-card-info">
+                                <div className="card-top-line">
+                                  <span className="card-title">{form.name || "New Connection"}</span>
+                                  <span className="draft-pill">Draft</span>
+                                </div>
+                                <span className="card-subtitle">
+                                  {form.type?.toUpperCase()} • {form.type === "sqlite" ? form.filePath || "database.sqlite" : `${form.host || "localhost"}:${portText}`}
+                                </span>
+                              </div>
+                            </div>
+                          )}
+
                           {groupItems.map((p) => {
                             const isConnected = activeProfile?.id === p.id;
+                            const isSelected = selectedId === p.id;
+                            const typeClass = p.type || "postgres";
+
                             return (
                               <div
                                 key={p.id}
-                                className={`profile-card-item ${selectedId === p.id ? "active" : ""} ${isConnected ? "is-connected" : ""}`}
+                                className={`conn-card-item ${isSelected ? "active" : ""} ${isConnected ? "is-connected" : ""}`}
                                 onClick={() => setSelectedId(p.id)}
+                                onDoubleClick={() => handleConnectDirectly(p)}
+                                title="Click to edit, Double-click to Connect"
                               >
-                                <div className="profile-icon-wrap">
-                                  <HardDrive size={13} className="profile-type-icon" />
-                                  {isConnected && <span className="item-connected-dot" />}
+                                <div className={`engine-avatar ${typeClass}-avatar`}>
+                                  <HardDrive size={13} />
+                                  {isConnected && <span className="avatar-online-dot" />}
                                 </div>
-                                <div className="profile-meta">
-                                  <div className="p-title-row">
-                                    <span className="p-title">{p.name}</span>
-                                    {isConnected && <span className="p-connected-badge">Connected</span>}
+
+                                <div className="conn-card-info">
+                                  <div className="card-top-line">
+                                    <span className="card-title">{p.name}</span>
+                                    {isConnected && <span className="connected-tag">Online</span>}
                                   </div>
-                                  <span className="p-sub">
-                                    {p.type.toUpperCase()} • {p.type === "sqlite" ? p.filePath || p.database : `${p.host}:${p.port}`}
+                                  <span className="card-subtitle">
+                                    <span className={`engine-type-tag ${typeClass}`}>{p.type.toUpperCase()}</span>
+                                    <span className="host-text">
+                                      {p.type === "sqlite" ? p.filePath || p.database : `${p.host}:${p.port}`}
+                                    </span>
                                   </span>
                                 </div>
+
+                                <button
+                                  className="quick-zap-btn"
+                                  title="Quick Connect"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleConnectDirectly(p);
+                                  }}
+                                >
+                                  <Zap size={11} />
+                                </button>
                               </div>
                             );
                           })}
@@ -319,462 +623,788 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
                 })
               )}
             </div>
-          </div>
+          </aside>
 
-          <div className="profile-editor-panel">
-            {isCurrentActive && (
-              <div className="active-connected-banner">
-                <div className="banner-left">
-                  <span className="pulse-dot" />
-                  <span className="banner-text">Currently Connected to this profile</span>
-                </div>
-                {onDisconnect && (
-                  <button
-                    className="btn-banner-disconnect"
-                    onClick={async () => {
-                      setDisconnecting(true);
-                      try {
-                        await onDisconnect();
-                      } finally {
-                        setDisconnecting(false);
-                      }
-                    }}
-                    disabled={disconnecting}
-                    title="Disconnect database connection"
-                  >
-                    <LogOut size={12} />
-                    <span>{disconnecting ? "Disconnecting..." : "Disconnect"}</span>
-                  </button>
-                )}
-              </div>
-            )}
-
-            <div className="field-row">
-              <div className="field-group flex-2">
-                <label className="field-label">Profile Name</label>
-                <input
-                  className="input form-control"
-                  placeholder="e.g. Production Postgres"
-                  value={form.name || ""}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                />
-              </div>
-              <div className="field-group flex-1">
-                <label className="field-label">Group / Folder</label>
-                {isCustomGroup ? (
-                  <div className="group-input-wrap">
-                    <input
-                      className="input form-control"
-                      placeholder="New group..."
-                      value={form.group || ""}
-                      onChange={(e) => setForm({ ...form, group: e.target.value })}
-                      autoFocus
-                    />
-                    <button
-                      type="button"
-                      className="btn-toggle-group"
-                      onClick={() => {
-                        setIsCustomGroup(false);
-                        setForm({ ...form, group: availableGroups[0] || "Default" });
-                      }}
-                      title="Select existing group"
-                    >
-                      Choose
-                    </button>
+          {/* Right Detail / Form Panel */}
+          <main className="conn-editor-panel">
+            <div className="editor-content-area">
+              {isCurrentActive && (
+                <div className="active-profile-banner">
+                  <div className="banner-left">
+                    <span className="pulse-green-dot" />
+                    <span className="banner-msg">Currently connected to <strong>{form.name}</strong></span>
                   </div>
-                ) : (
-                  <div className="select-container">
-                    <select
-                      className="select form-control custom-select"
-                      value={availableGroups.includes(form.group || "Default") ? (form.group || "Default") : "__NEW__"}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        if (val === "__NEW__") {
-                          setIsCustomGroup(true);
-                          setForm({ ...form, group: "" });
-                        } else {
-                          setForm({ ...form, group: val });
+                  {onDisconnect && (
+                    <button
+                      className="btn-disconnect-chip"
+                      onClick={async () => {
+                        setDisconnecting(true);
+                        try {
+                          await onDisconnect();
+                        } finally {
+                          setDisconnecting(false);
                         }
                       }}
+                      disabled={disconnecting}
                     >
-                      {availableGroups.map((g) => (
-                        <option key={g} value={g}>
-                          📁 {g}
-                        </option>
-                      ))}
-                      <option value="__NEW__">➕ Create New Group...</option>
-                    </select>
-                    <ChevronDown size={14} className="select-chevron" />
-                  </div>
-                )}
-              </div>
-            </div>
+                      <LogOut size={11} />
+                      <span>{disconnecting ? "Disconnecting..." : "Disconnect"}</span>
+                    </button>
+                  )}
+                </div>
+              )}
 
-            <div className="field-group">
-              <label className="field-label">Database Engine</label>
-              <div className="engine-options">
-                <button
-                  type="button"
-                  className={`engine-card ${form.type === "postgres" ? "active" : ""}`}
-                  onClick={() => handleTypeChange("postgres")}
-                >
-                  <Database size={14} />
-                  <span>PostgreSQL</span>
-                </button>
-                <button
-                  type="button"
-                  className={`engine-card ${form.type === "mariadb" ? "active" : ""}`}
-                  onClick={() => handleTypeChange("mariadb")}
-                >
-                  <Database size={14} />
-                  <span>MySQL / MariaDB</span>
-                </button>
-                <button
-                  type="button"
-                  className={`engine-card ${form.type === "sqlite" ? "active" : ""}`}
-                  onClick={() => handleTypeChange("sqlite")}
-                >
-                  <Database size={14} />
-                  <span>SQLite</span>
-                </button>
-              </div>
-            </div>
-
-            {form.type === "sqlite" ? (
-              <div className="field-group">
-                <label className="field-label">SQLite File Path (.db, .sqlite, .sqlite3)</label>
-                <div className="file-input-wrapper">
-                  <input
-                    className="input font-mono form-control file-path-input"
-                    placeholder="/Users/name/data/db.sqlite or ./data/db.sqlite"
-                    value={form.filePath || form.database || ""}
-                    onChange={(e) => setForm({ ...form, filePath: e.target.value, database: e.target.value })}
-                  />
+              {/* Database Engine Type Segmented Picker */}
+              <div className="form-section-card">
+                <div className="section-label">Database Type</div>
+                <div className="engine-segmented-control">
                   <button
                     type="button"
-                    className="btn btn-secondary browse-btn"
-                    onClick={handleBrowseSqliteFile}
-                    title="Click to browse SQLite file"
+                    className={`engine-seg-btn postgres ${form.type === "postgres" ? "active" : ""}`}
+                    onClick={() => handleTypeChange("postgres")}
                   >
-                    <FolderOpen size={14} />
-                    <span>Browse...</span>
+                    <Server size={14} className="seg-icon" />
+                    <span className="seg-label">PostgreSQL</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`engine-seg-btn mariadb ${form.type === "mariadb" ? "active" : ""}`}
+                    onClick={() => handleTypeChange("mariadb")}
+                  >
+                    <Server size={14} className="seg-icon" />
+                    <span className="seg-label">MySQL / MariaDB</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`engine-seg-btn sqlite ${form.type === "sqlite" ? "active" : ""}`}
+                    onClick={() => handleTypeChange("sqlite")}
+                  >
+                    <HardDrive size={14} className="seg-icon" />
+                    <span className="seg-label">SQLite</span>
                   </button>
                 </div>
-                <div className="sqlite-info-box">
-                  <Folder size={13} className="info-icon" />
-                  <span>
-                    Click <strong>Browse...</strong> to select a <code>.sqlite</code>, <code>.db</code>, or <code>.sqlite3</code> file from your computer.
-                  </span>
-                </div>
               </div>
-            ) : (
-              <>
-                <div className="field-row">
+
+              {/* General Connection Settings */}
+              <div className="form-section-card">
+                <div className="section-label">Connection Details</div>
+                
+                <div className="field-grid-2">
                   <div className="field-group flex-2">
-                    <label className="field-label">Host</label>
+                    <label className="field-label">Profile Name</label>
                     <input
-                      className="input font-mono form-control"
-                      placeholder="localhost"
-                      value={form.host || ""}
-                      onChange={(e) => setForm({ ...form, host: e.target.value })}
+                      className="input form-input"
+                      placeholder="e.g. Production Postgres"
+                      value={form.name || ""}
+                      onChange={(e) => setForm({ ...form, name: e.target.value })}
                     />
                   </div>
+
                   <div className="field-group flex-1">
-                    <label className="field-label">Port</label>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      className="input font-mono form-control"
-                      placeholder={form.type === "postgres" ? "5432" : "3306"}
-                      value={portText}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        if (val === "" || /^\d+$/.test(val)) {
-                          setPortText(val);
-                        }
-                      }}
-                    />
+                    <label className="field-label">Group / Folder</label>
+                    {isCustomGroup ? (
+                      <div className="custom-group-input-wrap">
+                        <input
+                          className="input form-input"
+                          placeholder="Group name"
+                          value={form.group || ""}
+                          onChange={(e) => setForm({ ...form, group: e.target.value })}
+                          autoFocus
+                        />
+                        <button
+                          className="btn-clear-group"
+                          onClick={() => {
+                            setIsCustomGroup(false);
+                            setForm({ ...form, group: "Default" });
+                          }}
+                          title="Select from existing"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ) : (
+                      <select
+                        className="select form-select"
+                        value={form.group || "Default"}
+                        onChange={(e) => {
+                          if (e.target.value === "__NEW__") {
+                            setIsCustomGroup(true);
+                            setForm({ ...form, group: "" });
+                          } else {
+                            setForm({ ...form, group: e.target.value });
+                          }
+                        }}
+                      >
+                        {availableGroups.map((grp) => (
+                          <option key={grp} value={grp}>
+                            {grp}
+                          </option>
+                        ))}
+                        <option value="__NEW__">+ New Group...</option>
+                      </select>
+                    )}
                   </div>
                 </div>
 
-                <div className="field-row">
-                  <div className="field-group flex-1">
-                    <label className="field-label">User</label>
-                    <input
-                      className="input form-control"
-                      placeholder="postgres"
-                      value={form.user || ""}
-                      onChange={(e) => setForm({ ...form, user: e.target.value })}
-                    />
+                {form.type === "sqlite" ? (
+                  <div className="field-group mt-12">
+                    <label className="field-label">SQLite Database File Path</label>
+                    <div className="file-input-group">
+                      <input
+                        className="input form-input font-mono"
+                        placeholder="/path/to/database.sqlite or ./data/db.sqlite"
+                        value={form.filePath || ""}
+                        onChange={(e) => setForm({ ...form, filePath: e.target.value })}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-secondary browse-file-btn"
+                        onClick={handleBrowseSqliteFile}
+                        title="Browse file on disk"
+                      >
+                        <FolderOpen size={13} />
+                        <span>Browse...</span>
+                      </button>
+                    </div>
                   </div>
-                  <div className="field-group flex-1">
-                    <label className="field-label">Password</label>
-                    <input
-                      type="password"
-                      className="input form-control"
-                      placeholder="••••••••"
-                      value={form.password || ""}
-                      onChange={(e) => setForm({ ...form, password: e.target.value })}
-                    />
-                  </div>
-                </div>
+                ) : (
+                  <>
+                    <div className="field-grid-2 mt-12">
+                      <div className="field-group flex-2">
+                        <label className="field-label">Host</label>
+                        <input
+                          className="input form-input font-mono"
+                          placeholder="localhost or 127.0.0.1"
+                          value={form.host || ""}
+                          onChange={(e) => setForm({ ...form, host: e.target.value })}
+                        />
+                      </div>
+                      <div className="field-group flex-1">
+                        <label className="field-label">Port</label>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          className="input form-input font-mono"
+                          placeholder={form.type === "postgres" ? "5432" : "3306"}
+                          value={portText}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (val === "" || /^\d+$/.test(val)) {
+                              setPortText(val);
+                            }
+                          }}
+                        />
+                      </div>
+                    </div>
 
-                <div className="field-group">
-                  <label className="field-label">Database Name</label>
-                  <input
-                    className="input font-mono form-control"
-                    placeholder={form.type === "postgres" ? "postgres" : "mysql"}
-                    value={form.database || ""}
-                    onChange={(e) => setForm({ ...form, database: e.target.value })}
-                  />
-                </div>
-              </>
-            )}
+                    <div className="field-grid-2 mt-12">
+                      <div className="field-group">
+                        <label className="field-label">User</label>
+                        <input
+                          className="input form-input"
+                          placeholder={form.type === "postgres" ? "postgres" : "root"}
+                          value={form.user || ""}
+                          onChange={(e) => setForm({ ...form, user: e.target.value })}
+                        />
+                      </div>
+                      <div className="field-group">
+                        <label className="field-label">Password</label>
+                        <input
+                          type="password"
+                          className="input form-input"
+                          placeholder="••••••••"
+                          value={form.password || ""}
+                          onChange={(e) => setForm({ ...form, password: e.target.value })}
+                        />
+                      </div>
+                    </div>
 
-            {testResult && (
-              <div className={`status-banner ${testResult.success ? "success" : "error"}`}>
-                {testResult.success ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
-                <span>{testResult.text}</span>
+                    <div className="field-group mt-12">
+                      <label className="field-label">Database Name</label>
+                      <input
+                        className="input form-input font-mono"
+                        placeholder={form.type === "postgres" ? "postgres" : "mysql"}
+                        value={form.database || ""}
+                        onChange={(e) => setForm({ ...form, database: e.target.value })}
+                      />
+                    </div>
+                  </>
+                )}
               </div>
-            )}
 
-            <div className="action-row">
-              <button className="btn btn-secondary" onClick={handleTest} disabled={testing || connecting || disconnecting}>
-                {testing ? <RefreshCw size={13} className="spin" /> : <Zap size={13} />}
-                <span>{testing ? "Testing..." : "Test Connection"}</span>
-              </button>
-              <button className="btn btn-secondary" onClick={handleSave} disabled={saving || connecting || disconnecting}>
-                {saving ? <RefreshCw size={13} className="spin" /> : null}
-                <span>{saving ? "Saving..." : "Save"}</span>
-              </button>
-              {isCurrentActive && onDisconnect && (
-                <button
-                  className="btn btn-disconnect"
-                  onClick={async () => {
-                    setDisconnecting(true);
-                    try {
-                      await onDisconnect();
-                    } finally {
-                      setDisconnecting(false);
-                    }
-                  }}
-                  disabled={disconnecting || connecting}
-                  title="Disconnect from database"
-                >
-                  <LogOut size={13} />
-                  <span>{disconnecting ? "Disconnecting..." : "Disconnect"}</span>
-                </button>
+              {testResult && (
+                <div className={`status-feedback-box ${testResult.success ? "success" : "error"}`}>
+                  {testResult.success ? <CheckCircle2 size={15} /> : <XCircle size={15} />}
+                  <span className="feedback-text">{testResult.text}</span>
+                </div>
               )}
+            </div>
+
+            {/* Bottom Footer Actions */}
+            <footer className="editor-footer-bar">
+              <div className="footer-left">
+                {selectedId && selectedId !== "__NEW__" && (
+                  <button
+                    className="btn-del-profile"
+                    onClick={() => {
+                      const currentProfile = profiles.find((p) => p.id === selectedId);
+                      if (currentProfile) {
+                        setConfirmDeleteProfile(currentProfile);
+                      }
+                    }}
+                    disabled={connecting || disconnecting}
+                    title="Delete this Profile"
+                  >
+                    <Trash2 size={13} />
+                    <span>Delete</span>
+                  </button>
+                )}
+              </div>
+
+              <div className="footer-right">
+                <button
+                  className="btn btn-secondary test-btn"
+                  onClick={handleTest}
+                  disabled={testing || connecting || disconnecting}
+                >
+                  {testing ? <RefreshCw size={13} className="spin" /> : <Zap size={13} />}
+                  <span>{testing ? "Testing..." : "Test Connection"}</span>
+                </button>
+
+                <button
+                  className="btn btn-secondary save-btn"
+                  onClick={handleSave}
+                  disabled={saving || connecting || disconnecting}
+                >
+                  {saving ? <RefreshCw size={13} className="spin" /> : null}
+                  <span>{saving ? "Saving..." : "Save"}</span>
+                </button>
+
+                <button
+                  className="btn btn-primary connect-main-btn"
+                  onClick={handleConnect}
+                  disabled={connecting || testing || saving || disconnecting}
+                >
+                  {connecting ? <RefreshCw size={13} className="spin" /> : <Zap size={13} />}
+                  <span>{connecting ? "Connecting..." : (isCurrentActive ? "Reconnect" : "Connect")}</span>
+                </button>
+              </div>
+            </footer>
+          </main>
+        </div>
+      </div>
+
+      {/* Group Context Menu */}
+      {groupContextMenu && (
+        <div
+          className="group-context-menu"
+          style={{
+            position: "fixed",
+            left: groupContextMenu.x,
+            top: groupContextMenu.y,
+            zIndex: 999999,
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="context-menu-header">
+            <Folder size={12} className="folder-icon" />
+            <span className="context-group-title">{groupContextMenu.groupName}</span>
+          </div>
+          <div className="context-menu-divider" />
+          <button
+            className="context-menu-item"
+            onClick={() => {
+              const g = groupContextMenu.groupName;
+              setGroupContextMenu(null);
+              setRenamingGroup({ oldName: g, newName: g });
+            }}
+          >
+            <Edit2 size={12} />
+            <span>Rename Group</span>
+          </button>
+          <button
+            className="context-menu-item"
+            onClick={() => {
+              const g = groupContextMenu.groupName;
+              setGroupContextMenu(null);
+              handleCreateNewInGroup(g);
+            }}
+          >
+            <FolderPlus size={12} />
+            <span>Add Connection to Group</span>
+          </button>
+          <button
+            className="context-menu-item"
+            onClick={() => {
+              const g = groupContextMenu.groupName;
+              setGroupContextMenu(null);
+              handleMoveGroup(g, -1);
+            }}
+          >
+            <ArrowUp size={12} />
+            <span>Move Up</span>
+          </button>
+          <button
+            className="context-menu-item"
+            onClick={() => {
+              const g = groupContextMenu.groupName;
+              setGroupContextMenu(null);
+              handleMoveGroup(g, 1);
+            }}
+          >
+            <ArrowDown size={12} />
+            <span>Move Down</span>
+          </button>
+          <div className="context-menu-divider" />
+          <button
+            className="context-menu-item danger"
+            onClick={() => {
+              const g = groupContextMenu.groupName;
+              setGroupContextMenu(null);
+              setDeletingGroup(g);
+            }}
+          >
+            <Trash2 size={12} />
+            <span>Delete Group...</span>
+          </button>
+        </div>
+      )}
+
+      {/* Rename Group Dialog Modal */}
+      {renamingGroup && (
+        <div className="submodal-overlay" onClick={() => setRenamingGroup(null)}>
+          <div className="submodal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="submodal-header">
+              <Edit2 size={14} />
+              <span>Rename Group</span>
+            </div>
+            <div className="submodal-body">
+              <label className="field-label">New Group Name</label>
+              <input
+                className="input form-input"
+                value={renamingGroup.newName}
+                onChange={(e) => setRenamingGroup({ ...renamingGroup, newName: e.target.value })}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleRenameGroup(renamingGroup.oldName, renamingGroup.newName);
+                  if (e.key === "Escape") setRenamingGroup(null);
+                }}
+                autoFocus
+              />
+            </div>
+            <div className="submodal-actions">
+              <button className="btn btn-secondary" onClick={() => setRenamingGroup(null)}>
+                Cancel
+              </button>
               <button
                 className="btn btn-primary"
-                onClick={handleConnect}
-                disabled={connecting || testing || saving || disconnecting}
+                onClick={() => handleRenameGroup(renamingGroup.oldName, renamingGroup.newName)}
+                disabled={!renamingGroup.newName.trim()}
               >
-                {connecting ? <RefreshCw size={13} className="spin" /> : null}
-                <span>{connecting ? "Connecting..." : (isCurrentActive ? "Reconnect" : "Connect")}</span>
+                Save
               </button>
-              {selectedId && (
-                <button
-                  className="btn btn-danger"
-                  onClick={async () => {
-                    await onDeleteProfile(selectedId);
-                    handleCreateNew();
-                  }}
-                  disabled={connecting || disconnecting}
-                  title="Delete Profile"
-                >
-                  <Trash2 size={13} />
-                </button>
-              )}
             </div>
           </div>
         </div>
-      </div>
+      )}
+
+      {/* Delete Group Dialog Modal */}
+      {deletingGroup && (
+        <div className="submodal-overlay" onClick={() => setDeletingGroup(null)}>
+          <div className="submodal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="submodal-header danger-header">
+              <AlertTriangle size={14} className="danger-icon" />
+              <span>Delete Group</span>
+            </div>
+            <div className="submodal-body">
+              <p className="submodal-desc">
+                Delete group <strong>&quot;{deletingGroup}&quot;</strong>?
+              </p>
+            </div>
+            <div className="submodal-column-actions">
+              <button
+                className="btn btn-secondary submodal-btn-choice"
+                onClick={() => handleDeleteGroupConfirm(deletingGroup, "move_default")}
+              >
+                <Folder size={13} />
+                <span>Move connections to Default & Delete Group</span>
+              </button>
+              <button
+                className="btn btn-danger submodal-btn-choice"
+                onClick={() => handleDeleteGroupConfirm(deletingGroup, "delete_all")}
+              >
+                <Trash2 size={13} />
+                <span>Delete Group & All Connections</span>
+              </button>
+              <button className="btn btn-secondary cancel-choice-btn" onClick={() => setDeletingGroup(null)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Profile Confirmation Modal */}
+      {confirmDeleteProfile && (
+        <div className="submodal-overlay" onClick={() => setConfirmDeleteProfile(null)}>
+          <div className="submodal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="submodal-header danger-header">
+              <AlertTriangle size={14} className="danger-icon" />
+              <span>Delete Profile</span>
+            </div>
+            <div className="submodal-body">
+              <p className="submodal-desc">
+                Delete profile <strong>&quot;{confirmDeleteProfile.name}&quot;</strong>?
+              </p>
+            </div>
+            <div className="submodal-actions">
+              <button className="btn btn-secondary" onClick={() => setConfirmDeleteProfile(null)}>
+                Cancel
+              </button>
+              <button
+                className="btn btn-danger"
+                onClick={async () => {
+                  const targetId = confirmDeleteProfile.id;
+                  setConfirmDeleteProfile(null);
+                  await onDeleteProfile(targetId);
+                  handleCreateNew();
+                }}
+              >
+                <Trash2 size={12} />
+                <span>Confirm</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <style jsx>{`
         .modal-overlay {
           position: fixed;
           inset: 0;
-          background: rgba(0, 0, 0, 0.65);
-          backdrop-filter: blur(6px);
+          background: rgba(0, 0, 0, 0.72);
+          backdrop-filter: blur(8px);
           display: flex;
           align-items: center;
           justify-content: center;
           z-index: 1000;
+          padding: 20px;
         }
 
-        .modal-card {
-          width: 760px;
-          height: 560px;
-          background: var(--bg-card);
-          border: 1px solid var(--border-light);
-          border-radius: var(--radius-lg);
-          box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+        .modal-window {
+          width: 860px;
+          height: 600px;
+          max-width: 95vw;
+          max-height: 90vh;
+          background: var(--bg-app);
+          border: 1px solid var(--border-medium);
+          border-radius: 12px;
+          box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.2);
           display: flex;
           flex-direction: column;
           overflow: hidden;
+          animation: modalAppear 0.18s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
-        .modal-top {
-          padding: 12px 16px;
-          background: var(--bg-tertiary);
+        @keyframes modalAppear {
+          from { opacity: 0; transform: scale(0.97) translateY(8px); }
+          to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+
+        /* Top Header */
+        .window-header {
+          padding: 12px 18px;
+          background: var(--bg-header);
           border-bottom: 1px solid var(--border-light);
           display: flex;
           justify-content: space-between;
           align-items: center;
+          user-select: none;
         }
-        .modal-title {
+        .window-title-left {
           display: flex;
           align-items: center;
-          gap: 8px;
-          font-weight: 700;
-          font-size: 13px;
-          color: var(--text-main);
+          gap: 10px;
         }
-        .modal-title-icon { color: var(--accent-blue); }
-
-        .active-indicator-tag {
+        .app-icon-badge {
+          width: 28px;
+          height: 28px;
+          border-radius: 7px;
+          background: rgba(59, 130, 246, 0.15);
+          color: var(--accent-blue);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border: 1px solid rgba(59, 130, 246, 0.3);
+        }
+        .title-text-group {
+          display: flex;
+          flex-direction: column;
+          gap: 1px;
+        }
+        .window-main-title {
+          font-size: 13.5px;
+          font-weight: 700;
+          color: var(--text-main);
+          letter-spacing: -0.2px;
+        }
+        .window-sub-title {
+          font-size: 10.5px;
+          color: var(--text-muted);
+        }
+        .active-conn-pill {
           display: inline-flex;
           align-items: center;
-          gap: 5px;
-          background: rgba(16, 185, 129, 0.15);
-          border: 1px solid rgba(16, 185, 129, 0.3);
+          gap: 6px;
+          background: rgba(16, 185, 129, 0.12);
+          border: 1px solid rgba(16, 185, 129, 0.35);
           color: var(--accent-green);
           font-size: 10px;
-          padding: 2px 7px;
+          padding: 2.5px 8px;
           border-radius: 12px;
           font-weight: 600;
+          margin-left: 8px;
         }
-
-        .mini-pulse-dot {
+        .pulse-green-dot {
           width: 6px;
           height: 6px;
           border-radius: 50%;
           background: var(--accent-green);
-          box-shadow: 0 0 6px rgba(16, 185, 129, 0.8);
-          animation: pulse 2s infinite;
+          box-shadow: 0 0 8px rgba(16, 185, 129, 0.8);
+          animation: pulseDot 2s infinite;
+        }
+        @keyframes pulseDot {
+          0%, 100% { transform: scale(1); opacity: 1; }
+          50% { transform: scale(1.2); opacity: 0.6; }
         }
 
-        .icon-close-btn {
+        .window-close-btn {
           background: transparent;
           border: none;
           color: var(--text-muted);
           cursor: pointer;
-          padding: 4px;
-          border-radius: 4px;
+          padding: 6px;
+          border-radius: 6px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: all 0.12s ease;
         }
-        .icon-close-btn:hover { color: var(--text-main); background: rgba(255, 255, 255, 0.08); }
+        .window-close-btn:hover {
+          color: var(--text-main);
+          background: var(--bg-hover);
+        }
 
-        .modal-main {
+        /* Main Window Layout */
+        .window-body {
           flex: 1;
           display: flex;
           overflow: hidden;
         }
 
-        .profile-list-panel {
-          width: 240px;
+        /* Left Master Sidebar */
+        .conn-sidebar {
+          width: 270px;
+          background: var(--bg-sidebar);
           border-right: 1px solid var(--border-light);
-          background: var(--bg-secondary);
-          padding: 12px;
+          display: flex;
+          flex-direction: column;
+          flex-shrink: 0;
+        }
+        .sidebar-top-action {
+          padding: 12px 14px;
+          border-bottom: 1px solid var(--border-light);
+        }
+        .new-conn-btn {
+          width: 100%;
+          height: 32px;
+          font-size: 12px;
+          font-weight: 600;
+          gap: 6px;
+          border-radius: 6px;
+          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+        }
+
+        .sidebar-scrollable-list {
+          flex: 1;
+          overflow-y: auto;
+          padding: 8px;
           display: flex;
           flex-direction: column;
           gap: 10px;
         }
 
-        .new-btn { width: 100%; justify-content: center; }
-
-        .profile-items-wrapper {
-          flex: 1;
-          overflow-y: auto;
+        .empty-profiles-notice {
+          padding: 32px 16px;
+          text-align: center;
+          color: var(--text-muted);
+          font-size: 11px;
           display: flex;
           flex-direction: column;
+          align-items: center;
           gap: 8px;
         }
+        .empty-icon { opacity: 0.4; }
 
-        .empty-profiles-notice {
-          padding: 16px;
-          text-align: center;
-          font-size: 11px;
-          color: var(--text-muted);
-        }
-
-        .group-folder-container {
+        .conn-group-section {
           display: flex;
           flex-direction: column;
-          gap: 2px;
+          gap: 3px;
         }
-
-        .group-folder-header {
+        .conn-group-header {
           display: flex;
           align-items: center;
-          gap: 6px;
-          padding: 4px 6px;
-          border-radius: 4px;
+          justify-content: space-between;
+          padding: 5px 8px;
+          border-radius: 5px;
           cursor: pointer;
-          color: var(--text-muted);
+          color: var(--text-sub);
           font-size: 11px;
-          font-weight: 700;
+          font-weight: 600;
           user-select: none;
+          transition: all 0.12s ease;
         }
-        .group-folder-header:hover {
+        .conn-group-header:hover {
           background: var(--bg-hover);
           color: var(--text-main);
         }
-
-        .folder-icon { color: var(--accent-blue); }
-        .folder-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .folder-count { font-size: 10px; opacity: 0.7; }
-
-        .group-folder-items {
-          display: flex;
-          flex-direction: column;
-          gap: 2px;
-          padding-left: 12px;
-        }
-
-        .profile-card-item {
+        .group-header-left {
           display: flex;
           align-items: center;
-          gap: 8px;
-          padding: 6px 8px;
-          border-radius: var(--radius-sm);
-          cursor: pointer;
-          border: 1px solid transparent;
-          transition: all 0.12s ease;
+          gap: 6px;
+          overflow: hidden;
+          flex: 1;
         }
-        .profile-card-item:hover { background: var(--bg-tertiary); }
-        .profile-card-item.active {
+        .group-arrow-icon { color: var(--text-muted); display: flex; }
+        .group-folder-icon { color: var(--accent-blue); flex-shrink: 0; }
+        .group-name-text {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .group-count-badge {
+          font-size: 9.5px;
+          color: var(--text-muted);
           background: var(--bg-tertiary);
-          border-color: var(--border-light);
-        }
-        .profile-card-item.is-connected {
-          border-left: 3px solid var(--accent-green);
+          padding: 1px 5px;
+          border-radius: 8px;
+          border: 1px solid var(--border-light);
         }
 
-        .profile-icon-wrap {
+        .group-quick-actions {
+          display: none;
+          align-items: center;
+          gap: 2px;
+        }
+        .conn-group-header:hover .group-quick-actions {
+          display: flex;
+        }
+        .group-tool-btn {
+          background: transparent;
+          border: none;
+          color: var(--text-muted);
+          padding: 2px 4px;
+          border-radius: 3px;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: all 0.1s ease;
+        }
+        .group-tool-btn:hover {
+          background: var(--bg-tertiary);
+          color: var(--text-main);
+        }
+        .group-tool-btn.danger-tool:hover {
+          color: var(--accent-red);
+        }
+
+        .conn-items-list {
+          display: flex;
+          flex-direction: column;
+          gap: 3px;
+          padding-left: 10px;
+        }
+
+        .conn-card-item {
+          display: flex;
+          align-items: center;
+          gap: 9px;
+          padding: 7px 10px;
+          border-radius: 7px;
+          cursor: pointer;
+          border: 1px solid transparent;
+          background: transparent;
+          transition: all 0.12s ease;
           position: relative;
+        }
+        .conn-card-item:hover {
+          background: var(--bg-hover);
+        }
+        .conn-card-item.active {
+          background: var(--bg-tertiary);
+          border-color: var(--border-medium);
+          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+        .conn-card-item.is-connected {
+          border-left: 3px solid var(--accent-green);
+        }
+        .conn-card-item.is-draft-card {
+          border: 1px dashed var(--accent-blue);
+          background: rgba(59, 130, 246, 0.08);
+        }
+
+        .engine-avatar {
+          width: 26px;
+          height: 26px;
+          border-radius: 6px;
           display: flex;
           align-items: center;
           justify-content: center;
           flex-shrink: 0;
+          position: relative;
+          background: var(--bg-card);
+          border: 1px solid var(--border-light);
+          color: var(--text-muted);
         }
-        .item-connected-dot {
+        .postgres-avatar { color: #3b82f6; background: rgba(59, 130, 246, 0.12); border-color: rgba(59, 130, 246, 0.25); }
+        .mariadb-avatar { color: #f59e0b; background: rgba(245, 158, 11, 0.12); border-color: rgba(245, 158, 11, 0.25); }
+        .sqlite-avatar { color: #10b981; background: rgba(16, 185, 129, 0.12); border-color: rgba(16, 185, 129, 0.25); }
+        .new-avatar { color: var(--accent-blue); background: rgba(59, 130, 246, 0.15); }
+
+        .avatar-online-dot {
           position: absolute;
           top: -2px;
           right: -2px;
-          width: 6px;
-          height: 6px;
+          width: 7px;
+          height: 7px;
           border-radius: 50%;
           background: var(--accent-green);
-          box-shadow: 0 0 5px rgba(16, 185, 129, 0.9);
+          box-shadow: 0 0 6px rgba(16, 185, 129, 0.9);
         }
 
-        .profile-type-icon { color: var(--accent-blue); flex-shrink: 0; }
-        .profile-meta { display: flex; flex-direction: column; overflow: hidden; flex: 1; }
-        .p-title-row { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
-        .p-title { font-size: 11px; font-weight: 600; color: var(--text-main); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .p-connected-badge {
-          font-size: 8px;
+        .conn-card-info {
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+          flex: 1;
+          gap: 2px;
+        }
+        .card-top-line {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 4px;
+        }
+        .card-title {
+          font-size: 11.5px;
+          font-weight: 600;
+          color: var(--text-main);
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .connected-tag {
+          font-size: 8.5px;
           font-weight: 700;
           color: var(--accent-green);
           background: rgba(16, 185, 129, 0.15);
@@ -782,238 +1412,410 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           border-radius: 3px;
           text-transform: uppercase;
         }
-        .p-sub { font-size: 9px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-        .profile-editor-panel {
-          flex: 1;
-          padding: 18px 20px;
+        .draft-pill {
+          font-size: 9px;
+          font-weight: 600;
+          color: var(--accent-blue);
+          background: rgba(59, 130, 246, 0.15);
+          padding: 1px 4px;
+          border-radius: 3px;
+        }
+        .card-subtitle {
           display: flex;
-          flex-direction: column;
-          gap: 14px;
-          overflow-y: auto;
+          align-items: center;
+          gap: 5px;
+          font-size: 10px;
+          color: var(--text-muted);
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .engine-type-tag {
+          font-size: 8.5px;
+          font-family: var(--font-mono);
+          font-weight: 600;
+          padding: 0.5px 3.5px;
+          border-radius: 3px;
+        }
+        .engine-type-tag.postgres { background: rgba(59, 130, 246, 0.12); color: #3b82f6; }
+        .engine-type-tag.mariadb { background: rgba(245, 158, 11, 0.12); color: #f59e0b; }
+        .engine-type-tag.sqlite { background: rgba(16, 185, 129, 0.12); color: #10b981; }
+
+        .host-text {
+          font-family: var(--font-mono);
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
         }
 
-        .active-connected-banner {
+        .quick-zap-btn {
+          display: none;
+          position: absolute;
+          right: 8px;
+          background: var(--accent-blue);
+          color: #fff;
+          border: none;
+          border-radius: 4px;
+          padding: 3px 6px;
+          cursor: pointer;
+          box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+          transition: all 0.12s ease;
+        }
+        .conn-card-item:hover .quick-zap-btn {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .quick-zap-btn:hover {
+          transform: scale(1.08);
+        }
+
+        /* Right Detail / Form Panel */
+        .conn-editor-panel {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          background: var(--bg-content);
+          overflow: hidden;
+        }
+
+        .editor-content-area {
+          flex: 1;
+          padding: 20px 24px;
+          overflow-y: auto;
+          display: flex;
+          flex-direction: column;
+          gap: 16px;
+        }
+
+        .active-profile-banner {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 8px 12px;
+          padding: 10px 14px;
           background: rgba(16, 185, 129, 0.1);
           border: 1px solid rgba(16, 185, 129, 0.3);
-          border-radius: var(--radius-sm);
+          border-radius: 8px;
         }
         .banner-left {
           display: flex;
           align-items: center;
           gap: 8px;
         }
-        .pulse-dot {
-          width: 8px;
-          height: 8px;
-          border-radius: 50%;
-          background: var(--accent-green);
-          box-shadow: 0 0 8px rgba(16, 185, 129, 0.8);
-          animation: pulse 2s infinite;
-        }
-        @keyframes pulse {
-          0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
-          70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
-          100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
-        }
-        .banner-text {
-          font-size: 11px;
-          font-weight: 600;
+        .banner-msg {
+          font-size: 11.5px;
           color: var(--accent-green);
         }
-        .btn-banner-disconnect {
-          display: inline-flex;
+        .btn-disconnect-chip {
+          background: transparent;
+          border: 1px solid rgba(239, 68, 68, 0.4);
+          color: var(--accent-red);
+          font-size: 10.5px;
+          font-weight: 600;
+          padding: 3px 8px;
+          border-radius: 4px;
+          display: flex;
           align-items: center;
           gap: 4px;
-          padding: 3px 8px;
-          font-size: 10px;
-          font-weight: 600;
-          background: rgba(239, 68, 68, 0.12);
-          color: #ef4444;
-          border: 1px solid rgba(239, 68, 68, 0.25);
-          border-radius: 4px;
           cursor: pointer;
           transition: all 0.12s ease;
         }
-        .btn-banner-disconnect:hover {
-          background: #ef4444;
+        .btn-disconnect-chip:hover {
+          background: var(--accent-red);
           color: #fff;
         }
 
-        .field-group { display: flex; flex-direction: column; gap: 5px; }
-        .field-label { font-size: 10px; font-weight: 600; color: var(--text-sub); text-transform: uppercase; letter-spacing: 0.3px; }
-
-        .field-row { display: flex; gap: 12px; align-items: flex-start; }
-        .flex-1 { flex: 1; }
-        .flex-2 { flex: 2; }
-
-        .form-control {
-          height: 34px !important;
-          min-height: 34px !important;
-          box-sizing: border-box !important;
-          width: 100%;
-        }
-
-        .select-container {
-          position: relative;
-          width: 100%;
+        .form-section-card {
+          background: var(--bg-card);
+          border: 1px solid var(--border-light);
+          border-radius: 8px;
+          padding: 14px 16px;
           display: flex;
-          align-items: center;
+          flex-direction: column;
+          gap: 10px;
         }
-
-        .custom-select {
-          appearance: none;
-          -webkit-appearance: none;
-          padding-right: 28px !important;
-          cursor: pointer;
-          background-color: var(--bg-card);
-        }
-
-        .select-chevron {
-          position: absolute;
-          right: 8px;
-          pointer-events: none;
+        .section-label {
+          font-size: 11px;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.4px;
           color: var(--text-muted);
         }
 
-        .file-input-wrapper {
-          display: flex;
-          gap: 8px;
-          align-items: center;
+        /* Database Type Segmented Control */
+        .engine-segmented-control {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          background: var(--bg-tertiary);
+          padding: 3px;
+          border-radius: 7px;
+          border: 1px solid var(--border-light);
+          gap: 4px;
         }
-
-        .file-path-input {
-          flex: 1;
-        }
-
-        .browse-btn {
-          height: 34px;
-          padding: 0 12px;
-          white-space: nowrap;
-          flex-shrink: 0;
-        }
-
-        .engine-options { display: flex; gap: 10px; }
-        .engine-card {
-          flex: 1;
-          height: 36px;
+        .engine-seg-btn {
           display: flex;
           align-items: center;
           justify-content: center;
           gap: 8px;
-          padding: 0 10px;
-          border-radius: var(--radius-sm);
-          border: 1px solid var(--border-light);
-          background: var(--bg-tertiary);
+          padding: 8px 12px;
+          border: none;
+          background: transparent;
           color: var(--text-sub);
+          font-size: 11.5px;
+          font-weight: 500;
+          border-radius: 5px;
+          cursor: pointer;
+          transition: all 0.14s ease;
+        }
+        .engine-seg-btn:hover {
+          color: var(--text-main);
+          background: var(--bg-hover);
+        }
+        .engine-seg-btn.active {
+          background: var(--bg-card);
+          color: var(--text-main);
+          font-weight: 600;
+          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 0 0 1px var(--border-light);
+        }
+        .engine-seg-btn.postgres.active { color: #3b82f6; }
+        .engine-seg-btn.mariadb.active { color: #f59e0b; }
+        .engine-seg-btn.sqlite.active { color: #10b981; }
+
+        .field-grid-2 {
+          display: flex;
+          gap: 12px;
+        }
+        .flex-1 { flex: 1; }
+        .flex-2 { flex: 2; }
+        .mt-12 { margin-top: 10px; }
+
+        .field-group {
+          display: flex;
+          flex-direction: column;
+          gap: 5px;
+          flex: 1;
+        }
+        .field-label {
           font-size: 11px;
+          font-weight: 600;
+          color: var(--text-sub);
+        }
+        .form-input, .form-select {
+          width: 100%;
+          height: 32px;
+          font-size: 12px;
+          border-radius: 6px;
+        }
+
+        .custom-group-input-wrap {
+          position: relative;
+          display: flex;
+          align-items: center;
+        }
+        .btn-clear-group {
+          position: absolute;
+          right: 6px;
+          background: transparent;
+          border: none;
+          color: var(--text-muted);
+          cursor: pointer;
+          font-size: 11px;
+          padding: 2px 4px;
+        }
+        .btn-clear-group:hover { color: var(--text-main); }
+
+        .file-input-group {
+          display: flex;
+          gap: 8px;
+          align-items: center;
+        }
+        .browse-file-btn {
+          flex-shrink: 0;
+          height: 32px;
+          font-size: 11.5px;
+          gap: 5px;
+        }
+
+        .status-feedback-box {
+          display: flex;
+          align-items: center;
+          gap: 9px;
+          padding: 10px 14px;
+          border-radius: 7px;
+          font-size: 12px;
+        }
+        .status-feedback-box.success {
+          background: rgba(16, 185, 129, 0.12);
+          color: var(--accent-green);
+          border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+        .status-feedback-box.error {
+          background: rgba(239, 68, 68, 0.12);
+          color: var(--accent-red);
+          border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+        .feedback-text { font-weight: 500; }
+
+        /* Sticky Footer Bar */
+        .editor-footer-bar {
+          padding: 12px 24px;
+          background: var(--bg-header);
+          border-top: 1px solid var(--border-light);
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }
+        .footer-left { display: flex; align-items: center; }
+        .footer-right { display: flex; align-items: center; gap: 8px; }
+
+        .btn-del-profile {
+          background: transparent;
+          border: 1px solid var(--border-light);
+          color: var(--text-muted);
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          padding: 5px 10px;
+          border-radius: 6px;
+          font-size: 11.5px;
           font-weight: 500;
           cursor: pointer;
           transition: all 0.12s ease;
         }
-        .engine-card.active {
-          border-color: var(--accent-blue);
-          color: var(--text-main);
-          background: rgba(59, 130, 246, 0.12);
-          font-weight: 600;
-        }
-
-        .status-banner {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          padding: 8px 12px;
-          border-radius: var(--radius-sm);
-          font-size: 11px;
-          margin-top: 4px;
-        }
-        .status-banner.success {
-          background: rgba(16, 185, 129, 0.12);
-          color: var(--accent-green);
-          border: 1px solid rgba(16, 185, 129, 0.25);
-        }
-        .status-banner.error {
-          background: rgba(239, 68, 68, 0.12);
+        .btn-del-profile:hover {
+          background: rgba(239, 68, 68, 0.15);
           color: var(--accent-red);
-          border: 1px solid rgba(239, 68, 68, 0.25);
+          border-color: rgba(239, 68, 68, 0.4);
         }
 
-        .action-row {
-          display: flex;
-          gap: 8px;
-          margin-top: auto;
-          padding-top: 10px;
-        }
-
-        .btn-disconnect {
-          background: rgba(239, 68, 68, 0.12);
-          color: #ef4444;
-          border: 1px solid rgba(239, 68, 68, 0.3);
-          font-weight: 600;
-          display: flex;
-          align-items: center;
-          gap: 5px;
-          padding: 0 12px;
-          border-radius: 6px;
-          cursor: pointer;
+        .test-btn, .save-btn {
           height: 32px;
           font-size: 12px;
+        }
+        .connect-main-btn {
+          height: 32px;
+          font-size: 12px;
+          font-weight: 600;
+          padding: 0 16px;
+          gap: 6px;
+          box-shadow: 0 1px 4px rgba(59, 130, 246, 0.3);
+        }
+
+        /* Context Menu Styles */
+        .group-context-menu {
+          background: var(--bg-card);
+          border: 1px solid var(--border-medium);
+          border-radius: 8px;
+          box-shadow: var(--shadow-popup);
+          padding: 4px;
+          min-width: 190px;
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+          user-select: none;
+        }
+        .context-menu-header {
+          padding: 6px 10px;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+        .context-group-title {
+          font-size: 11.5px;
+          font-weight: 700;
+          color: var(--text-main);
+        }
+        .context-menu-divider {
+          height: 1px;
+          background: var(--border-light);
+          margin: 3px 0;
+        }
+        .context-menu-item {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 6px 10px;
+          background: transparent;
+          border: none;
+          border-radius: 5px;
+          color: var(--text-main);
+          font-size: 11.5px;
+          cursor: pointer;
+          text-align: left;
+          width: 100%;
           transition: all 0.12s ease;
         }
-        .btn-disconnect:hover {
-          background: #ef4444;
-          color: #fff;
-        }
-
-        .group-input-wrap {
-          display: flex;
-          gap: 6px;
-          height: 34px;
-        }
-
-        .btn-toggle-group {
-          background: var(--bg-tertiary);
-          border: 1px solid var(--border-light);
-          color: var(--text-sub);
-          font-size: 10px;
-          padding: 0 8px;
-          border-radius: var(--radius-sm);
-          cursor: pointer;
-          white-space: nowrap;
-          height: 34px;
-        }
-        .btn-toggle-group:hover {
-          color: var(--text-main);
-          border-color: var(--accent-blue);
-        }
-
-        .sqlite-info-box {
-          margin-top: 6px;
-          padding: 8px 10px;
-          background: rgba(59, 130, 246, 0.08);
-          border: 1px solid rgba(59, 130, 246, 0.2);
-          border-radius: var(--radius-sm);
-          font-size: 11px;
-          color: var(--text-sub);
-          display: flex;
-          align-items: flex-start;
-          gap: 8px;
-          line-height: 1.4;
-        }
-        .sqlite-info-box .info-icon {
+        .context-menu-item:hover {
+          background: var(--bg-hover);
           color: var(--accent-blue);
-          margin-top: 2px;
-          flex-shrink: 0;
         }
-        .sqlite-info-box code {
-          background: var(--bg-tertiary);
-          padding: 1px 4px;
-          border-radius: 3px;
+        .context-menu-item.danger:hover {
+          background: rgba(239, 68, 68, 0.15);
+          color: var(--accent-red);
+        }
+
+        /* Submodal Dialogs */
+        .submodal-overlay {
+          position: fixed;
+          inset: 0;
+          background: rgba(0, 0, 0, 0.6);
+          backdrop-filter: blur(4px);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 10000;
+        }
+        .submodal-card {
+          width: 400px;
+          background: var(--bg-card);
+          border: 1px solid var(--border-medium);
+          border-radius: 10px;
+          box-shadow: 0 16px 36px rgba(0, 0, 0, 0.45);
+          padding: 16px 20px;
+          display: flex;
+          flex-direction: column;
+          gap: 14px;
+        }
+        .submodal-header {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 13.5px;
+          font-weight: 700;
           color: var(--text-main);
+        }
+        .submodal-header.danger-header {
+          color: var(--accent-red);
+        }
+        .danger-icon { color: var(--accent-red); }
+        .submodal-desc {
+          font-size: 12px;
+          color: var(--text-main);
+          line-height: 1.45;
+        }
+        .submodal-actions {
+          display: flex;
+          justify-content: flex-end;
+          gap: 8px;
+        }
+        .submodal-column-actions {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+        .submodal-btn-choice {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          justify-content: flex-start;
+          padding: 8px 12px;
+          font-size: 11.5px;
+          height: auto;
+          text-align: left;
+        }
+        .cancel-choice-btn {
+          margin-top: 4px;
+          justify-content: center;
         }
 
         .spin { animation: spin 1s linear infinite; }

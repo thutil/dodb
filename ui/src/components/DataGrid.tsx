@@ -6,6 +6,7 @@ import {
   Key,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Search,
   FileText,
   Plus,
@@ -24,7 +25,8 @@ import {
   Copy,
   Code2,
   FileJson,
-  WrapText
+  WrapText,
+  X,
 } from "lucide-react";
 import { ColumnInfo, TableRowData, ConnectionProfile, ColumnFilter, FilterOperator } from "../types";
 
@@ -36,8 +38,8 @@ export interface PendingChanges {
 }
 
 interface DataGridProps {
-  activeProfile?: ConnectionProfile | null;
-  activeDatabase?: string;
+  activeProfile: ConnectionProfile | null;
+  activeDatabase: string;
   tableName: string | null;
   columns: ColumnInfo[];
   rows: TableRowData[];
@@ -48,11 +50,11 @@ interface DataGridProps {
   onPageChange: (newPage: number) => void;
   onRefresh: () => void;
   onCommitChanges: (changes: PendingChanges) => Promise<{ success: boolean; error?: string }>;
-  onUpdateRows?: (updater: (prev: TableRowData[]) => TableRowData[]) => void;
-  onUpdateTotalRows?: (updater: (prev: number) => number) => void;
+  onUpdateRows?: React.Dispatch<React.SetStateAction<TableRowData[]>>;
+  onUpdateTotalRows?: React.Dispatch<React.SetStateAction<number>>;
   sortColumn?: string | null;
   sortOrder?: "ASC" | "DESC";
-  onSortChange?: (col: string | null, order: "ASC" | "DESC") => void;
+  onSortChange?: (column: string | null, order: "ASC" | "DESC") => void;
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
   filters?: ColumnFilter[];
@@ -89,7 +91,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
   // View Mode: Table vs JSON
   const [viewMode, setViewMode] = useState<"table" | "json">("table");
   const [jsonFormat, setJsonFormat] = useState<"pretty" | "compact">("pretty");
-  const [jsonWrap, setJsonWrap] = useState(true);
+  const [jsonWrap, setJsonWrap] = useState<boolean>(true);
   const [copied, setCopied] = useState(false);
   const [cellCopied, setCellCopied] = useState(false);
 
@@ -98,17 +100,25 @@ export const DataGrid: React.FC<DataGridProps> = ({
   const [exportType, setExportType] = useState<"sql" | "csv" | "json">("sql");
   const [exportContent, setExportContent] = useState<string>("");
   const [exporting, setExporting] = useState(false);
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   
   // Pending Transaction Edits keyed by Primary Key Value (or row key)
   const [editedCells, setEditedCells] = useState<{ [pkKey: string]: TableRowData }>({});
   const [newRows, setNewRows] = useState<TableRowData[]>([]);
   const [deletedRowKeys, setDeletedRowKeys] = useState<Set<string>>(new Set());
+  const [confirmDeleteRow, setConfirmDeleteRow] = useState<{ pkKey: string; rowIdx: number; rowData: TableRowData } | null>(null);
   
+  // Close export dropdown on outside click
+  useEffect(() => {
+    if (!isExportMenuOpen) return;
+    const handleOutside = () => setIsExportMenuOpen(false);
+    window.addEventListener("click", handleOutside);
+    return () => window.removeEventListener("click", handleOutside);
+  }, [isExportMenuOpen]);
+
   // Active Inline Editing Cell
   const [editingCell, setEditingCell] = useState<{ pkKey: string; isNew: boolean; nIdx?: number; colName: string } | null>(null);
   const [editValue, setEditValue] = useState<string>("");
-
-
 
   const isDateTimeColumn = (colType: string = ""): boolean => {
     const t = colType.toLowerCase();
@@ -127,10 +137,36 @@ export const DataGrid: React.FC<DataGridProps> = ({
     setEditedCells({});
     setNewRows([]);
     setDeletedRowKeys(new Set());
+    setConfirmDeleteRow(null);
     setEditingCell(null);
     setRowEditModal(null);
     setCommitMsg(null);
   }, [tableName, page]);
+
+  // Escape key handler for all modals and drawers
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (confirmDeleteRow) {
+          setConfirmDeleteRow(null);
+        } else if (rowEditModal) {
+          setRowEditModal(null);
+        } else if (selectedCell) {
+          setSelectedCell(null);
+        } else if (exportModalOpen) {
+          setExportModalOpen(false);
+        } else if (isExportMenuOpen) {
+          setIsExportMenuOpen(false);
+        } else if (isFilterPanelOpen) {
+          setIsFilterPanelOpen(false);
+        } else if (editingCell) {
+          setEditingCell(null);
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [confirmDeleteRow, rowEditModal, selectedCell, exportModalOpen, isExportMenuOpen, isFilterPanelOpen, editingCell]);
 
   if (!tableName) {
     return (
@@ -265,7 +301,34 @@ export const DataGrid: React.FC<DataGridProps> = ({
     setNewRows((prev) => [...prev, blank]);
   };
 
-  // Toggle mark row for deletion
+  // Request mark row for deletion (triggers confirmation modal)
+  const handleRequestDeleteRow = (pkKey: string, rowIdx: number, rowData: TableRowData) => {
+    if (deletedRowKeys.has(pkKey)) {
+      // If already marked, unmark directly (restore)
+      setDeletedRowKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(pkKey);
+        return next;
+      });
+    } else {
+      // Show confirmation dialog before marking row red
+      setConfirmDeleteRow({ pkKey, rowIdx, rowData });
+    }
+  };
+
+  // Confirm marking row for deletion
+  const handleConfirmMarkDelete = () => {
+    if (!confirmDeleteRow) return;
+    const { pkKey } = confirmDeleteRow;
+    setDeletedRowKeys((prev) => {
+      const next = new Set(prev);
+      next.add(pkKey);
+      return next;
+    });
+    setConfirmDeleteRow(null);
+  };
+
+  // Direct toggle mark row for deletion
   const toggleDeleteRow = (pkKey: string) => {
     setDeletedRowKeys((prev) => {
       const next = new Set(prev);
@@ -283,6 +346,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
     setEditedCells({});
     setNewRows([]);
     setDeletedRowKeys(new Set());
+    setConfirmDeleteRow(null);
     setEditingCell(null);
     setRowEditModal(null);
     setCommitMsg({ success: true, text: "All uncommitted changes rolled back" });
@@ -607,18 +671,52 @@ export const DataGrid: React.FC<DataGridProps> = ({
                 <span>Add Row</span>
               </button>
 
-              <button className="btn btn-secondary" onClick={() => handleFetchExport("json")}>
-                <FileJson size={12} />
-                <span>Export JSON</span>
-              </button>
-              <button className="btn btn-secondary" onClick={() => handleFetchExport("sql")}>
-                <Download size={12} />
-                <span>Export SQL</span>
-              </button>
-              <button className="btn btn-secondary" onClick={() => handleFetchExport("csv")}>
-                <FileCode size={12} />
-                <span>Export CSV</span>
-              </button>
+              {/* Compact Export Dropdown */}
+              <div className="export-dropdown-wrap" onClick={(e) => e.stopPropagation()}>
+                <button
+                  className={`btn btn-secondary ${isExportMenuOpen ? "export-btn-active" : ""}`}
+                  onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
+                  title="Export table data (JSON, SQL, CSV)"
+                >
+                  <Download size={12} />
+                  <span>Export</span>
+                  <ChevronDown size={11} className={`export-chevron ${isExportMenuOpen ? "open" : ""}`} />
+                </button>
+                {isExportMenuOpen && (
+                  <div className="export-dropdown-menu">
+                    <button
+                      className="export-menu-item"
+                      onClick={() => {
+                        setIsExportMenuOpen(false);
+                        handleFetchExport("json");
+                      }}
+                    >
+                      <FileJson size={13} className="menu-icon json-icon" />
+                      <span>Export JSON</span>
+                    </button>
+                    <button
+                      className="export-menu-item"
+                      onClick={() => {
+                        setIsExportMenuOpen(false);
+                        handleFetchExport("sql");
+                      }}
+                    >
+                      <Download size={13} className="menu-icon sql-icon" />
+                      <span>Export SQL</span>
+                    </button>
+                    <button
+                      className="export-menu-item"
+                      onClick={() => {
+                        setIsExportMenuOpen(false);
+                        handleFetchExport("csv");
+                      }}
+                    >
+                      <FileCode size={13} className="menu-icon csv-icon" />
+                      <span>Export CSV</span>
+                    </button>
+                  </div>
+                )}
+              </div>
             </>
           )}
 
@@ -648,30 +746,30 @@ export const DataGrid: React.FC<DataGridProps> = ({
           <div className="filter-drawer-header">
             <div className="filter-drawer-title">
               <Filter size={13} className="filter-icon" />
-              <span>Column Filters</span>
+              <span>Filter Records</span>
+              {filters.length > 0 && <span className="filter-count-badge">{filters.length} active</span>}
             </div>
             <div className="filter-drawer-actions">
               <button className="btn btn-secondary btn-sm" onClick={addFilter}>
                 <Plus size={11} />
-                <span>Add Condition</span>
+                <span>Add Filter Rule</span>
               </button>
-              {(filters.length > 0 || searchQuery) && (
+              {filters.length > 0 && (
                 <button className="btn btn-secondary btn-sm" onClick={clearAllFilters}>
-                  <RotateCcw size={11} />
-                  <span>Clear Filters</span>
+                  Clear All
                 </button>
               )}
             </div>
           </div>
 
           {filters.length === 0 ? (
-            <div className="empty-filters-msg">No active column filters. Click &quot;+ Add Condition&quot; to filter table rows.</div>
+            <div className="empty-filters-msg">No active filters. Click &quot;Add Filter Rule&quot; to filter table columns.</div>
           ) : (
             <div className="filter-list">
               {filters.map((f) => (
                 <div key={f.id} className="filter-row">
                   <select
-                    className="input font-mono select-column"
+                    className="select select-column"
                     value={f.column}
                     onChange={(e) => updateFilter(f.id, { column: e.target.value })}
                   >
@@ -683,18 +781,18 @@ export const DataGrid: React.FC<DataGridProps> = ({
                   </select>
 
                   <select
-                    className="input select-operator"
+                    className="select select-operator"
                     value={f.operator}
                     onChange={(e) => updateFilter(f.id, { operator: e.target.value as FilterOperator })}
                   >
                     <option value="equals">= Equals</option>
-                    <option value="contains">🔍 Contains</option>
+                    <option value="contains">Contains</option>
                     <option value="startsWith">Starts with</option>
                     <option value="endsWith">Ends with</option>
                     <option value="gt">&gt; Greater than</option>
                     <option value="gte">&gt;= Greater or equal</option>
                     <option value="lt">&lt; Less than</option>
-                    <option value="lte">&lt;= Less or equal</option>
+                    <option value="lte">&lt; Less or equal</option>
                     <option value="neq">!= Not equal</option>
                     <option value="isNull">IS NULL</option>
                     <option value="isNotNull">IS NOT NULL</option>
@@ -702,16 +800,15 @@ export const DataGrid: React.FC<DataGridProps> = ({
 
                   {f.operator !== "isNull" && f.operator !== "isNotNull" && (
                     <input
-                      type="text"
-                      className="input font-mono filter-val-input"
-                      placeholder="Value..."
+                      className="input filter-val-input"
+                      placeholder="Filter value..."
                       value={f.value}
                       onChange={(e) => updateFilter(f.id, { value: e.target.value })}
                     />
                   )}
 
-                  <button className="icon-del-btn" onClick={() => removeFilter(f.id)} title="Remove filter">
-                    <Trash2 size={12} />
+                  <button className="btn btn-icon delete-filter-btn" onClick={() => removeFilter(f.id)}>
+                    <Trash2 size={13} />
                   </button>
                 </div>
               ))}
@@ -722,22 +819,27 @@ export const DataGrid: React.FC<DataGridProps> = ({
 
       {/* Transaction Commit / Rollback Bar */}
       {totalPending > 0 && (
-        <div className="transaction-bar">
+        <div className={`transaction-bar ${numDeletes > 0 ? "has-deletions" : ""}`}>
           <div className="tx-info">
             <Edit2 size={13} className="tx-icon" />
             <span>
               Uncommitted Changes ({totalPending}): {numInserts > 0 && `${numInserts} new, `}
               {numUpdates > 0 && `${numUpdates} edited, `}
-              {numDeletes > 0 && `${numDeletes} deleted`}
+              {numDeletes > 0 && (
+                <strong className="tx-delete-highlight">
+                  <Trash2 size={12} style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} />
+                  {numDeletes} marked for deletion (Click Commit Changes to delete from database)
+                </strong>
+              )}
             </span>
           </div>
 
           <div className="tx-actions">
             <button className="btn btn-secondary" onClick={handleRollback} disabled={submitting}>
               <RotateCcw size={12} />
-              <span>Rollback (Discard)</span>
+              <span>Rollback</span>
             </button>
-            <button className="btn btn-primary" onClick={handleCommit} disabled={submitting}>
+            <button className="btn btn-primary btn-commit-action" onClick={handleCommit} disabled={submitting}>
               <Check size={12} />
               <span>{submitting ? "Committing..." : "Commit Changes"}</span>
             </button>
@@ -895,12 +997,21 @@ export const DataGrid: React.FC<DataGridProps> = ({
                             <FileText size={11} />
                           </button>
                           <button
-                            className={`icon-del-btn ${isDeleted ? "active" : ""}`}
-                            onClick={() => toggleDeleteRow(pkKey)}
-                            title={isDeleted ? "Restore Row" : "Mark for Delete"}
+                            className={`icon-del-btn ${isDeleted ? "active is-deleted" : ""}`}
+                            onClick={() => handleRequestDeleteRow(pkKey, idx, row)}
+                            title={isDeleted ? "Restore Row" : "Mark Row for Delete"}
                           >
                             <Trash2 size={11} />
                           </button>
+                          {isDeleted && (
+                            <button
+                              className="icon-restore-btn"
+                              onClick={() => toggleDeleteRow(pkKey)}
+                              title="Restore Row"
+                            >
+                              <RotateCcw size={10} />
+                            </button>
+                          )}
                         </div>
                       </td>
                       {columns.map((col) => {
@@ -933,7 +1044,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                                 />
                               </div>
                             ) : isNull ? (
-                              "NULL"
+                              <span className="null-tag">NULL</span>
                             ) : typeof val === "object" ? (
                               JSON.stringify(val)
                             ) : (
@@ -958,64 +1069,54 @@ export const DataGrid: React.FC<DataGridProps> = ({
 
         <div className="page-nav-btns">
           <button
-            className="btn btn-secondary"
-            disabled={page === 0 || loading}
-            onClick={() => onPageChange(page - 1)}
+            className="btn btn-secondary btn-sm"
+            onClick={() => onPageChange(Math.max(0, page - 1))}
+            disabled={page === 0}
           >
-            <ChevronLeft size={13} />
+            <ChevronLeft size={12} />
             <span>Prev</span>
           </button>
           <button
-            className="btn btn-secondary"
-            disabled={page >= totalPages - 1 || loading}
+            className="btn btn-secondary btn-sm"
             onClick={() => onPageChange(page + 1)}
+            disabled={(page + 1) * pageSize >= totalRows}
           >
             <span>Next</span>
-            <ChevronRight size={13} />
+            <ChevronRight size={12} />
           </button>
         </div>
       </div>
 
-      {/* Full Row Edit Modal */}
+      {/* Row Edit Modal */}
       {rowEditModal && (
         <div className="cell-overlay" onClick={() => setRowEditModal(null)}>
-          <div className="row-modal-card" onClick={(e) => e.stopPropagation()}>
-            <div className="cell-card-header">
-              <div className="cell-card-title">
+          <div className="cell-card row-modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="cell-card-hdr">
+              <div className="hdr-left">
                 <Edit3 size={14} className="edit-icon" />
-                <span>Edit Row #{rowEditModal.rowIdx + 1} ({rowEditModal.pkKey})</span>
+                <span>Edit Row #{page * pageSize + rowEditModal.rowIdx + 1}</span>
               </div>
               <button className="icon-close-btn" onClick={() => setRowEditModal(null)}>
-                ×
+                <X size={14} />
               </button>
             </div>
 
             <div className="row-modal-body">
               {columns.map((col) => {
-                const isDate = isDateTimeColumn(col.type);
-                const curVal = rowEditModal.data[col.name] === null || rowEditModal.data[col.name] === undefined
-                  ? ""
-                  : String(rowEditModal.data[col.name]);
-
+                const val = rowEditModal.data[col.name];
                 return (
-                  <div key={col.name} className="row-field-group">
-                    <label className="row-field-label">
-                      <span>{col.name}</span>
-                      <span className="col-type-tag">{col.type}</span>
-                    </label>
-                    <div className="input-with-picker">
-                      <input
-                        type={isDate ? (col.type.toLowerCase().includes("timestamp") || col.type.toLowerCase().includes("datetime") ? "datetime-local" : "date") : "text"}
-                        className="input font-mono"
-                        value={curVal}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setRowEditModal((prev) =>
-                            prev ? { ...prev, data: { ...prev.data, [col.name]: val } } : null
-                          );
-                        }}
-                      />
-                    </div>
+                  <div key={col.name} className="field-group">
+                    <label className="field-label font-mono">{col.name} ({col.type})</label>
+                    <input
+                      className="input form-control font-mono"
+                      value={val === null || val === undefined ? "" : String(val)}
+                      onChange={(e) =>
+                        setRowEditModal({
+                          ...rowEditModal,
+                          data: { ...rowEditModal.data, [col.name]: e.target.value },
+                        })
+                      }
+                    />
                   </div>
                 );
               })}
@@ -1026,74 +1127,77 @@ export const DataGrid: React.FC<DataGridProps> = ({
                 Cancel
               </button>
               <button className="btn btn-primary" onClick={saveRowModal}>
-                Save Row Edits
+                <Check size={12} />
+                <span>Apply to Row</span>
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Inspect Cell Overlay */}
+      {/* Single Cell Inspect Modal */}
       {selectedCell && (
         <div className="cell-overlay" onClick={() => setSelectedCell(null)}>
           <div className="cell-card" onClick={(e) => e.stopPropagation()}>
-            <div className="cell-card-header">
-              <div className="cell-card-title">
-                <FileText size={14} className="cell-modal-icon" />
-                <span>Column: {selectedCell.col}</span>
+            <div className="cell-card-hdr">
+              <div className="hdr-left">
+                <FileText size={14} className="edit-icon" />
+                <span>Inspect Value: {selectedCell.col}</span>
               </div>
-              <div className="cell-card-actions">
-                <button
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => {
-                    const text = selectedCell.val === null
-                      ? "null"
+              <button className="icon-close-btn" onClick={() => setSelectedCell(null)}>
+                <X size={14} />
+              </button>
+            </div>
+
+            <div className="row-modal-body">
+              <textarea
+                readOnly
+                className="textarea cell-mono-text font-mono"
+                value={
+                  selectedCell.val === null
+                    ? "NULL"
+                    : typeof selectedCell.val === "object"
+                    ? JSON.stringify(selectedCell.val, null, 2)
+                    : String(selectedCell.val)
+                }
+              />
+            </div>
+
+            <div className="cell-card-footer">
+              <button className="btn btn-secondary" onClick={() => setSelectedCell(null)}>
+                Close
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={() => {
+                  const text =
+                    selectedCell.val === null
+                      ? "NULL"
                       : typeof selectedCell.val === "object"
                       ? JSON.stringify(selectedCell.val, null, 2)
                       : String(selectedCell.val);
-                    handleCopyCell(text);
-                  }}
-                  title="Copy value to clipboard"
-                >
-                  {cellCopied ? <Check size={11} className="copy-check-icon" /> : <Copy size={11} />}
-                  <span>{cellCopied ? "Copied!" : "Copy"}</span>
-                </button>
-                <button className="icon-close-btn" onClick={() => setSelectedCell(null)}>
-                  ×
-                </button>
-              </div>
-            </div>
-            <textarea
-              readOnly
-              className="textarea cell-mono-text font-mono"
-              value={
-                selectedCell.val === null
-                  ? "NULL"
-                  : typeof selectedCell.val === "object"
-                  ? JSON.stringify(selectedCell.val, null, 2)
-                  : String(selectedCell.val)
-              }
-            />
-            <div className="cell-card-footer">
-              <button className="btn btn-primary" onClick={() => setSelectedCell(null)}>
-                Close
+                  handleCopyCell(text);
+                }}
+              >
+                {cellCopied ? <Check size={12} /> : <Copy size={12} />}
+                <span>{cellCopied ? "Copied!" : "Copy Value"}</span>
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Export Data Modal */}
+      {/* Export Table Modal */}
       {exportModalOpen && (
         <div className="cell-overlay" onClick={() => setExportModalOpen(false)}>
-          <div className="row-modal-card" onClick={(e) => e.stopPropagation()}>
-            <div className="cell-card-header">
-              <div className="cell-card-title">
+          <div className="cell-card" onClick={(e) => e.stopPropagation()}>
+            <div className="cell-card-hdr">
+              <div className="hdr-left">
                 <Download size={14} className="edit-icon" />
                 <span>Export Table: {tableName} ({exportType.toUpperCase()})</span>
               </div>
               <button className="icon-close-btn" onClick={() => setExportModalOpen(false)}>
-                ×
+                <X size={14} />
               </button>
             </div>
 
@@ -1123,6 +1227,37 @@ export const DataGrid: React.FC<DataGridProps> = ({
         </div>
       )}
 
+      {/* Confirm Mark Row Delete Modal Dialog */}
+      {confirmDeleteRow && (
+        <div className="cell-overlay" onClick={() => setConfirmDeleteRow(null)}>
+          <div className="cell-card delete-confirm-card" onClick={(e) => e.stopPropagation()}>
+            <div className="cell-card-hdr danger-hdr">
+              <div className="hdr-left">
+                <AlertCircle size={15} className="danger-icon" />
+                <span>Confirm Deletion</span>
+              </div>
+              <button className="icon-close-btn" onClick={() => setConfirmDeleteRow(null)}>
+                <X size={14} />
+              </button>
+            </div>
+            <div className="delete-modal-content">
+              <p className="delete-modal-notice">
+                Mark row <strong>#{page * pageSize + confirmDeleteRow.rowIdx + 1}</strong> for deletion?
+              </p>
+            </div>
+            <div className="cell-actions delete-modal-actions">
+              <button className="btn btn-secondary" onClick={() => setConfirmDeleteRow(null)}>
+                Cancel
+              </button>
+              <button className="btn btn-danger" onClick={handleConfirmMarkDelete}>
+                <Trash2 size={12} />
+                <span>Confirm</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <style jsx>{`
         .grid-pane {
           flex: 1;
@@ -1133,28 +1268,36 @@ export const DataGrid: React.FC<DataGridProps> = ({
         }
 
         .grid-bar {
-          padding: 8px 14px;
+          padding: 10px 16px;
           background: var(--bg-header);
           border-bottom: 1px solid var(--border-light);
           display: flex;
           justify-content: space-between;
           align-items: center;
+          gap: 12px;
         }
 
         .meta-group {
           display: flex;
           align-items: center;
           gap: 10px;
+          flex-shrink: 0;
         }
         .table-icon { color: var(--accent-blue); }
-        .table-name-text { font-size: 14px; font-weight: 700; }
+        .table-name-text {
+          font-size: 14px;
+          font-weight: 700;
+          letter-spacing: -0.2px;
+        }
         .count-pill {
-          font-size: 10px;
+          font-size: 10.5px;
           color: var(--text-muted);
           background: var(--bg-tertiary);
-          padding: 2px 6px;
-          border-radius: 4px;
+          padding: 2.5px 7px;
+          border-radius: 5px;
           font-weight: 500;
+          font-variant-numeric: tabular-nums;
+          border: 1px solid var(--border-light);
         }
 
         /* View Mode Segmented Switch */
@@ -1165,7 +1308,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
           border-radius: 6px;
           border: 1px solid var(--border-light);
           gap: 2px;
-          margin-left: 4px;
+          margin-left: 2px;
         }
         .view-toggle-btn {
           display: inline-flex;
@@ -1190,7 +1333,67 @@ export const DataGrid: React.FC<DataGridProps> = ({
           box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
         }
 
-        .bar-actions { display: flex; gap: 8px; align-items: center; }
+        .bar-actions {
+          display: flex;
+          gap: 8px;
+          align-items: center;
+          flex-wrap: nowrap;
+        }
+
+        /* Export Dropdown */
+        .export-dropdown-wrap {
+          position: relative;
+        }
+        .export-btn-active {
+          border-color: var(--accent-blue) !important;
+          color: var(--accent-blue) !important;
+        }
+        .export-chevron {
+          transition: transform 0.15s ease;
+          color: var(--text-muted);
+        }
+        .export-chevron.open {
+          transform: rotate(180deg);
+        }
+        .export-dropdown-menu {
+          position: absolute;
+          right: 0;
+          top: calc(100% + 5px);
+          background: var(--bg-card);
+          border: 1px solid var(--border-medium);
+          border-radius: var(--radius-sm);
+          padding: 4px;
+          box-shadow: var(--shadow-popup);
+          z-index: 120;
+          min-width: 155px;
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+        .export-menu-item {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 6px 10px;
+          border: none;
+          background: transparent;
+          color: var(--text-main);
+          font-size: 11.5px;
+          font-weight: 500;
+          border-radius: 4px;
+          cursor: pointer;
+          text-align: left;
+          width: 100%;
+          transition: all 0.12s ease;
+        }
+        .export-menu-item:hover {
+          background: var(--bg-hover);
+          color: var(--accent-blue);
+        }
+        .menu-icon { flex-shrink: 0; }
+        .json-icon { color: #f59e0b; }
+        .sql-icon { color: var(--accent-blue); }
+        .csv-icon { color: var(--accent-green); }
         
         .json-toolbar-group {
           display: flex;
@@ -1215,25 +1418,40 @@ export const DataGrid: React.FC<DataGridProps> = ({
           color: var(--accent-green);
         }
 
-        .search-wrap { position: relative; display: flex; align-items: center; }
-        .search-icon { position: absolute; left: 8px; color: var(--text-muted); }
-        .search-input { padding-left: 26px; width: 160px; font-size: 11px; }
+        .search-wrap {
+          position: relative;
+          display: flex;
+          align-items: center;
+        }
+        .search-icon {
+          position: absolute;
+          left: 9px;
+          color: var(--text-muted);
+          pointer-events: none;
+        }
+        .search-input {
+          padding-left: 28px;
+          width: 180px;
+          height: 28px;
+          font-size: 11.5px;
+          border-radius: 5px;
+        }
 
         .transaction-bar {
-          padding: 6px 14px;
+          padding: 7px 16px;
           background: rgba(245, 158, 11, 0.12);
           border-bottom: 1px solid rgba(245, 158, 11, 0.3);
           display: flex;
           justify-content: space-between;
           align-items: center;
-          font-size: 11px;
+          font-size: 11.5px;
         }
-        .tx-info { display: flex; align-items: center; gap: 6px; color: #f59e0b; font-weight: 600; }
+        .tx-info { display: flex; align-items: center; gap: 7px; color: #f59e0b; font-weight: 600; }
         .tx-actions { display: flex; gap: 8px; }
 
         .status-bar-msg {
-          padding: 6px 14px;
-          font-size: 11px;
+          padding: 7px 16px;
+          font-size: 11.5px;
           display: flex;
           align-items: center;
           gap: 6px;
@@ -1260,7 +1478,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
         .pro-table {
           width: 100%;
           border-collapse: collapse;
-          font-size: 11px;
+          font-size: 12px;
         }
 
         .pro-table th {
@@ -1269,7 +1487,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
           background: var(--bg-tertiary);
           color: var(--text-sub);
           text-align: left;
-          padding: 6px 10px;
+          padding: 8px 12px;
           border-bottom: 1px solid var(--border-light);
           border-right: 1px solid var(--border-light);
           z-index: 10;
@@ -1278,14 +1496,28 @@ export const DataGrid: React.FC<DataGridProps> = ({
         .hdr-flex {
           display: flex;
           align-items: center;
-          gap: 6px;
+          gap: 7px;
+          min-height: 20px;
         }
-        .pk-icon { color: #f59e0b; }
-        .col-title { font-weight: 600; color: var(--text-main); }
-        .col-type-tag { font-size: 9px; color: var(--text-muted); font-family: var(--font-mono); }
+        .pk-icon { color: #f59e0b; flex-shrink: 0; }
+        .col-title {
+          font-weight: 600;
+          color: var(--text-main);
+          font-size: 12px;
+        }
+        .col-type-tag {
+          font-size: 9.5px;
+          color: var(--text-muted);
+          font-family: var(--font-mono);
+          background: rgba(255, 255, 255, 0.05);
+          padding: 1px 5px;
+          border-radius: 3px;
+          border: 1px solid var(--border-light);
+          white-space: nowrap;
+        }
 
-        .num-col { width: 36px; text-align: center; }
-        .action-col { width: 56px; text-align: center; }
+        .num-col { width: 44px; min-width: 44px; text-align: center; }
+        .action-col { width: 88px; min-width: 88px; text-align: center; }
 
         .row-index {
           text-align: center;
@@ -1293,8 +1525,10 @@ export const DataGrid: React.FC<DataGridProps> = ({
           background: var(--bg-sidebar);
           border-right: 1px solid var(--border-light);
           border-bottom: 1px solid var(--border-light);
-          font-size: 10px;
+          font-size: 11px;
           font-family: var(--font-mono);
+          font-variant-numeric: tabular-nums;
+          padding: 7px 4px;
         }
         .new-idx { color: var(--accent-green); font-weight: bold; }
 
@@ -1302,12 +1536,13 @@ export const DataGrid: React.FC<DataGridProps> = ({
           text-align: center;
           border-bottom: 1px solid var(--border-light);
           border-right: 1px solid var(--border-light);
+          padding: 5px 6px;
         }
         .act-group {
           display: flex;
           align-items: center;
           justify-content: center;
-          gap: 3px;
+          gap: 5px;
         }
 
         .icon-edit-btn, .icon-del-btn {
@@ -1315,8 +1550,9 @@ export const DataGrid: React.FC<DataGridProps> = ({
           border: none;
           color: var(--text-muted);
           cursor: pointer;
-          padding: 2px 4px;
-          border-radius: 3px;
+          padding: 3px 5px;
+          border-radius: 4px;
+          transition: all 0.12s ease;
         }
         .icon-edit-btn:hover {
           color: var(--accent-blue);
@@ -1326,15 +1562,64 @@ export const DataGrid: React.FC<DataGridProps> = ({
           color: var(--accent-red);
           background: rgba(239, 68, 68, 0.15);
         }
+        .icon-del-btn.is-deleted {
+          color: #ef4444;
+          background: rgba(239, 68, 68, 0.25);
+        }
+
+        .icon-restore-btn {
+          background: rgba(59, 130, 246, 0.15);
+          color: var(--accent-blue);
+          border: 1px solid rgba(59, 130, 246, 0.35);
+          border-radius: 3px;
+          padding: 2px 5px;
+          cursor: pointer;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          transition: all 0.12s ease;
+        }
+        .icon-restore-btn:hover {
+          background: var(--accent-blue);
+          color: #fff;
+        }
+
+        .transaction-bar.has-deletions {
+          border-left: 4px solid var(--accent-red);
+          background: rgba(239, 68, 68, 0.12);
+        }
+        .tx-delete-highlight {
+          color: var(--accent-red);
+          font-weight: 700;
+        }
 
         .pro-table td {
-          padding: 5px 10px;
+          padding: 7px 12px;
           border-bottom: 1px solid var(--border-light);
           border-right: 1px solid var(--border-light);
           white-space: nowrap;
-          max-width: 280px;
+          max-width: 320px;
           overflow: hidden;
           text-overflow: ellipsis;
+          font-size: 12px;
+          line-height: 1.4;
+        }
+
+        .pro-table tr:hover td {
+          background: var(--bg-hover);
+        }
+
+        .null-tag {
+          display: inline-block;
+          font-size: 10px;
+          font-style: italic;
+          color: var(--text-muted);
+          background: rgba(255, 255, 255, 0.04);
+          padding: 1px 5px;
+          border-radius: 3px;
+          border: 1px solid var(--border-light);
+          letter-spacing: 0.2px;
+          opacity: 0.7;
         }
 
         .pro-table tr:hover td {
@@ -1342,9 +1627,89 @@ export const DataGrid: React.FC<DataGridProps> = ({
         }
 
         .row-deleted td {
+          background: rgba(239, 68, 68, 0.22) !important;
+          color: #fca5a5 !important;
           text-decoration: line-through;
-          opacity: 0.4;
-          background: rgba(239, 68, 68, 0.05);
+          border-bottom: 1px solid rgba(239, 68, 68, 0.35) !important;
+          border-right: 1px solid rgba(239, 68, 68, 0.2) !important;
+        }
+        .row-deleted:hover td {
+          background: rgba(239, 68, 68, 0.3) !important;
+        }
+
+        .delete-confirm-card {
+          width: 450px;
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+          box-shadow: 0 16px 36px rgba(0, 0, 0, 0.45);
+        }
+        .danger-hdr {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          color: var(--accent-red);
+          font-weight: 700;
+          font-size: 13px;
+        }
+        .danger-hdr .hdr-left {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+        .danger-icon { color: var(--accent-red); }
+        .delete-modal-content {
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+        }
+        .delete-modal-notice {
+          font-size: 12px;
+          color: var(--text-main);
+          line-height: 1.4;
+        }
+        .delete-preview-box {
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-light);
+          border-radius: var(--radius-sm);
+          padding: 8px 10px;
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          max-height: 120px;
+          overflow-y: auto;
+          font-size: 11px;
+        }
+        .preview-item {
+          display: flex;
+          gap: 6px;
+          align-items: center;
+        }
+        .preview-col {
+          color: var(--text-muted);
+          font-weight: 600;
+        }
+        .preview-val {
+          color: var(--text-main);
+        }
+        .delete-step-hint {
+          font-size: 11px;
+          color: var(--text-sub);
+          background: rgba(245, 158, 11, 0.1);
+          border: 1px solid rgba(245, 158, 11, 0.25);
+          border-radius: var(--radius-sm);
+          padding: 6px 10px;
+          display: flex;
+          gap: 6px;
+          line-height: 1.4;
+        }
+        .step-badge {
+          color: #f59e0b;
+          font-weight: 700;
+          flex-shrink: 0;
+        }
+        .delete-modal-actions {
+          margin-top: 4px;
         }
 
         .cell-data { cursor: pointer; }

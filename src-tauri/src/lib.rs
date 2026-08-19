@@ -15,6 +15,7 @@ pub fn run() {
         // Profile Management
         get_profiles,
         save_profile,
+        save_all_profiles,
         delete_profile,
         test_connection,
         // Database & Table Operations

@@ -102,8 +102,10 @@ pub async fn get_columns(id: String, database: String, table: String, state: Sta
             let mut col_info = serde_json::Map::new();
             
             if profile.r#type == SupportedDB::Sqlite {
-                col_info.insert("name".to_string(), obj.get("name").cloned().unwrap_or_default());
-                col_info.insert("type".to_string(), obj.get("type").cloned().unwrap_or_default());
+                let name = obj.get("name").cloned().unwrap_or_default();
+                let col_type = obj.get("type").cloned().unwrap_or_default();
+                col_info.insert("name".to_string(), name);
+                col_info.insert("type".to_string(), col_type.clone());
                 
                 let notnull_val = obj.get("notnull").unwrap_or(&serde_json::Value::Null);
                 let is_not_null = notnull_val.as_i64().map(|v| v != 0).unwrap_or_else(|| notnull_val.as_str() == Some("1"));
@@ -113,6 +115,9 @@ pub async fn get_columns(id: String, database: String, table: String, state: Sta
                 let is_pk = pk_val.as_i64().map(|v| v != 0).unwrap_or_else(|| pk_val.as_str() == Some("1"));
                 col_info.insert("primaryKey".to_string(), serde_json::Value::Bool(is_pk));
                 col_info.insert("default".to_string(), obj.get("dflt_value").cloned().unwrap_or(serde_json::Value::Null));
+
+                let is_auto = is_pk && col_type.as_str().map(|t| t.to_lowercase().contains("int")).unwrap_or(false);
+                col_info.insert("autoIncrement".to_string(), serde_json::Value::Bool(is_auto));
             } else if profile.r#type == SupportedDB::Mariadb {
                 col_info.insert("name".to_string(), obj.get("Field").cloned().unwrap_or_default());
                 col_info.insert("type".to_string(), obj.get("Type").cloned().unwrap_or_default());
@@ -123,6 +128,11 @@ pub async fn get_columns(id: String, database: String, table: String, state: Sta
                 let is_pk = obj.get("Key").and_then(|v| v.as_str()).unwrap_or("") == "PRI";
                 col_info.insert("primaryKey".to_string(), serde_json::Value::Bool(is_pk));
                 col_info.insert("default".to_string(), obj.get("Default").cloned().unwrap_or(serde_json::Value::Null));
+
+                let extra_val = obj.get("Extra").and_then(|v| v.as_str()).unwrap_or("");
+                let is_auto = extra_val.to_lowercase().contains("auto_increment");
+                col_info.insert("autoIncrement".to_string(), serde_json::Value::Bool(is_auto));
+                col_info.insert("extra".to_string(), serde_json::Value::String(extra_val.to_string()));
             } else {
                 // Postgres
                 col_info.insert("name".to_string(), obj.get("name").cloned().unwrap_or_default());
@@ -135,7 +145,12 @@ pub async fn get_columns(id: String, database: String, table: String, state: Sta
                 let pk_val = obj.get("primary_key").unwrap_or(&serde_json::Value::Null);
                 let is_pk = pk_val.as_bool().unwrap_or_else(|| pk_val.as_str() == Some("true") || pk_val.as_str() == Some("1") || pk_val.as_i64() == Some(1));
                 col_info.insert("primaryKey".to_string(), serde_json::Value::Bool(is_pk));
-                col_info.insert("default".to_string(), obj.get("default_value").cloned().unwrap_or(serde_json::Value::Null));
+                let def_val = obj.get("default_value").cloned().unwrap_or(serde_json::Value::Null);
+                col_info.insert("default".to_string(), def_val.clone());
+
+                let def_str = def_val.as_str().unwrap_or("");
+                let is_auto = def_str.contains("nextval") || def_str.contains("identity");
+                col_info.insert("autoIncrement".to_string(), serde_json::Value::Bool(is_auto));
             }
             columns.push(serde_json::Value::Object(col_info));
         }

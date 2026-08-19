@@ -48,6 +48,9 @@ export default function Home() {
   const [searchQuery, setSearchQuery] = useState("");
   const [filters, setFilters] = useState<ColumnFilter[]>([]);
 
+  // Request sequence ref to prevent table data race condition
+  const fetchSeqRef = React.useRef(0);
+
   // Auto-detect OS Theme on mount
   useEffect(() => {
     const isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
@@ -188,17 +191,22 @@ export default function Home() {
 
   const fetchTableData = useCallback(async () => {
     if (!activeProfile || !activeDatabase || !activeTable) return;
+    const currentReqSeq = ++fetchSeqRef.current;
+    const reqProfileId = activeProfile.id;
+    const reqDatabase = activeDatabase;
+    const reqTable = activeTable;
+
     setLoadingData(true);
     try {
       // 1. Fetch columns metadata
-      const colData: any = await apiClient.getColumns(activeProfile.id, activeDatabase, activeTable);
-      setColumns(colData.columns || []);
+      const colData: any = await apiClient.getColumns(reqProfileId, reqDatabase, reqTable);
+      if (fetchSeqRef.current !== currentReqSeq) return;
 
       // 2. Fetch paginated rows with sorting, search, and filtering
       const rowData: any = await apiClient.getRows(
-        activeProfile.id,
-        activeDatabase,
-        activeTable,
+        reqProfileId,
+        reqDatabase,
+        reqTable,
         pageSize,
         page * pageSize,
         sortColumn,
@@ -206,13 +214,19 @@ export default function Home() {
         searchQuery,
         filters
       );
-      
+      if (fetchSeqRef.current !== currentReqSeq) return;
+
+      setColumns(colData.columns || []);
       setRows(rowData.rows || []);
       setTotalRows(rowData.total || 0);
     } catch (err) {
-      console.error("Fetch table data error", err);
+      if (fetchSeqRef.current === currentReqSeq) {
+        console.error("Fetch table data error", err);
+      }
     } finally {
-      setLoadingData(false);
+      if (fetchSeqRef.current === currentReqSeq) {
+        setLoadingData(false);
+      }
     }
   }, [activeProfile, activeDatabase, activeTable, page, sortColumn, sortOrder, searchQuery, filters, pageSize]);
 
@@ -231,6 +245,30 @@ export default function Home() {
       const msg = typeof err === "string" ? err : err?.message || String(err);
       throw new Error(msg || "Save profile failed");
     }
+  };
+
+  const handleSaveAllProfiles = async (newProfiles: ConnectionProfile[]) => {
+    try {
+      await apiClient.saveAllProfiles(newProfiles);
+      await fetchProfiles();
+    } catch (err: any) {
+      const msg = typeof err === "string" ? err : err?.message || String(err);
+      throw new Error(msg || "Save profiles failed");
+    }
+  };
+
+  const handleSwitchProfile = (profile: ConnectionProfile) => {
+    fetchSeqRef.current += 1;
+    setActiveProfile(profile);
+    setActiveDatabase("");
+    setDatabases([]);
+    setTables([]);
+    setActiveTable(null);
+    setColumns([]);
+    setRows([]);
+    setTotalRows(0);
+    setPage(0);
+    setIsConnModalOpen(false);
   };
 
   const handleDeleteProfile = async (id: string) => {
@@ -276,10 +314,10 @@ export default function Home() {
   };
 
   const handleExecuteSql = async (sql: string): Promise<QueryExecutionResult> => {
-    if (!activeProfile) {
-      throw new Error("โปรดเลือกการเชื่อมต่อฐานข้อมูลก่อนรันคำสั่ง");
+    if (!activeProfile || !activeDatabase) {
+      throw new Error("Please select an active database connection before running SQL queries.");
     }
-    
+
     const start = performance.now();
     try {
       const data: any = await apiClient.executeCommand(
@@ -335,7 +373,7 @@ export default function Home() {
     if (!activeProfile || !activeTable) {
       return { success: false, error: "Missing active database connection or table" };
     }
-    
+
     const start = performance.now();
     const numInserts = changes.inserts?.length || 0;
     const numUpdates = changes.updates?.length || 0;
@@ -344,10 +382,10 @@ export default function Home() {
 
     try {
       await apiClient.commitChanges(
-          activeProfile.id,
-          activeDatabase || activeProfile.database,
-          activeTable,
-          changes
+        activeProfile.id,
+        activeDatabase || activeProfile.database,
+        activeTable,
+        changes
       );
       const duration = Math.round(performance.now() - start);
 
@@ -385,7 +423,7 @@ export default function Home() {
   return (
     <React.Fragment>
       <Head>
-        <title>dodb - macOS Native Database Manager</title>
+        <title>DODB - Database Manager</title>
         <meta name="description" content="Simple, fast macOS Native Database Manager for Postgres, MySQL, MariaDB & SQLite" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <link rel="icon" href="/favicon.ico" />
@@ -395,10 +433,13 @@ export default function Home() {
       <div className="app-layout">
         <Header
           activeProfile={activeProfile}
+          profiles={profiles}
+          onSelectProfile={handleSwitchProfile}
           activeDatabase={activeDatabase}
           databases={databases}
           onSelectDatabase={(db) => {
             if (db !== activeDatabase) {
+              fetchSeqRef.current += 1;
               setActiveDatabase(db);
               setActiveTable(null);
               setRows([]);
@@ -423,6 +464,7 @@ export default function Home() {
               activeDatabase={activeDatabase}
               onSelectDatabase={(db) => {
                 if (db !== activeDatabase) {
+                  fetchSeqRef.current += 1;
                   setActiveDatabase(db);
                   setActiveTable(null);
                   setRows([]);
@@ -434,10 +476,17 @@ export default function Home() {
               tables={tables}
               activeTable={activeTable}
               onSelectTable={(tbl) => {
-                setActiveTable(tbl);
-                setPage(0);
-                if (activeView !== "explorer") {
-                  setActiveView("explorer");
+                if (tbl !== activeTable) {
+                  fetchSeqRef.current += 1;
+                  setRows([]);
+                  setColumns([]);
+                  setTotalRows(0);
+                  setLoadingData(true);
+                  setActiveTable(tbl);
+                  setPage(0);
+                  if (activeView !== "explorer") {
+                    setActiveView("explorer");
+                  }
                 }
               }}
               onViewStructure={(tbl) => setStructureModalTable(tbl)}
@@ -519,11 +568,9 @@ export default function Home() {
           profiles={profiles}
           activeProfile={activeProfile}
           onSaveProfile={handleSaveProfile}
+          onSaveAllProfiles={handleSaveAllProfiles}
           onDeleteProfile={handleDeleteProfile}
-          onConnect={(profile) => {
-            setActiveProfile(profile);
-            setIsConnModalOpen(false);
-          }}
+          onConnect={handleSwitchProfile}
           onDisconnect={handleDisconnect}
           onTestConnection={handleTestConnection}
         />
