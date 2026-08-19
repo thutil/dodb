@@ -200,7 +200,6 @@ export const Header: React.FC<HeaderProps> = ({
           justify-content: center;
           -webkit-app-region: no-drag;
           flex: 1;
-          max-width: 540px;
         }
         .nav-tabs {
           display: flex;
@@ -399,7 +398,7 @@ export const Header: React.FC<HeaderProps> = ({
           .brand-title, .brand-badge { display: none; }
           .profile-title { display: none; }
           .db-type-badge { display: none; }
-          .app-header { padding: 0 8px 0 72px; gap: 8px; }
+          .app-header { padding: 0 8px 0 8px; gap: 8px; }
         }
 
         @media (max-width: 680px) {

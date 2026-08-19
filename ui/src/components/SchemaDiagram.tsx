@@ -215,7 +215,7 @@ export const SchemaDiagram: React.FC<SchemaDiagramProps> = ({
         activeProfile.id,
         activeDatabase
       );
-      
+
       const fetchedTables: TableData[] = data?.tables || [];
       const fetchedRelations: Relation[] = data?.relations || [];
 
@@ -506,7 +506,7 @@ export const SchemaDiagram: React.FC<SchemaDiagramProps> = ({
           position: absolute;
           inset: 0;
           z-index: 100;
-          background: rgba(18, 18, 22, 0.75);
+          background: white; 
           backdrop-filter: blur(4px);
           display: flex;
           flex-direction: column;
