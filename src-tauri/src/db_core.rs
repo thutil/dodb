@@ -68,11 +68,38 @@ pub async fn get_pool(
                 "postgres://{}:{}@{}:{}/{}",
                 profile.user, profile.password, profile.host, profile.port, db_name
             );
-            let p = sqlx::postgres::PgPoolOptions::new()
+            
+            let connect_opts = url.parse::<sqlx::postgres::PgConnectOptions>()
+                .unwrap_or_else(|_| {
+                    sqlx::postgres::PgConnectOptions::new()
+                        .host(&profile.host)
+                        .port(profile.port)
+                        .username(&profile.user)
+                        .password(&profile.password)
+                        .database(&db_name)
+                });
+
+            // Try connecting with Prefer first, fallback to Disable if server fails on SSLRequest
+            let connect_res = sqlx::postgres::PgPoolOptions::new()
                 .max_connections(5)
-                .connect(&url)
-                .await
-                .map_err(|e| format!("Failed to connect to Postgres database '{}': {}", db_name, e))?;
+                .connect_with(connect_opts.clone().ssl_mode(sqlx::postgres::PgSslMode::Prefer))
+                .await;
+
+            let p = match connect_res {
+                Ok(pool) => pool,
+                Err(err) => {
+                    let err_msg = err.to_string();
+                    if err_msg.contains("SSLRequest") || err_msg.contains("tls") || err_msg.contains("ssl") || err_msg.contains("0x5a") {
+                        sqlx::postgres::PgPoolOptions::new()
+                            .max_connections(5)
+                            .connect_with(connect_opts.ssl_mode(sqlx::postgres::PgSslMode::Disable))
+                            .await
+                            .map_err(|e2| format!("Failed to connect to Postgres database '{}': {}", db_name, e2))?
+                    } else {
+                        return Err(format!("Failed to connect to Postgres database '{}': {}", db_name, err));
+                    }
+                }
+            };
             DbPool::Postgres(p)
         }
         SupportedDB::Mariadb => {

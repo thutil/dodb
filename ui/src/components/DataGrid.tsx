@@ -48,6 +48,8 @@ interface DataGridProps {
   onPageChange: (newPage: number) => void;
   onRefresh: () => void;
   onCommitChanges: (changes: PendingChanges) => Promise<{ success: boolean; error?: string }>;
+  onUpdateRows?: (updater: (prev: TableRowData[]) => TableRowData[]) => void;
+  onUpdateTotalRows?: (updater: (prev: number) => number) => void;
   sortColumn?: string | null;
   sortOrder?: "ASC" | "DESC";
   onSortChange?: (col: string | null, order: "ASC" | "DESC") => void;
@@ -71,6 +73,8 @@ export const DataGrid: React.FC<DataGridProps> = ({
   onPageChange,
   onRefresh,
   onCommitChanges,
+  onUpdateRows,
+  onUpdateTotalRows,
   sortColumn,
   sortOrder = "ASC",
   onSortChange,
@@ -316,10 +320,53 @@ export const DataGrid: React.FC<DataGridProps> = ({
 
       if (res.success) {
         setCommitMsg({ success: true, text: "Transaction committed to database successfully" });
+
+        // In-place local row update without reloading entire dataset
+        if (onUpdateRows) {
+          onUpdateRows((prevRows) => {
+            let updated = [...prevRows];
+
+            // 1. Apply cell updates in place
+            if (Object.keys(editedCells).length > 0) {
+              updated = updated.map((row, idx) => {
+                const key = getPkKey(row, idx);
+                if (editedCells[key]) {
+                  return { ...row, ...editedCells[key] };
+                }
+                return row;
+              });
+            }
+
+            // 2. Remove deleted rows in place
+            if (deletedRowKeys.size > 0) {
+              updated = updated.filter((row, idx) => {
+                const key = getPkKey(row, idx);
+                return !deletedRowKeys.has(key);
+              });
+            }
+
+            // 3. Prepend new inserted rows
+            if (insertsToSubmit.length > 0) {
+              updated = [...insertsToSubmit, ...updated];
+            }
+
+            return updated;
+          });
+        } else {
+          onRefresh();
+        }
+
+        // Update total rows count in place
+        if (onUpdateTotalRows) {
+          const delta = insertsToSubmit.length - deletesToSubmit.length;
+          if (delta !== 0) {
+            onUpdateTotalRows((prev) => Math.max(0, prev + delta));
+          }
+        }
+
         setEditedCells({});
         setNewRows([]);
         setDeletedRowKeys(new Set());
-        onRefresh();
       } else {
         setCommitMsg({ success: false, text: res.error || "Commit failed, transaction rolled back" });
       }

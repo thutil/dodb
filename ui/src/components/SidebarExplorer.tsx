@@ -1,5 +1,6 @@
-import React, { useState } from "react";
-import { Database, Table2, RefreshCw, Search, HardDrive, X } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
+import { Database, Table2, RefreshCw, Search, HardDrive, X, Layers, Terminal, Copy, Check } from "lucide-react";
 
 interface SidebarExplorerProps {
   databases: string[];
@@ -8,8 +9,11 @@ interface SidebarExplorerProps {
   tables: string[];
   activeTable: string | null;
   onSelectTable: (table: string) => void;
+  onViewStructure?: (table: string) => void;
+  onOpenInSql?: (sql: string) => void;
   onRefresh: () => void;
   loading: boolean;
+  dbType?: string;
 }
 
 export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
@@ -19,14 +23,66 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
   tables,
   activeTable,
   onSelectTable,
+  onViewStructure,
+  onOpenInSql,
   onRefresh,
   loading,
+  dbType,
 }) => {
+  const [mounted, setMounted] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; table: string } | null>(null);
+  const [copiedItem, setCopiedItem] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const quoteIdent = (name: string) => {
+    if (dbType === "mariadb" || dbType === "mysql") {
+      return `\`${name}\``;
+    }
+    return `"${name}"`;
+  };
 
   const filteredTables = tables.filter((table) =>
     table.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  // Close context menu when clicking outside or pressing Escape
+  useEffect(() => {
+    const handleOutsideClick = () => setContextMenu(null);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setContextMenu(null);
+    };
+
+    window.addEventListener("click", handleOutsideClick);
+    window.addEventListener("contextmenu", handleOutsideClick);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("click", handleOutsideClick);
+      window.removeEventListener("contextmenu", handleOutsideClick);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
+
+  const handleCopyName = (tableName: string) => {
+    navigator.clipboard.writeText(tableName);
+    setCopiedItem(true);
+    setTimeout(() => {
+      setCopiedItem(false);
+      setContextMenu(null);
+    }, 600);
+  };
+
+  const handleCopySelect = (tableName: string) => {
+    navigator.clipboard.writeText(`SELECT * FROM ${quoteIdent(tableName)} LIMIT 50;`);
+    setCopiedItem(true);
+    setTimeout(() => {
+      setCopiedItem(false);
+      setContextMenu(null);
+    }, 600);
+  };
 
   return (
     <aside className="sidebar">
@@ -104,7 +160,16 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
                   key={table}
                   className={`tree-item ${isActive ? "active" : ""}`}
                   onClick={() => onSelectTable(table)}
-                  title={table}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setContextMenu({
+                      x: Math.min(e.clientX, window.innerWidth - 200),
+                      y: Math.min(e.clientY, window.innerHeight - 200),
+                      table,
+                    });
+                  }}
+                  title={`${table} (Right-click for options)`}
                 >
                   <Table2 size={14} className={`tree-icon ${isActive ? "active-icon" : ""}`} />
                   <span className="tree-label">{table}</span>
@@ -114,6 +179,83 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
           </div>
         )}
       </div>
+
+      {/* Right-click Context Menu */}
+      {contextMenu && mounted && typeof document !== "undefined" && createPortal(
+        <div
+          className="sidebar-context-menu"
+          style={{
+            position: "fixed",
+            top: contextMenu.y,
+            left: contextMenu.x,
+            zIndex: 999999,
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="context-menu-header">
+            <Table2 size={12} className="menu-header-icon" />
+            <span className="menu-header-name font-mono">{contextMenu.table}</span>
+          </div>
+
+          <div className="context-menu-divider" />
+
+          {onViewStructure && (
+            <button
+              className="context-menu-item highlight"
+              onClick={() => {
+                onViewStructure(contextMenu.table);
+                setContextMenu(null);
+              }}
+            >
+              <Layers size={13} />
+              <span>View Structure</span>
+            </button>
+          )}
+
+          <button
+            className="context-menu-item"
+            onClick={() => {
+              onSelectTable(contextMenu.table);
+              setContextMenu(null);
+            }}
+          >
+            <Database size={13} />
+            <span>Open in Data Explorer</span>
+          </button>
+
+          {onOpenInSql && (
+            <button
+              className="context-menu-item"
+              onClick={() => {
+                onOpenInSql(`SELECT * FROM ${quoteIdent(contextMenu.table)} LIMIT 100;`);
+                setContextMenu(null);
+              }}
+            >
+              <Terminal size={13} />
+              <span>Select Top 100 Rows</span>
+            </button>
+          )}
+
+          <div className="context-menu-divider" />
+
+          <button
+            className="context-menu-item"
+            onClick={() => handleCopyName(contextMenu.table)}
+          >
+            {copiedItem ? <Check size={13} className="copy-check" /> : <Copy size={13} />}
+            <span>{copiedItem ? "Copied Name!" : "Copy Table Name"}</span>
+          </button>
+
+          <button
+            className="context-menu-item"
+            onClick={() => handleCopySelect(contextMenu.table)}
+          >
+            <Copy size={13} />
+            <span>Copy SELECT Query</span>
+          </button>
+        </div>,
+        document.body
+      )}
 
       <style jsx>{`
         .sidebar {
@@ -127,6 +269,7 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
           gap: 10px;
           user-select: none;
           flex-shrink: 0;
+          position: relative;
         }
 
         .sidebar-group {
@@ -311,6 +454,81 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
         }
         .loading-icon {
           color: var(--accent-blue);
+        }
+
+        :global(.sidebar-context-menu) {
+          background: var(--bg-card);
+          border: 1px solid var(--border-medium);
+          border-radius: var(--radius-sm);
+          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.08);
+          padding: 4px;
+          min-width: 190px;
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+          animation: contextFade 0.12s ease;
+        }
+        @keyframes contextFade {
+          from { opacity: 0; transform: scale(0.96); }
+          to { opacity: 1; transform: scale(1); }
+        }
+
+        :global(.context-menu-header) {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          padding: 5px 8px 3px 8px;
+          color: var(--text-muted);
+          font-size: 10.5px;
+        }
+        :global(.menu-header-icon) {
+          color: var(--accent-blue);
+        }
+        :global(.menu-header-name) {
+          font-weight: 700;
+          color: var(--text-main);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        :global(.context-menu-divider) {
+          height: 1px;
+          background: var(--border-light);
+          margin: 2px 0;
+        }
+
+        :global(.context-menu-item) {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 6px 10px;
+          background: transparent;
+          border: none;
+          color: var(--text-main);
+          font-size: 11.5px;
+          font-weight: 500;
+          border-radius: 4px;
+          cursor: pointer;
+          text-align: left;
+          width: 100%;
+          transition: all 0.1s ease;
+        }
+        :global(.context-menu-item:hover) {
+          background: var(--accent-blue);
+          color: #ffffff;
+        }
+        :global(.context-menu-item.highlight) {
+          color: var(--accent-blue);
+          font-weight: 600;
+        }
+        :global(.context-menu-item.highlight:hover) {
+          background: var(--accent-blue);
+          color: #ffffff;
+        }
+
+        :global(.copy-check) {
+          color: var(--accent-green);
         }
 
         @media (max-width: 900px) {

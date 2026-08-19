@@ -67,9 +67,10 @@ pub async fn get_columns(id: String, database: String, table: String, state: Sta
             let tbl_clean = table.replace("'", "''");
             format!("
                 SELECT 
-                    c.column_name AS name,
-                    c.data_type AS type,
+                    c.column_name::text AS name, 
+                    c.data_type::text AS type,
                     (c.is_nullable = 'YES') AS nullable,
+                    c.column_default::text AS default_value,
                     EXISTS (
                         SELECT 1 
                         FROM information_schema.table_constraints tc 
@@ -111,6 +112,7 @@ pub async fn get_columns(id: String, database: String, table: String, state: Sta
                 let pk_val = obj.get("pk").unwrap_or(&serde_json::Value::Null);
                 let is_pk = pk_val.as_i64().map(|v| v != 0).unwrap_or_else(|| pk_val.as_str() == Some("1"));
                 col_info.insert("primaryKey".to_string(), serde_json::Value::Bool(is_pk));
+                col_info.insert("default".to_string(), obj.get("dflt_value").cloned().unwrap_or(serde_json::Value::Null));
             } else if profile.r#type == SupportedDB::Mariadb {
                 col_info.insert("name".to_string(), obj.get("Field").cloned().unwrap_or_default());
                 col_info.insert("type".to_string(), obj.get("Type").cloned().unwrap_or_default());
@@ -120,6 +122,7 @@ pub async fn get_columns(id: String, database: String, table: String, state: Sta
                 
                 let is_pk = obj.get("Key").and_then(|v| v.as_str()).unwrap_or("") == "PRI";
                 col_info.insert("primaryKey".to_string(), serde_json::Value::Bool(is_pk));
+                col_info.insert("default".to_string(), obj.get("Default").cloned().unwrap_or(serde_json::Value::Null));
             } else {
                 // Postgres
                 col_info.insert("name".to_string(), obj.get("name").cloned().unwrap_or_default());
@@ -132,6 +135,7 @@ pub async fn get_columns(id: String, database: String, table: String, state: Sta
                 let pk_val = obj.get("primary_key").unwrap_or(&serde_json::Value::Null);
                 let is_pk = pk_val.as_bool().unwrap_or_else(|| pk_val.as_str() == Some("true") || pk_val.as_str() == Some("1") || pk_val.as_i64() == Some(1));
                 col_info.insert("primaryKey".to_string(), serde_json::Value::Bool(is_pk));
+                col_info.insert("default".to_string(), obj.get("default_value").cloned().unwrap_or(serde_json::Value::Null));
             }
             columns.push(serde_json::Value::Object(col_info));
         }

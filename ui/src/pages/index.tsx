@@ -5,6 +5,7 @@ import { Header } from "../components/Header";
 import { SidebarExplorer } from "../components/SidebarExplorer";
 import { ConnectionModal } from "../components/ConnectionModal";
 import { AuditLogDrawer } from "../components/AuditLogDrawer";
+import { TableStructureModal } from "../components/TableStructureModal";
 import { DataGrid, PendingChanges } from "../components/DataGrid";
 import { SqlConsole } from "../components/SqlConsole";
 import { AdminPanel } from "../components/AdminPanel";
@@ -25,6 +26,7 @@ export default function Home() {
   const [activeProfile, setActiveProfile] = useState<ConnectionProfile | null>(null);
   const [isConnModalOpen, setIsConnModalOpen] = useState(false);
   const [isAuditLogOpen, setIsAuditLogOpen] = useState(false);
+  const [structureModalTable, setStructureModalTable] = useState<string | null>(null);
 
   const [databases, setDatabases] = useState<string[]>([]);
   const [activeDatabase, setActiveDatabase] = useState<string>("");
@@ -417,12 +419,18 @@ export default function Home() {
                   setActiveView("explorer");
                 }
               }}
+              onViewStructure={(tbl) => setStructureModalTable(tbl)}
+              onOpenInSql={(sql) => {
+                setActiveView("sql");
+                handleExecuteSql(sql);
+              }}
               onRefresh={() => {
                 fetchDatabases();
                 fetchTables();
                 fetchTableData();
               }}
               loading={loadingTables}
+              dbType={activeProfile?.type}
             />
           )}
 
@@ -441,6 +449,8 @@ export default function Home() {
                 onPageChange={setPage}
                 onRefresh={fetchTableData}
                 onCommitChanges={handleCommitChanges}
+                onUpdateRows={setRows}
+                onUpdateTotalRows={setTotalRows}
                 sortColumn={sortColumn}
                 sortOrder={sortOrder}
                 onSortChange={(col, order) => {
@@ -499,6 +509,22 @@ export default function Home() {
           isOpen={isAuditLogOpen}
           onClose={() => setIsAuditLogOpen(false)}
           profiles={profiles}
+        />
+
+        <TableStructureModal
+          isOpen={!!structureModalTable}
+          onClose={() => setStructureModalTable(null)}
+          tableName={structureModalTable || ""}
+          activeProfile={activeProfile}
+          activeDatabase={activeDatabase}
+          onOpenInSql={(sql) => {
+            setActiveView("sql");
+            handleExecuteSql(sql);
+          }}
+          onOpenInExplorer={(tbl) => {
+            setActiveTable(tbl);
+            setActiveView("explorer");
+          }}
         />
 
         <footer className="app-footer">

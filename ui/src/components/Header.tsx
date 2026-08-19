@@ -199,6 +199,7 @@ export const Header: React.FC<HeaderProps> = ({
           align-items: center;
           justify-content: center;
           -webkit-app-region: no-drag;
+          max-width: 520px;
           flex: 1;
         }
         .nav-tabs {
