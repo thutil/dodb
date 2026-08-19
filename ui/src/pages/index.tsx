@@ -24,7 +24,7 @@ export default function Home() {
 
   const [profiles, setProfiles] = useState<ConnectionProfile[]>([]);
   const [activeProfile, setActiveProfile] = useState<ConnectionProfile | null>(null);
-  const [isConnModalOpen, setIsConnModalOpen] = useState(false);
+  const [isConnModalOpen, setIsConnModalOpen] = useState(true);
   const [isAuditLogOpen, setIsAuditLogOpen] = useState(false);
   const [structureModalTable, setStructureModalTable] = useState<string | null>(null);
 
@@ -104,13 +104,31 @@ export default function Home() {
     try {
       const data: any = await apiClient.getProfiles();
       setProfiles(data);
-      if (data.length > 0 && !activeProfile) {
-        setActiveProfile(data[0]);
-      }
     } catch {
       // Backend service offline or initial launch
     }
-  }, [activeProfile]);
+  }, []);
+
+  const handleDisconnect = async () => {
+    try {
+      if (activeProfile) {
+        await apiClient.disconnectDatabase(activeProfile.id);
+      } else {
+        await apiClient.disconnectDatabase();
+      }
+    } catch (err) {
+      console.warn("Disconnect backend warning", err);
+    }
+    setActiveProfile(null);
+    setActiveDatabase("");
+    setDatabases([]);
+    setTables([]);
+    setActiveTable(null);
+    setColumns([]);
+    setRows([]);
+    setTotalRows(0);
+    setIsConnModalOpen(true);
+  };
 
   useEffect(() => {
     fetchProfiles();
@@ -368,8 +386,10 @@ export default function Home() {
     <React.Fragment>
       <Head>
         <title>dodb - macOS Native Database Manager</title>
-        <meta name="description" content="Simple, fast macOS Native Database Manager for Postgres and MySQL" />
+        <meta name="description" content="Simple, fast macOS Native Database Manager for Postgres, MySQL, MariaDB & SQLite" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <link rel="icon" href="/favicon.ico" />
+        <link rel="apple-touch-icon" href="/icon.png" />
       </Head>
 
       <div className="app-layout">
@@ -390,6 +410,7 @@ export default function Home() {
           activeView={activeView}
           onChangeView={setActiveView}
           onOpenConnections={() => setIsConnModalOpen(true)}
+          onDisconnect={handleDisconnect}
           onOpenAuditLogs={() => setIsAuditLogOpen(true)}
           theme={theme}
           onToggleTheme={toggleTheme}
@@ -493,15 +514,17 @@ export default function Home() {
         </div>
 
         <ConnectionModal
-          isOpen={isConnModalOpen || !activeProfile}
+          isOpen={isConnModalOpen}
           onClose={() => setIsConnModalOpen(false)}
           profiles={profiles}
+          activeProfile={activeProfile}
           onSaveProfile={handleSaveProfile}
           onDeleteProfile={handleDeleteProfile}
           onConnect={(profile) => {
             setActiveProfile(profile);
             setIsConnModalOpen(false);
           }}
+          onDisconnect={handleDisconnect}
           onTestConnection={handleTestConnection}
         />
 

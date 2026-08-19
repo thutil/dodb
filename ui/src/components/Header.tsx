@@ -1,5 +1,5 @@
 import React from "react";
-import { Database, Terminal, Server, Sun, Moon, Shield, GitFork, FileText, ChevronDown } from "lucide-react";
+import { Database, Terminal, Server, Sun, Moon, Shield, GitFork, FileText, ChevronDown, LogOut } from "lucide-react";
 import { ConnectionProfile } from "../types";
 
 interface HeaderProps {
@@ -10,6 +10,7 @@ interface HeaderProps {
   activeView: "explorer" | "sql" | "admin" | "diagram";
   onChangeView: (view: "explorer" | "sql" | "admin" | "diagram") => void;
   onOpenConnections: () => void;
+  onDisconnect?: () => void;
   onOpenAuditLogs?: () => void;
   theme: "dark" | "light";
   onToggleTheme: () => void;
@@ -23,6 +24,7 @@ export const Header: React.FC<HeaderProps> = ({
   activeView,
   onChangeView,
   onOpenConnections,
+  onDisconnect,
   onOpenAuditLogs,
   theme,
   onToggleTheme,
@@ -33,7 +35,7 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="header-left">
         <div className="brand" title="dodb Database Manager">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/mascot.jpg" alt="dodb mascot" className="brand-mascot-img" />
+          <img src="/icon.png" alt="dodb mascot" className="brand-mascot-img" />
           <span className="brand-title">dodb</span>
           <span className="brand-badge">macOS</span>
         </div>
@@ -110,9 +112,19 @@ export const Header: React.FC<HeaderProps> = ({
                 <ChevronDown size={10} className="db-select-chevron" />
               </div>
             )}
+
+            {onDisconnect && (
+              <button
+                className="chip-disconnect-btn"
+                onClick={onDisconnect}
+                title="Disconnect from database"
+              >
+                <LogOut size={11} />
+              </button>
+            )}
           </div>
         ) : (
-          <div className="active-conn-chip offline">
+          <div className="active-conn-chip offline clickable" onClick={onOpenConnections} title="Click to Connect">
             <span className="status-indicator offline" />
             <span>Not Connected</span>
           </div>
@@ -275,6 +287,32 @@ export const Header: React.FC<HeaderProps> = ({
         }
         .active-conn-chip.offline {
           color: var(--text-muted);
+        }
+        .active-conn-chip.clickable {
+          cursor: pointer;
+          transition: all 0.15s ease;
+        }
+        .active-conn-chip.clickable:hover {
+          border-color: var(--accent-blue);
+          color: var(--text-main);
+          background: var(--bg-hover);
+        }
+        .chip-disconnect-btn {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: transparent;
+          border: none;
+          color: var(--text-muted);
+          cursor: pointer;
+          padding: 3px;
+          border-radius: 4px;
+          margin-left: 2px;
+          transition: all 0.15s ease;
+        }
+        .chip-disconnect-btn:hover {
+          background: rgba(239, 68, 68, 0.15);
+          color: #ef4444;
         }
         .status-indicator {
           width: 6.5px;

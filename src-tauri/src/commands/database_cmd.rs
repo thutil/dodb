@@ -413,3 +413,10 @@ pub async fn commit_changes(id: String, database: String, table: String, changes
     
     Ok(serde_json::json!({ "success": true, "queries": queries }))
 }
+
+#[command]
+pub async fn disconnect_database(id: Option<String>, state: State<'_, DbState>) -> Result<bool, String> {
+    crate::db_core::close_profile_pools(&state, id.as_deref()).await?;
+    Ok(true)
+}
+

@@ -14,6 +14,7 @@ import {
   FolderOpen,
   ChevronDown,
   ChevronRight,
+  LogOut,
 } from "lucide-react";
 import { ConnectionProfile, DBType } from "../types";
 import { apiClient } from "../utils/apiClient";
@@ -22,9 +23,11 @@ interface ConnectionModalProps {
   isOpen: boolean;
   onClose: () => void;
   profiles: ConnectionProfile[];
+  activeProfile?: ConnectionProfile | null;
   onSaveProfile: (profile: Partial<ConnectionProfile>) => Promise<void>;
   onDeleteProfile: (id: string) => Promise<void>;
   onConnect: (profile: ConnectionProfile) => void;
+  onDisconnect?: () => Promise<void> | void;
   onTestConnection: (profile: Partial<ConnectionProfile>) => Promise<{ success: boolean; message?: string; error?: string }>;
 }
 
@@ -32,12 +35,14 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
   isOpen,
   onClose,
   profiles,
+  activeProfile,
   onSaveProfile,
   onDeleteProfile,
   onConnect,
+  onDisconnect,
   onTestConnection,
 }) => {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(activeProfile?.id || (profiles[0]?.id ?? null));
   const [form, setForm] = useState<Partial<ConnectionProfile>>({
     name: "Local Postgres",
     type: "postgres",
@@ -54,6 +59,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [connecting, setConnecting] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
   const [isCustomGroup, setIsCustomGroup] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
 
@@ -67,6 +73,16 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
       ...profiles.map((p) => p.group || "Default").filter(Boolean),
     ])
   );
+
+  useEffect(() => {
+    if (isOpen) {
+      if (activeProfile) {
+        setSelectedId(activeProfile.id);
+      } else if (!selectedId && profiles.length > 0) {
+        setSelectedId(profiles[0].id);
+      }
+    }
+  }, [isOpen, activeProfile, profiles, selectedId]);
 
   useEffect(() => {
     if (selectedId) {
@@ -225,6 +241,8 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
     setCollapsedGroups((prev) => ({ ...prev, [gName]: !prev[gName] }));
   };
 
+  const isCurrentActive = Boolean(activeProfile && selectedId === activeProfile.id);
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-card" onClick={(e) => e.stopPropagation()}>
@@ -232,6 +250,12 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           <div className="modal-title">
             <Server size={16} className="modal-title-icon" />
             <span>Database Connection Profiles</span>
+            {activeProfile && (
+              <span className="active-indicator-tag">
+                <span className="mini-pulse-dot" />
+                Active: {activeProfile.name}
+              </span>
+            )}
           </div>
           <button className="icon-close-btn" onClick={onClose}>
             <X size={16} />
@@ -264,21 +288,30 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
 
                       {!isCollapsed && (
                         <div className="group-folder-items">
-                          {groupItems.map((p) => (
-                            <div
-                              key={p.id}
-                              className={`profile-card-item ${selectedId === p.id ? "active" : ""}`}
-                              onClick={() => setSelectedId(p.id)}
-                            >
-                              <HardDrive size={13} className="profile-type-icon" />
-                              <div className="profile-meta">
-                                <span className="p-title">{p.name}</span>
-                                <span className="p-sub">
-                                  {p.type.toUpperCase()} • {p.type === "sqlite" ? p.filePath || p.database : `${p.host}:${p.port}`}
-                                </span>
+                          {groupItems.map((p) => {
+                            const isConnected = activeProfile?.id === p.id;
+                            return (
+                              <div
+                                key={p.id}
+                                className={`profile-card-item ${selectedId === p.id ? "active" : ""} ${isConnected ? "is-connected" : ""}`}
+                                onClick={() => setSelectedId(p.id)}
+                              >
+                                <div className="profile-icon-wrap">
+                                  <HardDrive size={13} className="profile-type-icon" />
+                                  {isConnected && <span className="item-connected-dot" />}
+                                </div>
+                                <div className="profile-meta">
+                                  <div className="p-title-row">
+                                    <span className="p-title">{p.name}</span>
+                                    {isConnected && <span className="p-connected-badge">Connected</span>}
+                                  </div>
+                                  <span className="p-sub">
+                                    {p.type.toUpperCase()} • {p.type === "sqlite" ? p.filePath || p.database : `${p.host}:${p.port}`}
+                                  </span>
+                                </div>
                               </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                     </div>
@@ -289,6 +322,33 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           </div>
 
           <div className="profile-editor-panel">
+            {isCurrentActive && (
+              <div className="active-connected-banner">
+                <div className="banner-left">
+                  <span className="pulse-dot" />
+                  <span className="banner-text">Currently Connected to this profile</span>
+                </div>
+                {onDisconnect && (
+                  <button
+                    className="btn-banner-disconnect"
+                    onClick={async () => {
+                      setDisconnecting(true);
+                      try {
+                        await onDisconnect();
+                      } finally {
+                        setDisconnecting(false);
+                      }
+                    }}
+                    disabled={disconnecting}
+                    title="Disconnect database connection"
+                  >
+                    <LogOut size={12} />
+                    <span>{disconnecting ? "Disconnecting..." : "Disconnect"}</span>
+                  </button>
+                )}
+              </div>
+            )}
+
             <div className="field-row">
               <div className="field-group flex-2">
                 <label className="field-label">Profile Name</label>
@@ -479,21 +539,39 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
             )}
 
             <div className="action-row">
-              <button className="btn btn-secondary" onClick={handleTest} disabled={testing || connecting}>
+              <button className="btn btn-secondary" onClick={handleTest} disabled={testing || connecting || disconnecting}>
                 {testing ? <RefreshCw size={13} className="spin" /> : <Zap size={13} />}
                 <span>{testing ? "Testing..." : "Test Connection"}</span>
               </button>
-              <button className="btn btn-secondary" onClick={handleSave} disabled={saving || connecting}>
+              <button className="btn btn-secondary" onClick={handleSave} disabled={saving || connecting || disconnecting}>
                 {saving ? <RefreshCw size={13} className="spin" /> : null}
                 <span>{saving ? "Saving..." : "Save"}</span>
               </button>
+              {isCurrentActive && onDisconnect && (
+                <button
+                  className="btn btn-disconnect"
+                  onClick={async () => {
+                    setDisconnecting(true);
+                    try {
+                      await onDisconnect();
+                    } finally {
+                      setDisconnecting(false);
+                    }
+                  }}
+                  disabled={disconnecting || connecting}
+                  title="Disconnect from database"
+                >
+                  <LogOut size={13} />
+                  <span>{disconnecting ? "Disconnecting..." : "Disconnect"}</span>
+                </button>
+              )}
               <button
                 className="btn btn-primary"
                 onClick={handleConnect}
-                disabled={connecting || testing || saving}
+                disabled={connecting || testing || saving || disconnecting}
               >
                 {connecting ? <RefreshCw size={13} className="spin" /> : null}
-                <span>{connecting ? "Connecting..." : "Connect"}</span>
+                <span>{connecting ? "Connecting..." : (isCurrentActive ? "Reconnect" : "Connect")}</span>
               </button>
               {selectedId && (
                 <button
@@ -502,7 +580,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
                     await onDeleteProfile(selectedId);
                     handleCreateNew();
                   }}
-                  disabled={connecting}
+                  disabled={connecting || disconnecting}
                   title="Delete Profile"
                 >
                   <Trash2 size={13} />
@@ -554,6 +632,28 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           color: var(--text-main);
         }
         .modal-title-icon { color: var(--accent-blue); }
+
+        .active-indicator-tag {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          background: rgba(16, 185, 129, 0.15);
+          border: 1px solid rgba(16, 185, 129, 0.3);
+          color: var(--accent-green);
+          font-size: 10px;
+          padding: 2px 7px;
+          border-radius: 12px;
+          font-weight: 600;
+        }
+
+        .mini-pulse-dot {
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background: var(--accent-green);
+          box-shadow: 0 0 6px rgba(16, 185, 129, 0.8);
+          animation: pulse 2s infinite;
+        }
 
         .icon-close-btn {
           background: transparent;
@@ -647,10 +747,41 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           background: var(--bg-tertiary);
           border-color: var(--border-light);
         }
+        .profile-card-item.is-connected {
+          border-left: 3px solid var(--accent-green);
+        }
+
+        .profile-icon-wrap {
+          position: relative;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+        }
+        .item-connected-dot {
+          position: absolute;
+          top: -2px;
+          right: -2px;
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background: var(--accent-green);
+          box-shadow: 0 0 5px rgba(16, 185, 129, 0.9);
+        }
 
         .profile-type-icon { color: var(--accent-blue); flex-shrink: 0; }
-        .profile-meta { display: flex; flex-direction: column; overflow: hidden; }
+        .profile-meta { display: flex; flex-direction: column; overflow: hidden; flex: 1; }
+        .p-title-row { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
         .p-title { font-size: 11px; font-weight: 600; color: var(--text-main); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .p-connected-badge {
+          font-size: 8px;
+          font-weight: 700;
+          color: var(--accent-green);
+          background: rgba(16, 185, 129, 0.15);
+          padding: 1px 4px;
+          border-radius: 3px;
+          text-transform: uppercase;
+        }
         .p-sub { font-size: 9px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
         .profile-editor-panel {
@@ -660,6 +791,57 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           flex-direction: column;
           gap: 14px;
           overflow-y: auto;
+        }
+
+        .active-connected-banner {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 8px 12px;
+          background: rgba(16, 185, 129, 0.1);
+          border: 1px solid rgba(16, 185, 129, 0.3);
+          border-radius: var(--radius-sm);
+        }
+        .banner-left {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .pulse-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: var(--accent-green);
+          box-shadow: 0 0 8px rgba(16, 185, 129, 0.8);
+          animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+          0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+          70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+          100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        }
+        .banner-text {
+          font-size: 11px;
+          font-weight: 600;
+          color: var(--accent-green);
+        }
+        .btn-banner-disconnect {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          padding: 3px 8px;
+          font-size: 10px;
+          font-weight: 600;
+          background: rgba(239, 68, 68, 0.12);
+          color: #ef4444;
+          border: 1px solid rgba(239, 68, 68, 0.25);
+          border-radius: 4px;
+          cursor: pointer;
+          transition: all 0.12s ease;
+        }
+        .btn-banner-disconnect:hover {
+          background: #ef4444;
+          color: #fff;
         }
 
         .field-group { display: flex; flex-direction: column; gap: 5px; }
@@ -765,6 +947,26 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           gap: 8px;
           margin-top: auto;
           padding-top: 10px;
+        }
+
+        .btn-disconnect {
+          background: rgba(239, 68, 68, 0.12);
+          color: #ef4444;
+          border: 1px solid rgba(239, 68, 68, 0.3);
+          font-weight: 600;
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          padding: 0 12px;
+          border-radius: 6px;
+          cursor: pointer;
+          height: 32px;
+          font-size: 12px;
+          transition: all 0.12s ease;
+        }
+        .btn-disconnect:hover {
+          background: #ef4444;
+          color: #fff;
         }
 
         .group-input-wrap {

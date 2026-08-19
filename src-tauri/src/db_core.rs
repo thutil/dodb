@@ -23,6 +23,45 @@ impl Default for DbState {
     }
 }
 
+pub const CONNECTION_TIMEOUT_SECS: u64 = 180;
+
+impl DbPool {
+    pub async fn close(&self) {
+        match self {
+            DbPool::Postgres(p) => p.close().await,
+            DbPool::MySql(p) => p.close().await,
+            DbPool::Sqlite(p) => p.close().await,
+        }
+    }
+}
+
+pub async fn close_profile_pools(state: &State<'_, DbState>, profile_id: Option<&str>) -> Result<(), String> {
+    let mut pools_to_close = Vec::new();
+    {
+        let mut pools = state.pools.lock().map_err(|e| e.to_string())?;
+        match profile_id {
+            Some(id) if !id.trim().is_empty() => {
+                let prefix = format!("{}:", id.trim());
+                let keys: Vec<String> = pools.keys().filter(|k| k.starts_with(&prefix)).cloned().collect();
+                for k in keys {
+                    if let Some(p) = pools.remove(&k) {
+                        pools_to_close.push(p);
+                    }
+                }
+            }
+            _ => {
+                for (_, p) in pools.drain() {
+                    pools_to_close.push(p);
+                }
+            }
+        }
+    }
+    for pool in pools_to_close {
+        pool.close().await;
+    }
+    Ok(())
+}
+
 pub async fn get_pool(
     state: &State<'_, DbState>,
     profile: &ConnectionProfile,
@@ -62,6 +101,8 @@ pub async fn get_pool(
         }
     }
 
+    let timeout = std::time::Duration::from_secs(CONNECTION_TIMEOUT_SECS);
+
     let pool = match profile.r#type {
         SupportedDB::Postgres => {
             let url = format!(
@@ -82,6 +123,7 @@ pub async fn get_pool(
             // Try connecting with Prefer first, fallback to Disable if server fails on SSLRequest
             let connect_res = sqlx::postgres::PgPoolOptions::new()
                 .max_connections(5)
+                .acquire_timeout(timeout)
                 .connect_with(connect_opts.clone().ssl_mode(sqlx::postgres::PgSslMode::Prefer))
                 .await;
 
@@ -92,6 +134,7 @@ pub async fn get_pool(
                     if err_msg.contains("SSLRequest") || err_msg.contains("tls") || err_msg.contains("ssl") || err_msg.contains("0x5a") {
                         sqlx::postgres::PgPoolOptions::new()
                             .max_connections(5)
+                            .acquire_timeout(timeout)
                             .connect_with(connect_opts.ssl_mode(sqlx::postgres::PgSslMode::Disable))
                             .await
                             .map_err(|e2| format!("Failed to connect to Postgres database '{}': {}", db_name, e2))?
@@ -109,6 +152,7 @@ pub async fn get_pool(
             );
             let p = sqlx::mysql::MySqlPoolOptions::new()
                 .max_connections(5)
+                .acquire_timeout(timeout)
                 .connect(&url)
                 .await
                 .map_err(|e| format!("Failed to connect to MySQL database '{}': {}", db_name, e))?;
@@ -123,6 +167,7 @@ pub async fn get_pool(
             let url = format!("sqlite://{}", path);
             let p = sqlx::sqlite::SqlitePoolOptions::new()
                 .max_connections(5)
+                .acquire_timeout(timeout)
                 .connect(&url)
                 .await
                 .map_err(|e| format!("Failed to open SQLite database '{}': {}", path, e))?;

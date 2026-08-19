@@ -137,9 +137,13 @@ export const DataGrid: React.FC<DataGridProps> = ({
       <div className="grid-placeholder">
         <div className="placeholder-card">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/mascot.jpg" alt="dodb Mascot" width={64} height={64} className="placeholder-mascot-img" />
+          <img src="/icon.png" alt="dodb Mascot" width={72} height={72} className="placeholder-mascot-img" />
           <h3>dodb Database Manager</h3>
-          <p>Select a table from the sidebar to inspect records or open SQL Console</p>
+          <p>
+            {activeProfile
+              ? "Select a table from the sidebar to inspect records or open SQL Console"
+              : "Open Connections to connect to PostgreSQL, MySQL, MariaDB, or SQLite"}
+          </p>
         </div>
         <style jsx>{`
           .grid-placeholder {
@@ -157,11 +161,12 @@ export const DataGrid: React.FC<DataGridProps> = ({
             align-items: center;
             gap: 12px;
           }
-          .mascot-placeholder-img {
-            width: 80px;
-            height: 80px;
-            border-radius: 18px;
+          .placeholder-mascot-img {
+            width: 72px;
+            height: 72px;
+            border-radius: 16px;
             box-shadow: var(--shadow-popup);
+            object-fit: cover;
           }
           .placeholder-card h3 { color: var(--text-main); font-size: 16px; }
         `}</style>

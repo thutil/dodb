@@ -15,6 +15,9 @@ export const apiClient = {
   testConnection: async (profile: any) => {
     return await invoke("test_connection", { profile });
   },
+  disconnectDatabase: async (id?: string) => {
+    return await invoke("disconnect_database", { id });
+  },
   // DB Operations
   getDatabases: async (id: string) => {
     return await invoke("get_databases", { id });
