@@ -27,6 +27,9 @@ import {
   FileJson,
   WrapText,
   X,
+  Server,
+  Database,
+  Zap,
 } from "lucide-react";
 import { ColumnInfo, TableRowData, ConnectionProfile, ColumnFilter, FilterOperator } from "../types";
 
@@ -126,7 +129,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
   };
 
   // Row Edit Modal State
-  const [rowEditModal, setRowEditModal] = useState<{ pkKey: string; rowIdx: number; data: TableRowData } | null>(null);
+  const [rowEditModal, setRowEditModal] = useState<{ pkKey: string; rowIdx: number; isNew?: boolean; data: TableRowData } | null>(null);
   
   // Commit Status
   const [submitting, setSubmitting] = useState(false);
@@ -141,71 +144,50 @@ export const DataGrid: React.FC<DataGridProps> = ({
     setEditingCell(null);
     setRowEditModal(null);
     setCommitMsg(null);
-  }, [tableName, page]);
+  }, [tableName, activeDatabase, page]);
 
-  // Escape key handler for all modals and drawers
+  // Global Escape key listener
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         if (confirmDeleteRow) {
           setConfirmDeleteRow(null);
-        } else if (rowEditModal) {
+          return;
+        }
+        if (rowEditModal) {
           setRowEditModal(null);
-        } else if (selectedCell) {
+          return;
+        }
+        if (selectedCell) {
           setSelectedCell(null);
-        } else if (exportModalOpen) {
-          setExportModalOpen(false);
-        } else if (isExportMenuOpen) {
-          setIsExportMenuOpen(false);
-        } else if (isFilterPanelOpen) {
-          setIsFilterPanelOpen(false);
-        } else if (editingCell) {
+          return;
+        }
+        if (editingCell) {
           setEditingCell(null);
+          return;
         }
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [confirmDeleteRow, rowEditModal, selectedCell, exportModalOpen, isExportMenuOpen, isFilterPanelOpen, editingCell]);
+  }, [confirmDeleteRow, rowEditModal, selectedCell, editingCell]);
+
+  if (!activeProfile) {
+    return (
+      <div className="empty-state-panel">
+        <Server size={32} className="empty-icon" />
+        <span className="empty-title">No Database Selected</span>
+        <span className="empty-sub">Please connect to a profile from the top bar.</span>
+      </div>
+    );
+  }
 
   if (!tableName) {
     return (
-      <div className="grid-placeholder">
-        <div className="placeholder-card">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/icon.png" alt="dodb Mascot" width={72} height={72} className="placeholder-mascot-img" />
-          <h3>dodb Database Manager</h3>
-          <p>
-            {activeProfile
-              ? "Select a table from the sidebar to inspect records or open SQL Console"
-              : "Open Connections to connect to PostgreSQL, MySQL, MariaDB, or SQLite"}
-          </p>
-        </div>
-        <style jsx>{`
-          .grid-placeholder {
-            flex: 1;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: var(--bg-content);
-          }
-          .placeholder-card {
-            text-align: center;
-            color: var(--text-muted);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 12px;
-          }
-          .placeholder-mascot-img {
-            width: 72px;
-            height: 72px;
-            border-radius: 16px;
-            box-shadow: var(--shadow-popup);
-            object-fit: cover;
-          }
-          .placeholder-card h3 { color: var(--text-main); font-size: 16px; }
-        `}</style>
+      <div className="empty-state-panel">
+        <Database size={32} className="empty-icon" />
+        <span className="empty-title">No Table Selected</span>
+        <span className="empty-sub">Select a table from the sidebar to inspect records.</span>
       </div>
     );
   }
@@ -231,7 +213,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
   // Handle Cell Double Click to start inline editing
   const startEditing = (pkKey: string, isNew: boolean, nIdx: number | undefined, colName: string, currentVal: unknown) => {
     setEditingCell({ pkKey, isNew, nIdx, colName });
-    setEditValue(currentVal === null || currentVal === undefined ? "" : String(currentVal));
+    setEditValue(currentVal === null || currentVal === undefined || currentVal === "__AUTO__" ? "" : String(currentVal));
   };
 
   // Save inline cell edit
@@ -258,36 +240,44 @@ export const DataGrid: React.FC<DataGridProps> = ({
   };
 
   // Open Full Row Edit Modal
-  const openRowModal = (rowIdx: number, row: TableRowData) => {
-    const pkKey = getPkKey(row, rowIdx);
-    const currentEdits = editedCells[pkKey] || {};
+  const openRowModal = (rowIdx: number, row: TableRowData, isNew?: boolean) => {
+    const pkKey = isNew ? `new_${rowIdx}` : getPkKey(row, rowIdx);
+    const currentEdits = isNew ? {} : (editedCells[pkKey] || {});
     const merged = { ...row, ...currentEdits };
-    setRowEditModal({ pkKey, rowIdx, data: merged });
+    setRowEditModal({ pkKey, rowIdx, isNew, data: merged });
   };
 
   // Save Full Row Modal Edits
   const saveRowModal = () => {
     if (!rowEditModal) return;
-    const { pkKey, rowIdx, data } = rowEditModal;
-    const originalRow = rows[rowIdx] || {};
-    
-    const changesObj: TableRowData = {};
-    columns.forEach((col) => {
-      const newVal = data[col.name];
-      const oldVal = originalRow[col.name];
-      if (String(newVal) !== String(oldVal)) {
-        changesObj[col.name] = newVal;
-      }
-    });
+    const { pkKey, rowIdx, isNew, data } = rowEditModal;
 
-    if (Object.keys(changesObj).length > 0) {
-      setEditedCells((prev) => ({
-        ...prev,
-        [pkKey]: {
-          ...(prev[pkKey] || {}),
-          ...changesObj,
-        },
-      }));
+    if (isNew) {
+      setNewRows((prev) => {
+        const updated = [...prev];
+        updated[rowIdx] = { ...data };
+        return updated;
+      });
+    } else {
+      const originalRow = rows[rowIdx] || {};
+      const changesObj: TableRowData = {};
+      columns.forEach((col) => {
+        const newVal = data[col.name];
+        const oldVal = originalRow[col.name];
+        if (newVal !== oldVal) {
+          changesObj[col.name] = newVal;
+        }
+      });
+
+      if (Object.keys(changesObj).length > 0) {
+        setEditedCells((prev) => ({
+          ...prev,
+          [pkKey]: {
+            ...(prev[pkKey] || {}),
+            ...changesObj,
+          },
+        }));
+      }
     }
     setRowEditModal(null);
   };
@@ -296,7 +286,11 @@ export const DataGrid: React.FC<DataGridProps> = ({
   const handleAddRow = () => {
     const blank: TableRowData = {};
     columns.forEach((c) => {
-      blank[c.name] = c.primaryKey ? "" : "";
+      if (c.autoIncrement || (c.primaryKey && c.type.toLowerCase().includes("int"))) {
+        blank[c.name] = "__AUTO__";
+      } else {
+        blank[c.name] = "";
+      }
     });
     setNewRows((prev) => [...prev, blank]);
   };
@@ -358,8 +352,21 @@ export const DataGrid: React.FC<DataGridProps> = ({
     setSubmitting(true);
     setCommitMsg(null);
 
-    // Prepare inserts
-    const insertsToSubmit = newRows.filter((r) => Object.values(r).some((v) => v !== ""));
+    // Prepare inserts: omit __AUTO__ or undefined columns so DB creates auto-increment ID
+    const insertsToSubmit = newRows.map((r) => {
+      const cleanRow: TableRowData = {};
+      columns.forEach((c) => {
+        const val = r[c.name];
+        if (val === "__AUTO__" || val === undefined) {
+          // Omit column so DB generates auto-increment value
+        } else if (val === null) {
+          cleanRow[c.name] = null;
+        } else if (val !== "") {
+          cleanRow[c.name] = val;
+        }
+      });
+      return cleanRow;
+    }).filter((r) => Object.keys(r).length > 0 || columns.some((c) => c.autoIncrement || c.primaryKey));
 
     // Prepare updates
     const updatesToSubmit: Array<{ pkColumn: string; pkValue: unknown; data: TableRowData }> = [];
@@ -928,22 +935,34 @@ export const DataGrid: React.FC<DataGridProps> = ({
                 <tr key={`new-${nIdx}`} className="new-row-tr">
                   <td className="row-index new-idx">+</td>
                   <td className="action-cell">
-                    <button
-                      className="icon-del-btn"
-                      onClick={() => setNewRows((prev) => prev.filter((_, i) => i !== nIdx))}
-                      title="Remove new row"
-                    >
-                      <Trash2 size={11} />
-                    </button>
+                    <div className="act-group">
+                      <button
+                        className="icon-edit-btn"
+                        onClick={() => openRowModal(nIdx, nRow, true)}
+                        title="Edit Full New Record"
+                      >
+                        <Edit3 size={11} />
+                      </button>
+                      <button
+                        className="icon-del-btn"
+                        onClick={() => setNewRows((prev) => prev.filter((_, i) => i !== nIdx))}
+                        title="Remove new row draft"
+                      >
+                        <Trash2 size={11} />
+                      </button>
+                    </div>
                   </td>
                   {columns.map((col) => {
                     const isEditing = editingCell?.isNew && editingCell.nIdx === nIdx && editingCell.colName === col.name;
                     const val = nRow[col.name];
+                    const isAuto = val === "__AUTO__";
+
                     return (
                       <td
                         key={col.name}
-                        className="cell-data cell-new"
+                        className={`cell-data cell-new ${isAuto ? "cell-auto" : ""}`}
                         onDoubleClick={() => startEditing(`new_${nIdx}`, true, nIdx, col.name, val)}
+                        title={isAuto ? "Auto Increment: Double-click to type custom value" : "Double-click to edit cell"}
                       >
                         {isEditing ? (
                           <input
@@ -954,8 +973,14 @@ export const DataGrid: React.FC<DataGridProps> = ({
                             onBlur={saveCellEdit}
                             onKeyDown={(e) => e.key === "Enter" && saveCellEdit()}
                           />
+                        ) : isAuto ? (
+                          <span className="auto-inc-pill-tag">
+                            <Zap size={10} /> AUTO
+                          </span>
+                        ) : val !== undefined && val !== null && val !== "" ? (
+                          String(val)
                         ) : (
-                          val !== undefined && val !== null && val !== "" ? String(val) : <span className="placeholder-text">Click to edit</span>
+                          <span className="placeholder-text">Click to edit</span>
                         )}
                       </td>
                     );
@@ -984,7 +1009,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                         <div className="act-group">
                           <button
                             className="icon-edit-btn"
-                            onClick={() => openRowModal(idx, row)}
+                            onClick={() => openRowModal(idx, row, false)}
                             title="Edit Entire Row Modal"
                           >
                             <Edit3 size={11} />
@@ -1087,48 +1112,195 @@ export const DataGrid: React.FC<DataGridProps> = ({
         </div>
       </div>
 
-      {/* Row Edit Modal */}
+      {/* Row Edit / Insert Record Modal */}
       {rowEditModal && (
-        <div className="cell-overlay" onClick={() => setRowEditModal(null)}>
-          <div className="cell-card row-modal-card" onClick={(e) => e.stopPropagation()}>
-            <div className="cell-card-hdr">
-              <div className="hdr-left">
-                <Edit3 size={14} className="edit-icon" />
-                <span>Edit Row #{page * pageSize + rowEditModal.rowIdx + 1}</span>
+        <div className="row-dialog-overlay" onClick={() => setRowEditModal(null)}>
+          <div className="row-dialog-card" onClick={(e) => e.stopPropagation()}>
+            {/* Modal Titlebar */}
+            <div className="row-dialog-header">
+              <div className="dialog-header-left">
+                <div className="dialog-icon-badge">
+                  <Edit3 size={15} />
+                </div>
+                <div className="dialog-title-group">
+                  <span className="dialog-title-text">
+                    {rowEditModal.isNew ? "Insert New Record" : `Edit Record #${page * pageSize + rowEditModal.rowIdx + 1}`}
+                  </span>
+                  <span className="dialog-sub-text">
+                    Table: <code className="table-code-tag">{tableName}</code>
+                  </span>
+                </div>
               </div>
-              <button className="icon-close-btn" onClick={() => setRowEditModal(null)}>
-                <X size={14} />
+              <button className="dialog-close-btn" onClick={() => setRowEditModal(null)} title="Close (Esc)">
+                <X size={15} />
               </button>
             </div>
 
-            <div className="row-modal-body">
+            {/* Modal Body - Scrollable Fields Grid */}
+            <div className="row-dialog-body">
               {columns.map((col) => {
                 const val = rowEditModal.data[col.name];
+                const isAuto = val === "__AUTO__" || (rowEditModal.isNew && (col.autoIncrement || (col.primaryKey && col.type.toLowerCase().includes("int"))) && val === "__AUTO__");
+                const isNull = val === null;
+                const isDateCol = isDateTimeColumn(col.type);
+                const isBoolCol = col.type.toLowerCase().includes("bool") || col.type.toLowerCase() === "tinyint(1)";
+                const isLongText = col.type.toLowerCase().includes("text") || col.type.toLowerCase().includes("json");
+
                 return (
-                  <div key={col.name} className="field-group">
-                    <label className="field-label font-mono">{col.name} ({col.type})</label>
-                    <input
-                      className="input form-control font-mono"
-                      value={val === null || val === undefined ? "" : String(val)}
-                      onChange={(e) =>
-                        setRowEditModal({
-                          ...rowEditModal,
-                          data: { ...rowEditModal.data, [col.name]: e.target.value },
-                        })
-                      }
-                    />
+                  <div key={col.name} className={`field-record-card ${col.primaryKey ? "is-pk-record" : ""}`}>
+                    <div className="field-card-top">
+                      <div className="field-meta-left">
+                        <span className="field-name-title font-mono">{col.name}</span>
+                        <span className="field-type-badge font-mono">{col.type}</span>
+                        {col.primaryKey && (
+                          <span className="field-pk-badge">
+                            <Key size={10} /> PK
+                          </span>
+                        )}
+                        {col.autoIncrement && (
+                          <span className="field-auto-badge">
+                            <Zap size={10} /> Auto-Increment
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="field-toggles-right">
+                        {(col.autoIncrement || (rowEditModal.isNew && col.primaryKey)) && (
+                          <button
+                            type="button"
+                            className={`toggle-chip-btn auto-chip ${isAuto ? "active" : ""}`}
+                            onClick={() => {
+                              setRowEditModal({
+                                ...rowEditModal,
+                                data: {
+                                  ...rowEditModal.data,
+                                  [col.name]: isAuto ? "" : "__AUTO__",
+                                },
+                              });
+                            }}
+                            title="Toggle Auto-Generated / Auto-Increment"
+                          >
+                            <Zap size={10} />
+                            <span>AUTO</span>
+                          </button>
+                        )}
+
+                        {col.nullable && (
+                          <button
+                            type="button"
+                            className={`toggle-chip-btn null-chip ${isNull ? "active" : ""}`}
+                            onClick={() => {
+                              setRowEditModal({
+                                ...rowEditModal,
+                                data: {
+                                  ...rowEditModal.data,
+                                  [col.name]: isNull ? "" : null,
+                                },
+                              });
+                            }}
+                            title="Toggle NULL value"
+                          >
+                            <span>NULL</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="field-card-control">
+                      {isAuto ? (
+                        <div
+                          className="auto-state-box"
+                          onClick={() => {
+                            setRowEditModal({
+                              ...rowEditModal,
+                              data: { ...rowEditModal.data, [col.name]: "" },
+                            });
+                          }}
+                          title="Click to switch to custom value"
+                        >
+                          <Zap size={13} className="auto-state-icon" />
+                          <span className="auto-state-text">AUTO (Generated by Database on save)</span>
+                          <span className="auto-switch-hint">Click to edit manually</span>
+                        </div>
+                      ) : isNull ? (
+                        <div
+                          className="null-state-box"
+                          onClick={() => {
+                            setRowEditModal({
+                              ...rowEditModal,
+                              data: { ...rowEditModal.data, [col.name]: "" },
+                            });
+                          }}
+                          title="Click to enter custom value"
+                        >
+                          <span className="null-state-badge">NULL</span>
+                          <span className="null-state-text">Value is NULL</span>
+                          <span className="null-switch-hint">Click to type value</span>
+                        </div>
+                      ) : isDateCol ? (
+                        <input
+                          type={col.type.toLowerCase().includes("timestamp") || col.type.toLowerCase().includes("datetime") ? "datetime-local" : "date"}
+                          className="input form-input font-mono"
+                          value={val === null || val === undefined ? "" : String(val)}
+                          onChange={(e) =>
+                            setRowEditModal({
+                              ...rowEditModal,
+                              data: { ...rowEditModal.data, [col.name]: e.target.value },
+                            })
+                          }
+                        />
+                      ) : isBoolCol ? (
+                        <select
+                          className="select form-select font-mono"
+                          value={String(val)}
+                          onChange={(e) =>
+                            setRowEditModal({
+                              ...rowEditModal,
+                              data: { ...rowEditModal.data, [col.name]: e.target.value === "true" || e.target.value === "1" },
+                            })
+                          }
+                        >
+                          <option value="true">true (1)</option>
+                          <option value="false">false (0)</option>
+                        </select>
+                      ) : isLongText ? (
+                        <textarea
+                          rows={3}
+                          className="input form-textarea font-mono"
+                          value={val === null || val === undefined ? "" : typeof val === "object" ? JSON.stringify(val, null, 2) : String(val)}
+                          onChange={(e) =>
+                            setRowEditModal({
+                              ...rowEditModal,
+                              data: { ...rowEditModal.data, [col.name]: e.target.value },
+                            })
+                          }
+                        />
+                      ) : (
+                        <input
+                          className="input form-input font-mono"
+                          value={val === null || val === undefined ? "" : String(val)}
+                          onChange={(e) =>
+                            setRowEditModal({
+                              ...rowEditModal,
+                              data: { ...rowEditModal.data, [col.name]: e.target.value },
+                            })
+                          }
+                        />
+                      )}
+                    </div>
                   </div>
                 );
               })}
             </div>
 
-            <div className="cell-card-footer">
+            {/* Modal Footer */}
+            <div className="row-dialog-footer">
               <button className="btn btn-secondary" onClick={() => setRowEditModal(null)}>
                 Cancel
               </button>
-              <button className="btn btn-primary" onClick={saveRowModal}>
-                <Check size={12} />
-                <span>Apply to Row</span>
+              <button className="btn btn-primary apply-dialog-btn" onClick={saveRowModal}>
+                <Check size={13} />
+                <span>{rowEditModal.isNew ? "Add Row to Batch" : "Apply to Row"}</span>
               </button>
             </div>
           </div>
@@ -1721,6 +1893,24 @@ export const DataGrid: React.FC<DataGridProps> = ({
         .cell-new {
           background: rgba(16, 185, 129, 0.1) !important;
         }
+        .cell-auto {
+          background: rgba(59, 130, 246, 0.08) !important;
+        }
+
+        .auto-inc-pill-tag {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          background: rgba(59, 130, 246, 0.15);
+          border: 1px solid rgba(59, 130, 246, 0.35);
+          color: var(--accent-blue);
+          font-size: 9.5px;
+          font-family: var(--font-mono);
+          font-weight: 700;
+          padding: 1px 6px;
+          border-radius: 4px;
+          letter-spacing: 0.3px;
+        }
 
         .placeholder-text { color: var(--text-muted); font-style: italic; }
         .cell-edit-input {
@@ -1748,94 +1938,343 @@ export const DataGrid: React.FC<DataGridProps> = ({
         .pagination-info { color: var(--text-muted); }
         .page-nav-btns { display: flex; gap: 6px; }
 
+        /* Cell Inspect Modal */
         .cell-overlay {
           position: fixed;
           inset: 0;
-          background: rgba(0,0,0,0.6);
-          backdrop-filter: blur(4px);
+          background: rgba(0, 0, 0, 0.65);
+          backdrop-filter: blur(6px);
           display: flex;
           align-items: center;
           justify-content: center;
-          z-index: 500;
+          z-index: 1000;
+          padding: 20px;
         }
         .cell-card {
           width: 480px;
           background: var(--bg-card);
-          padding: 14px;
-          border-radius: var(--radius-md);
-          border: 1px solid var(--border-light);
-          box-shadow: var(--shadow-popup);
-          display: flex;
-          flex-direction: column;
-          gap: 10px;
-        }
-        .row-modal-card {
-          width: 520px;
-          max-height: 80vh;
-          background: var(--bg-card);
           padding: 16px;
           border-radius: var(--radius-md);
-          border: 1px solid var(--border-light);
-          box-shadow: var(--shadow-popup);
+          border: 1px solid var(--border-medium);
+          box-shadow: 0 20px 48px rgba(0, 0, 0, 0.45);
           display: flex;
           flex-direction: column;
           gap: 12px;
         }
-
-        .row-modal-body {
-          flex: 1;
-          overflow-y: auto;
-          display: flex;
-          flex-direction: column;
-          gap: 10px;
-          max-height: 380px;
-          padding-right: 4px;
-        }
-        .row-field-group {
-          display: flex;
-          flex-direction: column;
-          gap: 4px;
-        }
-        .row-field-label {
-          display: flex;
-          justify-content: space-between;
-          font-size: 11px;
-          font-weight: 600;
-          color: var(--text-sub);
-        }
-
-        .edit-icon { color: var(--accent-blue); }
-        .cell-modal-icon { color: var(--accent-blue); }
-        .cell-card-header {
+        .cell-card-hdr {
           display: flex;
           justify-content: space-between;
           align-items: center;
         }
-        .cell-card-title {
+        .cell-card-hdr .hdr-left {
           display: flex;
           align-items: center;
-          gap: 6px;
-          font-weight: 600;
-        }
-        .cell-card-actions {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-        }
-        .icon-close-btn {
-          background: transparent;
-          border: none;
-          color: var(--text-muted);
-          cursor: pointer;
+          gap: 8px;
+          font-weight: 700;
+          font-size: 13px;
+          color: var(--text-main);
         }
         .cell-mono-text {
+          width: 100%;
           height: 180px;
-          font-size: 11px;
+          font-size: 11.5px;
+          border-radius: 6px;
+          padding: 8px 10px;
+          background: var(--bg-app);
+          border: 1px solid var(--border-light);
+          color: var(--text-main);
+          resize: vertical;
         }
         .cell-card-footer {
           display: flex;
           justify-content: flex-end;
           gap: 8px;
+        }
+
+        /* Full Row Edit / Insert Record Dialog */
+        .row-dialog-overlay {
+          position: fixed;
+          inset: 0;
+          background: rgba(0, 0, 0, 0.72);
+          backdrop-filter: blur(8px);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 1000;
+          padding: 20px;
+        }
+        .row-dialog-card {
+          width: 620px;
+          max-height: 86vh;
+          background: var(--bg-app);
+          border: 1px solid var(--border-medium);
+          border-radius: 12px;
+          box-shadow: 0 24px 60px rgba(0, 0, 0, 0.52), 0 2px 8px rgba(0, 0, 0, 0.25);
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+          animation: modalAppear 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .row-dialog-header {
+          padding: 12px 18px;
+          background: var(--bg-header);
+          border-bottom: 1px solid var(--border-light);
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }
+        .dialog-header-left {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+        .dialog-icon-badge {
+          width: 28px;
+          height: 28px;
+          border-radius: 7px;
+          background: rgba(59, 130, 246, 0.15);
+          color: var(--accent-blue);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border: 1px solid rgba(59, 130, 246, 0.3);
+        }
+        .dialog-title-group {
+          display: flex;
+          flex-direction: column;
+          gap: 1px;
+        }
+        .dialog-title-text {
+          font-size: 13.5px;
+          font-weight: 700;
+          color: var(--text-main);
+        }
+        .dialog-sub-text {
+          font-size: 11px;
+          color: var(--text-muted);
+        }
+        .table-code-tag {
+          font-family: var(--font-mono);
+          font-weight: 600;
+          color: var(--accent-blue);
+          background: rgba(59, 130, 246, 0.08);
+          padding: 1px 4px;
+          border-radius: 3px;
+        }
+        .dialog-close-btn {
+          background: transparent;
+          border: none;
+          color: var(--text-muted);
+          cursor: pointer;
+          padding: 6px;
+          border-radius: 6px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: all 0.12s ease;
+        }
+        .dialog-close-btn:hover {
+          color: var(--text-main);
+          background: var(--bg-hover);
+        }
+
+        .row-dialog-body {
+          flex: 1;
+          overflow-y: auto;
+          padding: 16px 20px;
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+
+        .field-record-card {
+          background: var(--bg-card);
+          border: 1px solid var(--border-light);
+          border-radius: 8px;
+          padding: 10px 14px;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          transition: all 0.12s ease;
+        }
+        .field-record-card:hover {
+          border-color: var(--border-medium);
+        }
+        .field-record-card.is-pk-record {
+          border-left: 3px solid #f59e0b;
+        }
+
+        .field-card-top {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+        }
+        .field-meta-left {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          flex-wrap: wrap;
+        }
+        .field-name-title {
+          font-size: 12px;
+          font-weight: 700;
+          color: var(--text-main);
+        }
+        .field-type-badge {
+          font-size: 9.5px;
+          color: var(--text-muted);
+          background: var(--bg-tertiary);
+          padding: 1px 5px;
+          border-radius: 3px;
+          border: 1px solid var(--border-light);
+        }
+        .field-pk-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 3px;
+          font-size: 9px;
+          font-weight: 700;
+          color: #f59e0b;
+          background: rgba(245, 158, 11, 0.12);
+          border: 1px solid rgba(245, 158, 11, 0.3);
+          padding: 1px 4px;
+          border-radius: 3px;
+        }
+        .field-auto-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 3px;
+          font-size: 9px;
+          font-weight: 700;
+          color: var(--accent-blue);
+          background: rgba(59, 130, 246, 0.12);
+          border: 1px solid rgba(59, 130, 246, 0.3);
+          padding: 1px 4px;
+          border-radius: 3px;
+        }
+
+        .field-toggles-right {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+        }
+        .toggle-chip-btn {
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-light);
+          color: var(--text-muted);
+          font-size: 10px;
+          font-weight: 600;
+          padding: 2px 7px;
+          border-radius: 4px;
+          cursor: pointer;
+          display: inline-flex;
+          align-items: center;
+          gap: 3px;
+          transition: all 0.12s ease;
+        }
+        .toggle-chip-btn:hover {
+          color: var(--text-main);
+          border-color: var(--border-medium);
+        }
+        .toggle-chip-btn.auto-chip.active {
+          background: rgba(59, 130, 246, 0.18);
+          border-color: var(--accent-blue);
+          color: var(--accent-blue);
+        }
+        .toggle-chip-btn.null-chip.active {
+          background: rgba(245, 158, 11, 0.18);
+          border-color: #f59e0b;
+          color: #f59e0b;
+        }
+
+        .field-card-control {
+          display: flex;
+          width: 100%;
+        }
+        .form-input, .form-select {
+          width: 100%;
+          height: 32px;
+          font-size: 12px;
+          border-radius: 6px;
+        }
+        .form-textarea {
+          width: 100%;
+          font-size: 11.5px;
+          border-radius: 6px;
+          padding: 6px 8px;
+          resize: vertical;
+        }
+
+        .auto-state-box, .null-state-box {
+          width: 100%;
+          height: 32px;
+          border-radius: 6px;
+          padding: 0 10px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          cursor: pointer;
+          user-select: none;
+          transition: all 0.12s ease;
+        }
+        .auto-state-box {
+          background: rgba(59, 130, 246, 0.08);
+          border: 1px dashed rgba(59, 130, 246, 0.4);
+          color: var(--accent-blue);
+        }
+        .auto-state-box:hover {
+          background: rgba(59, 130, 246, 0.14);
+        }
+        .auto-state-icon { flex-shrink: 0; margin-right: 6px; }
+        .auto-state-text {
+          font-size: 11.5px;
+          font-weight: 600;
+          flex: 1;
+        }
+        .auto-switch-hint, .null-switch-hint {
+          font-size: 10.5px;
+          color: var(--text-muted);
+          text-decoration: underline;
+        }
+
+        .null-state-box {
+          background: rgba(245, 158, 11, 0.08);
+          border: 1px dashed rgba(245, 158, 11, 0.4);
+        }
+        .null-state-box:hover {
+          background: rgba(245, 158, 11, 0.14);
+        }
+        .null-state-badge {
+          font-size: 10px;
+          font-weight: 700;
+          color: #f59e0b;
+          background: rgba(245, 158, 11, 0.15);
+          padding: 1px 5px;
+          border-radius: 3px;
+          margin-right: 6px;
+        }
+        .null-state-text {
+          font-size: 11.5px;
+          color: var(--text-sub);
+          flex: 1;
+        }
+
+        .row-dialog-footer {
+          padding: 12px 20px;
+          background: var(--bg-header);
+          border-top: 1px solid var(--border-light);
+          display: flex;
+          justify-content: flex-end;
+          gap: 8px;
+        }
+        .apply-dialog-btn {
+          gap: 6px;
+          padding: 0 16px;
+          height: 32px;
+          font-size: 12px;
+          font-weight: 600;
         }
 
         .filter-active-btn {

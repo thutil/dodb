@@ -21,6 +21,8 @@ export interface ColumnInfo {
   nullable: boolean;
   primaryKey: boolean;
   default?: string | null;
+  autoIncrement?: boolean;
+  extra?: string;
 }
 
 export interface TableRowData {
