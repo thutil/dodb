@@ -36,7 +36,16 @@ pub async fn get_tables(id: String, database: String, state: State<'_, DbState>)
     let profile = profiles.iter().find(|p| p.id == id).ok_or("Profile not found")?;
     
     let query = match profile.r#type {
-        SupportedDB::Postgres => "SELECT tablename::text as name FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename",
+        SupportedDB::Postgres => "
+            SELECT 
+                CASE 
+                    WHEN schemaname = 'public' THEN tablename::text 
+                    ELSE (schemaname || '.' || tablename)::text 
+                END AS name 
+            FROM pg_tables 
+            WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+            ORDER BY (schemaname = 'public') DESC, tablename ASC
+        ",
         SupportedDB::Mariadb => "SHOW TABLES",
         SupportedDB::Sqlite => "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
     };
@@ -64,7 +73,13 @@ pub async fn get_columns(id: String, database: String, table: String, state: Sta
     
     let query = match profile.r#type {
         SupportedDB::Postgres => {
-            let tbl_clean = table.replace("'", "''");
+            let (schema_part, table_part) = if table.contains('.') {
+                let parts: Vec<&str> = table.splitn(2, '.').collect();
+                (parts[0].replace('\'', "''"), parts[1].replace('\'', "''"))
+            } else {
+                ("public".to_string(), table.replace('\'', "''"))
+            };
+            
             format!("
                 SELECT 
                     c.column_name::text AS name, 
@@ -78,19 +93,18 @@ pub async fn get_columns(id: String, database: String, table: String, state: Sta
                           ON tc.constraint_name = kcu.constraint_name 
                           AND tc.table_schema = kcu.table_schema 
                         WHERE tc.constraint_type = 'PRIMARY KEY' 
-                          AND tc.table_name = c.table_name 
-                          AND tc.table_schema = c.table_schema 
+                          AND (tc.table_name = c.table_name OR LOWER(tc.table_name) = LOWER(c.table_name))
+                          AND (tc.table_schema = c.table_schema OR LOWER(tc.table_schema) = LOWER(c.table_schema))
                           AND kcu.column_name = c.column_name
                     ) AS primary_key
                 FROM information_schema.columns c
-                WHERE (c.table_schema = 'public' OR c.table_schema = CURRENT_SCHEMA())
-                  AND (c.table_name = '{0}' OR LOWER(c.table_name) = LOWER('{0}'))
+                WHERE (c.table_schema = '{0}' OR LOWER(c.table_schema) = LOWER('{0}') OR c.table_schema = 'public' OR c.table_schema = CURRENT_SCHEMA())
+                  AND (c.table_name = '{1}' OR LOWER(c.table_name) = LOWER('{1}'))
                 ORDER BY c.ordinal_position
-            ", tbl_clean)
+            ", schema_part, table_part)
         },
-        SupportedDB::Mariadb => format!("SHOW COLUMNS FROM `{}`", table),
-        SupportedDB::Sqlite => format!("PRAGMA table_info(\"{}\")", table),
-
+        SupportedDB::Mariadb => format!("SHOW COLUMNS FROM `{}`", table.replace('`', "")),
+        SupportedDB::Sqlite => format!("PRAGMA table_info(\"{}\")", table.replace('"', "")),
     };
     
     let pool = get_pool(&state, profile, Some(&database)).await?;
@@ -155,6 +169,39 @@ pub async fn get_columns(id: String, database: String, table: String, state: Sta
             columns.push(serde_json::Value::Object(col_info));
         }
     }
+    
+    // Fallback: If information_schema had no rows, discover headers dynamically
+    if columns.is_empty() {
+        let fallback_query = match profile.r#type {
+            SupportedDB::Postgres => {
+                if table.contains('.') {
+                    let parts: Vec<&str> = table.splitn(2, '.').collect();
+                    format!("SELECT * FROM \"{}\".\"{}\" LIMIT 0", parts[0].replace('"', ""), parts[1].replace('"', ""))
+                } else {
+                    format!("SELECT * FROM \"{}\" LIMIT 0", table.replace('"', ""))
+                }
+            },
+            SupportedDB::Mariadb => format!("SELECT * FROM `{}` LIMIT 0", table.replace('`', "")),
+            SupportedDB::Sqlite => format!("SELECT * FROM \"{}\" LIMIT 0", table.replace('"', "")),
+        };
+        if let Ok(dummy_rows) = execute_query(&pool, &fallback_query).await {
+            if let Some(first) = dummy_rows.first() {
+                if let Some(obj) = first.as_object() {
+                    for key in obj.keys() {
+                        let mut col_info = serde_json::Map::new();
+                        col_info.insert("name".to_string(), serde_json::Value::String(key.clone()));
+                        col_info.insert("type".to_string(), serde_json::Value::String("text".to_string()));
+                        col_info.insert("nullable".to_string(), serde_json::Value::Bool(true));
+                        col_info.insert("primaryKey".to_string(), serde_json::Value::Bool(key.to_lowercase() == "id"));
+                        col_info.insert("default".to_string(), serde_json::Value::Null);
+                        col_info.insert("autoIncrement".to_string(), serde_json::Value::Bool(key.to_lowercase() == "id"));
+                        columns.push(serde_json::Value::Object(col_info));
+                    }
+                }
+            }
+        }
+    }
+    
     Ok(serde_json::json!({ "columns": columns }))
 }
 
@@ -176,9 +223,16 @@ pub async fn get_rows(
     
     // Identifier quoting depends on SQL dialect
     let table_ident = match profile.r#type {
-        SupportedDB::Postgres => format!("\"{}\"", table),
-        SupportedDB::Mariadb => format!("`{}`", table),
-        SupportedDB::Sqlite => format!("\"{}\"", table),
+        SupportedDB::Postgres => {
+            if table.contains('.') {
+                let parts: Vec<&str> = table.splitn(2, '.').collect();
+                format!("\"{}\".\"{}\"", parts[0].replace('"', ""), parts[1].replace('"', ""))
+            } else {
+                format!("\"{}\"", table.replace('"', ""))
+            }
+        },
+        SupportedDB::Mariadb => format!("`{}`", table.replace('`', "")),
+        SupportedDB::Sqlite => format!("\"{}\"", table.replace('"', "")),
     };
     
     // Build WHERE clause
@@ -194,11 +248,11 @@ pub async fn get_rows(
                 if col.is_empty() { continue; }
                 
                 let col_ident = match profile.r#type {
-                    SupportedDB::Postgres | SupportedDB::Sqlite => format!("\"{}\"", col),
-                    SupportedDB::Mariadb => format!("`{}`", col),
+                    SupportedDB::Postgres | SupportedDB::Sqlite => format!("\"{}\"", col.replace('"', "")),
+                    SupportedDB::Mariadb => format!("`{}`", col.replace('`', "")),
                 };
                 
-                let val_escaped = val.replace("'", "''");
+                let val_escaped = val.replace('\'', "''");
                 
                 let clause = match op {
                     "equals" => format!("{} = '{}'", col_ident, val_escaped),
@@ -231,8 +285,8 @@ pub async fn get_rows(
             "".to_string()
         } else {
             let col_ident = match profile.r#type {
-                SupportedDB::Postgres | SupportedDB::Sqlite => format!("\"{}\"", col),
-                SupportedDB::Mariadb => format!("`{}`", col),
+                SupportedDB::Postgres | SupportedDB::Sqlite => format!("\"{}\"", col.replace('"', "")),
+                SupportedDB::Mariadb => format!("`{}`", col.replace('`', "")),
             };
             let dir = sort_order.unwrap_or_else(|| "ASC".to_string()).to_uppercase();
             let dir = if dir == "DESC" { "DESC" } else { "ASC" };
@@ -243,29 +297,37 @@ pub async fn get_rows(
     };
     
     let query = format!("SELECT * FROM {} {} {} LIMIT {} OFFSET {}", table_ident, where_sql, order_sql, limit, offset);
-    let count_query = format!("SELECT COUNT(*) FROM {} {}", table_ident, where_sql);
+    let count_query = format!("SELECT COUNT(*)::bigint AS total FROM {} {}", table_ident, where_sql);
     
     let pool = get_pool(&state, profile, Some(&database)).await?;
     
-    // Run both queries concurrently
-    let (rows_res, count_res) = tokio::join!(
+    // Try querying with quoted identifier first; fallback to unquoted if identifier casing mismatch
+    let (rows, count_rows) = match tokio::join!(
         execute_query(&pool, &query),
         execute_query(&pool, &count_query)
-    );
-    
-    let rows = rows_res?;
-    let count_rows = count_res?;
+    ) {
+        (Ok(r), Ok(c)) => (r, c),
+        _ => {
+            let unquoted_query = format!("SELECT * FROM {} {} {} LIMIT {} OFFSET {}", table, where_sql, order_sql, limit, offset);
+            let unquoted_count = format!("SELECT COUNT(*)::bigint AS total FROM {} {}", table, where_sql);
+            let (r2, c2) = tokio::join!(
+                execute_query(&pool, &unquoted_query),
+                execute_query(&pool, &unquoted_count)
+            );
+            (r2?, c2?)
+        }
+    };
     
     let mut total = 0;
     if let Some(first) = count_rows.first() {
         if let Some(obj) = first.as_object() {
-            if let Some(val) = obj.values().next() {
-                if let Some(s) = val.as_str() {
-                    total = s.parse::<u32>().unwrap_or(0);
+            if let Some(val) = obj.get("total").or_else(|| obj.values().next()) {
+                if let Some(n) = val.as_i64() {
+                    total = n as u32;
                 } else if let Some(n) = val.as_u64() {
                     total = n as u32;
-                } else if let Some(n) = val.as_i64() {
-                    total = n as u32;
+                } else if let Some(s) = val.as_str() {
+                    total = s.parse::<u32>().unwrap_or(0);
                 }
             }
         }

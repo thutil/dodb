@@ -289,6 +289,8 @@ pub async fn execute_query(pool: &DbPool, query: &str) -> Result<Vec<serde_json:
                         map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
                     } else if let Ok(v) = row.try_get::<i16, _>(i) {
                         map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
+                    } else if let Ok(v) = row.try_get::<i8, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
                     } else if let Ok(v) = row.try_get::<f64, _>(i) {
                         if let Some(num) = serde_json::Number::from_f64(v) {
                             map.insert(column.name().to_string(), serde_json::Value::Number(num));
@@ -301,6 +303,10 @@ pub async fn execute_query(pool: &DbPool, query: &str) -> Result<Vec<serde_json:
                         } else {
                             map.insert(column.name().to_string(), serde_json::Value::Null);
                         }
+                    } else if let Ok(v) = row.try_get::<rust_decimal::Decimal, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::String(v.to_string()));
+                    } else if let Ok(v) = row.try_get::<bigdecimal::BigDecimal, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::String(v.to_string()));
                     } else if let Ok(v) = row.try_get::<chrono::DateTime<chrono::Utc>, _>(i) {
                         map.insert(column.name().to_string(), serde_json::Value::String(v.to_rfc3339()));
                     } else if let Ok(v) = row.try_get::<chrono::DateTime<chrono::FixedOffset>, _>(i) {
@@ -351,9 +357,19 @@ pub async fn execute_query(pool: &DbPool, query: &str) -> Result<Vec<serde_json:
                         map.insert(column.name().to_string(), serde_json::Value::Bool(v));
                     } else if let Ok(v) = row.try_get::<i64, _>(i) {
                         map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
+                    } else if let Ok(v) = row.try_get::<u64, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
                     } else if let Ok(v) = row.try_get::<i32, _>(i) {
                         map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
+                    } else if let Ok(v) = row.try_get::<u32, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
                     } else if let Ok(v) = row.try_get::<i16, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
+                    } else if let Ok(v) = row.try_get::<u16, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
+                    } else if let Ok(v) = row.try_get::<i8, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
+                    } else if let Ok(v) = row.try_get::<u8, _>(i) {
                         map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
                     } else if let Ok(v) = row.try_get::<f64, _>(i) {
                         if let Some(num) = serde_json::Number::from_f64(v) {
@@ -367,6 +383,10 @@ pub async fn execute_query(pool: &DbPool, query: &str) -> Result<Vec<serde_json:
                         } else {
                             map.insert(column.name().to_string(), serde_json::Value::Null);
                         }
+                    } else if let Ok(v) = row.try_get::<rust_decimal::Decimal, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::String(v.to_string()));
+                    } else if let Ok(v) = row.try_get::<bigdecimal::BigDecimal, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::String(v.to_string()));
                     } else if let Ok(v) = row.try_get::<chrono::DateTime<chrono::Utc>, _>(i) {
                         map.insert(column.name().to_string(), serde_json::Value::String(v.to_rfc3339()));
                     } else if let Ok(v) = row.try_get::<chrono::NaiveDateTime, _>(i) {

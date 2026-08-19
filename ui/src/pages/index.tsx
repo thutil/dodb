@@ -39,6 +39,7 @@ export default function Home() {
   const [rows, setRows] = useState<TableRowData[]>([]);
   const [totalRows, setTotalRows] = useState(0);
   const [loadingData, setLoadingData] = useState(false);
+  const [tableError, setTableError] = useState<string | null>(null);
 
   // Pagination & Filtering
   const [page, setPage] = useState(0);
@@ -197,6 +198,7 @@ export default function Home() {
     const reqTable = activeTable;
 
     setLoadingData(true);
+    setTableError(null);
     try {
       // 1. Fetch columns metadata
       const colData: any = await apiClient.getColumns(reqProfileId, reqDatabase, reqTable);
@@ -219,9 +221,12 @@ export default function Home() {
       setColumns(colData.columns || []);
       setRows(rowData.rows || []);
       setTotalRows(rowData.total || 0);
-    } catch (err) {
+      setTableError(null);
+    } catch (err: any) {
       if (fetchSeqRef.current === currentReqSeq) {
+        const msg = typeof err === "string" ? err : err?.message || String(err);
         console.error("Fetch table data error", err);
+        setTableError(msg);
       }
     } finally {
       if (fetchSeqRef.current === currentReqSeq) {
@@ -532,6 +537,7 @@ export default function Home() {
                 filters={filters}
                 onFiltersChange={setFilters}
                 theme={theme}
+                errorMessage={tableError}
               />
             ) : activeView === "sql" ? (
               <SqlConsole

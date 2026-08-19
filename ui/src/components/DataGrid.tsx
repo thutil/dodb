@@ -63,6 +63,7 @@ interface DataGridProps {
   filters?: ColumnFilter[];
   onFiltersChange?: (filters: ColumnFilter[]) => void;
   theme?: "dark" | "light";
+  errorMessage?: string | null;
 }
 
 export const DataGrid: React.FC<DataGridProps> = ({
@@ -88,6 +89,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
   filters = [],
   onFiltersChange,
   theme = "dark",
+  errorMessage = null,
 }) => {
   const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
 
@@ -991,8 +993,20 @@ export const DataGrid: React.FC<DataGridProps> = ({
               {/* Existing Database Rows */}
               {rows.length === 0 && newRows.length === 0 ? (
                 <tr>
-                  <td colSpan={columns.length + 2} className="empty-cell">
-                    No matching records found
+                  <td colSpan={Math.max(columns.length + 2, 3)} className="empty-cell">
+                    {errorMessage ? (
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "8px", color: "var(--accent-red, #ef4444)" }}>
+                        <AlertCircle size={22} />
+                        <span style={{ fontSize: "12px", fontWeight: 600 }}>Database Query Error</span>
+                        <span style={{ fontSize: "11px", color: "var(--text-muted)", maxWidth: "480px" }}>{errorMessage}</span>
+                        <button className="btn btn-secondary btn-sm" onClick={onRefresh} style={{ marginTop: "4px" }}>
+                          <RefreshCw size={11} />
+                          <span>Retry</span>
+                        </button>
+                      </div>
+                    ) : (
+                      "No matching records found"
+                    )}
                   </td>
                 </tr>
               ) : (
