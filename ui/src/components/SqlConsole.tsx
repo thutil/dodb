@@ -635,7 +635,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
           display: inline-flex;
           background: var(--bg-card);
           padding: 2px;
-          border-radius: 5px;
+          border-radius: var(--radius-sm);
           border: 1px solid var(--border-light);
           gap: 2px;
         }
@@ -644,22 +644,23 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
           align-items: center;
           gap: 4px;
           background: transparent;
-          border: none;
+          border: 1px solid transparent;
           color: var(--text-muted);
           padding: 2px 7px;
-          border-radius: 4px;
+          border-radius: var(--radius-xs);
           font-size: 10px;
           font-weight: 500;
           cursor: pointer;
-          transition: all 0.15s ease;
+          transition: all 0.12s ease;
         }
         .view-toggle-btn:hover {
           color: var(--text-main);
         }
         .view-toggle-btn.active {
-          background: var(--accent-blue);
-          color: #ffffff;
-          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+          background: var(--bg-tertiary);
+          color: var(--text-main);
+          font-weight: 600;
+          border-color: var(--border-light);
         }
 
         .json-toolbar-group {
@@ -671,14 +672,14 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
           display: inline-flex;
           background: var(--bg-card);
           padding: 2px;
-          border-radius: 4px;
+          border-radius: var(--radius-xs);
           border: 1px solid var(--border-light);
           gap: 2px;
         }
         .active-format {
-          background: rgba(59, 130, 246, 0.2) !important;
-          color: var(--accent-blue) !important;
-          border-color: rgba(59, 130, 246, 0.4) !important;
+          background: var(--bg-tertiary) !important;
+          color: var(--text-main) !important;
+          border-color: var(--border-light) !important;
           font-weight: 600;
         }
         .copy-check-icon {
@@ -687,7 +688,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
 
         .btn-sm {
           padding: 2px 7px;
-          font-size: 10px;
+          font-size: 10.5px;
         }
 
         .json-result-wrapper {
@@ -702,13 +703,13 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
           display: flex;
           align-items: center;
           gap: 5px;
-          font-weight: 700;
+          font-weight: 600;
           font-size: 10px;
           padding: 2px 6px;
           border-radius: 3px;
         }
-        .res-badge.success { background: rgba(16, 185, 129, 0.15); color: var(--accent-green); }
-        .res-badge.error { background: rgba(239, 68, 68, 0.15); color: var(--accent-red); }
+        .res-badge.success { background: var(--bg-card); color: var(--accent-green); border: 1px solid var(--border-light); }
+        .res-badge.error { background: rgba(239, 68, 68, 0.08); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.2); }
 
         .stat-item {
           display: flex;
@@ -719,9 +720,9 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
         }
 
         .error-display {
-          padding: 14px;
-          color: var(--accent-red);
-          background: rgba(239, 68, 68, 0.08);
+          padding: 12px 14px;
+          color: #f87171;
+          background: rgba(239, 68, 68, 0.06);
           font-size: 11px;
           overflow: auto;
         }

@@ -395,11 +395,11 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
           display: flex;
           align-items: center;
           gap: 8px;
-          padding: 6px 10px;
-          border-radius: 6px;
+          padding: 5px 9px;
+          border-radius: 5px;
           cursor: pointer;
           color: var(--text-sub);
-          font-size: 12.5px;
+          font-size: 12px;
           transition: all 0.12s ease;
           position: relative;
         }
@@ -409,27 +409,27 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
         }
         .tree-item.active {
           background: var(--bg-active);
-          color: var(--accent-blue);
+          color: var(--text-main);
           font-weight: 600;
         }
         .tree-item.active::before {
           content: "";
           position: absolute;
           left: 0;
-          top: 4px;
-          bottom: 4px;
-          width: 3px;
-          background: var(--accent-blue);
+          top: 5px;
+          bottom: 5px;
+          width: 2.5px;
+          background: var(--text-main);
           border-radius: 2px;
         }
 
         .tree-icon {
           flex-shrink: 0;
-          opacity: 0.75;
+          opacity: 0.7;
         }
         .tree-icon.active-icon {
           opacity: 1;
-          color: var(--accent-blue);
+          color: var(--text-main);
         }
 
         .tree-label {
@@ -437,7 +437,7 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
           overflow: hidden;
           text-overflow: ellipsis;
           font-family: var(--font-mono);
-          font-size: 12px;
+          font-size: 11.5px;
           font-weight: 500;
           letter-spacing: -0.2px;
         }

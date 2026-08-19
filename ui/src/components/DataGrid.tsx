@@ -1466,21 +1466,21 @@ export const DataGrid: React.FC<DataGridProps> = ({
         .meta-group {
           display: flex;
           align-items: center;
-          gap: 10px;
+          gap: 8px;
           flex-shrink: 0;
         }
-        .table-icon { color: var(--accent-blue); }
+        .table-icon { color: var(--text-muted); }
         .table-name-text {
-          font-size: 14px;
-          font-weight: 700;
+          font-size: 13px;
+          font-weight: 600;
           letter-spacing: -0.2px;
         }
         .count-pill {
-          font-size: 10.5px;
+          font-size: 10px;
           color: var(--text-muted);
           background: var(--bg-tertiary);
-          padding: 2.5px 7px;
-          border-radius: 5px;
+          padding: 1.5px 6px;
+          border-radius: 4px;
           font-weight: 500;
           font-variant-numeric: tabular-nums;
           border: 1px solid var(--border-light);
@@ -1491,7 +1491,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
           display: inline-flex;
           background: var(--bg-tertiary);
           padding: 2px;
-          border-radius: 6px;
+          border-radius: 5px;
           border: 1px solid var(--border-light);
           gap: 2px;
           margin-left: 2px;
@@ -1501,27 +1501,29 @@ export const DataGrid: React.FC<DataGridProps> = ({
           align-items: center;
           gap: 5px;
           background: transparent;
-          border: none;
+          border: 1px solid transparent;
           color: var(--text-muted);
-          padding: 3px 8px;
+          padding: 2px 7px;
           border-radius: 4px;
           font-size: 11px;
           font-weight: 500;
           cursor: pointer;
-          transition: all 0.15s ease;
+          transition: all 0.12s ease;
         }
         .view-toggle-btn:hover {
           color: var(--text-main);
         }
         .view-toggle-btn.active {
-          background: var(--accent-blue);
-          color: #ffffff;
-          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+          background: var(--bg-card);
+          color: var(--text-main);
+          font-weight: 600;
+          border-color: var(--border-light);
+          box-shadow: var(--shadow-sm);
         }
 
         .bar-actions {
           display: flex;
-          gap: 8px;
+          gap: 6px;
           align-items: center;
           flex-wrap: nowrap;
         }
@@ -1531,8 +1533,8 @@ export const DataGrid: React.FC<DataGridProps> = ({
           position: relative;
         }
         .export-btn-active {
-          border-color: var(--accent-blue) !important;
-          color: var(--accent-blue) !important;
+          border-color: var(--border-medium) !important;
+          background: var(--bg-hover) !important;
         }
         .export-chevron {
           transition: transform 0.15s ease;
@@ -1551,7 +1553,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
           padding: 4px;
           box-shadow: var(--shadow-popup);
           z-index: 120;
-          min-width: 155px;
+          min-width: 150px;
           display: flex;
           flex-direction: column;
           gap: 2px;
@@ -1560,11 +1562,11 @@ export const DataGrid: React.FC<DataGridProps> = ({
           display: flex;
           align-items: center;
           gap: 8px;
-          padding: 6px 10px;
+          padding: 5px 8px;
           border: none;
           background: transparent;
           color: var(--text-main);
-          font-size: 11.5px;
+          font-size: 11px;
           font-weight: 500;
           border-radius: 4px;
           cursor: pointer;
@@ -1574,12 +1576,8 @@ export const DataGrid: React.FC<DataGridProps> = ({
         }
         .export-menu-item:hover {
           background: var(--bg-hover);
-          color: var(--accent-blue);
         }
-        .menu-icon { flex-shrink: 0; }
-        .json-icon { color: #f59e0b; }
-        .sql-icon { color: var(--accent-blue); }
-        .csv-icon { color: var(--accent-green); }
+        .menu-icon { flex-shrink: 0; color: var(--text-muted); }
         
         .json-toolbar-group {
           display: flex;
@@ -1595,9 +1593,9 @@ export const DataGrid: React.FC<DataGridProps> = ({
           gap: 2px;
         }
         .active-format {
-          background: rgba(59, 130, 246, 0.2) !important;
-          color: var(--accent-blue) !important;
-          border-color: rgba(59, 130, 246, 0.4) !important;
+          background: var(--bg-card) !important;
+          color: var(--text-main) !important;
+          border-color: var(--border-light) !important;
           font-weight: 600;
         }
         .copy-check-icon {
@@ -1611,39 +1609,45 @@ export const DataGrid: React.FC<DataGridProps> = ({
         }
         .search-icon {
           position: absolute;
-          left: 9px;
+          left: 8px;
           color: var(--text-muted);
           pointer-events: none;
         }
         .search-input {
-          padding-left: 28px;
-          width: 180px;
-          height: 28px;
-          font-size: 11.5px;
-          border-radius: 5px;
+          padding-left: 26px;
+          width: 160px;
+          height: 26px;
+          font-size: 11px;
+          border-radius: var(--radius-sm);
         }
 
         .transaction-bar {
-          padding: 7px 16px;
-          background: rgba(245, 158, 11, 0.12);
-          border-bottom: 1px solid rgba(245, 158, 11, 0.3);
+          padding: 6px 14px;
+          background: var(--bg-card);
+          border-bottom: 1px solid var(--border-light);
           display: flex;
           justify-content: space-between;
           align-items: center;
           font-size: 11.5px;
         }
-        .tx-info { display: flex; align-items: center; gap: 7px; color: #f59e0b; font-weight: 600; }
-        .tx-actions { display: flex; gap: 8px; }
+        .tx-info {
+          display: flex;
+          align-items: center;
+          gap: 7px;
+          color: var(--text-main);
+          font-weight: 500;
+        }
+        .tx-actions { display: flex; gap: 6px; }
 
         .status-bar-msg {
-          padding: 7px 16px;
+          padding: 6px 14px;
           font-size: 11.5px;
           display: flex;
           align-items: center;
           gap: 6px;
         }
-        .status-bar-msg.success { background: rgba(16, 185, 129, 0.15); color: var(--accent-green); }
-        .status-bar-msg.error { background: rgba(239, 68, 68, 0.15); color: var(--accent-red); }
+        .status-bar-msg.success { background: var(--bg-tertiary); color: var(--accent-green); border-bottom: 1px solid var(--border-light); }
+        .status-bar-msg.error { background: rgba(239, 68, 68, 0.08); color: #f87171; border-bottom: 1px solid rgba(239, 68, 68, 0.2); }
 
         .spin { animation: spin 1s linear infinite; }
         @keyframes spin { 100% { transform: rotate(360deg); } }
@@ -1673,37 +1677,38 @@ export const DataGrid: React.FC<DataGridProps> = ({
           background: var(--bg-tertiary);
           color: var(--text-sub);
           text-align: left;
-          padding: 8px 12px;
+          padding: 7px 10px;
           border-bottom: 1px solid var(--border-light);
           border-right: 1px solid var(--border-light);
           z-index: 10;
+          font-weight: 600;
         }
 
         .hdr-flex {
           display: flex;
           align-items: center;
-          gap: 7px;
-          min-height: 20px;
+          gap: 6px;
+          min-height: 18px;
         }
-        .pk-icon { color: #f59e0b; flex-shrink: 0; }
+        .pk-icon { color: var(--text-muted); flex-shrink: 0; }
         .col-title {
-          font-weight: 600;
+          font-weight: 500;
           color: var(--text-main);
-          font-size: 12px;
+          font-size: 11.5px;
         }
         .col-type-tag {
-          font-size: 9.5px;
+          font-size: 9px;
           color: var(--text-muted);
           font-family: var(--font-mono);
-          background: rgba(255, 255, 255, 0.05);
-          padding: 1px 5px;
+          background: var(--bg-card);
+          padding: 1px 4px;
           border-radius: 3px;
           border: 1px solid var(--border-light);
           white-space: nowrap;
         }
 
         .num-col { width: 44px; min-width: 44px; text-align: center; }
-        .action-col { width: 88px; min-width: 88px; text-align: center; }
+        .action-col { width: 80px; min-width: 80px; text-align: center; }
 
         .row-index {
           text-align: center;
@@ -1711,24 +1716,24 @@ export const DataGrid: React.FC<DataGridProps> = ({
           background: var(--bg-sidebar);
           border-right: 1px solid var(--border-light);
           border-bottom: 1px solid var(--border-light);
-          font-size: 11px;
+          font-size: 10.5px;
           font-family: var(--font-mono);
           font-variant-numeric: tabular-nums;
-          padding: 7px 4px;
+          padding: 6px 4px;
         }
-        .new-idx { color: var(--accent-green); font-weight: bold; }
+        .new-idx { color: var(--accent-green); font-weight: 600; }
 
         .action-cell {
           text-align: center;
           border-bottom: 1px solid var(--border-light);
           border-right: 1px solid var(--border-light);
-          padding: 5px 6px;
+          padding: 4px 6px;
         }
         .act-group {
           display: flex;
           align-items: center;
           justify-content: center;
-          gap: 5px;
+          gap: 4px;
         }
 
         .icon-edit-btn, .icon-del-btn {
@@ -1736,27 +1741,27 @@ export const DataGrid: React.FC<DataGridProps> = ({
           border: none;
           color: var(--text-muted);
           cursor: pointer;
-          padding: 3px 5px;
-          border-radius: 4px;
+          padding: 2px 4px;
+          border-radius: 3px;
           transition: all 0.12s ease;
         }
         .icon-edit-btn:hover {
-          color: var(--accent-blue);
-          background: rgba(59, 130, 246, 0.15);
+          color: var(--text-main);
+          background: var(--bg-hover);
         }
         .icon-del-btn:hover, .icon-del-btn.active {
           color: var(--accent-red);
-          background: rgba(239, 68, 68, 0.15);
+          background: rgba(239, 68, 68, 0.1);
         }
         .icon-del-btn.is-deleted {
           color: #ef4444;
-          background: rgba(239, 68, 68, 0.25);
+          background: rgba(239, 68, 68, 0.15);
         }
 
         .icon-restore-btn {
-          background: rgba(59, 130, 246, 0.15);
-          color: var(--accent-blue);
-          border: 1px solid rgba(59, 130, 246, 0.35);
+          background: var(--bg-tertiary);
+          color: var(--text-main);
+          border: 1px solid var(--border-light);
           border-radius: 3px;
           padding: 2px 5px;
           cursor: pointer;
@@ -1766,28 +1771,27 @@ export const DataGrid: React.FC<DataGridProps> = ({
           transition: all 0.12s ease;
         }
         .icon-restore-btn:hover {
-          background: var(--accent-blue);
-          color: #fff;
+          background: var(--bg-hover);
+          border-color: var(--border-medium);
         }
 
         .transaction-bar.has-deletions {
-          border-left: 4px solid var(--accent-red);
-          background: rgba(239, 68, 68, 0.12);
+          border-left: 3px solid rgba(239, 68, 68, 0.6);
         }
         .tx-delete-highlight {
-          color: var(--accent-red);
-          font-weight: 700;
+          color: #f87171;
+          font-weight: 600;
         }
 
         .pro-table td {
-          padding: 7px 12px;
+          padding: 6px 10px;
           border-bottom: 1px solid var(--border-light);
           border-right: 1px solid var(--border-light);
           white-space: nowrap;
           max-width: 320px;
           overflow: hidden;
           text-overflow: ellipsis;
-          font-size: 12px;
+          font-size: 11.5px;
           line-height: 1.4;
         }
 
@@ -1797,45 +1801,39 @@ export const DataGrid: React.FC<DataGridProps> = ({
 
         .null-tag {
           display: inline-block;
-          font-size: 10px;
+          font-size: 9.5px;
           font-style: italic;
           color: var(--text-muted);
-          background: rgba(255, 255, 255, 0.04);
-          padding: 1px 5px;
+          background: var(--bg-tertiary);
+          padding: 0.5px 4px;
           border-radius: 3px;
           border: 1px solid var(--border-light);
-          letter-spacing: 0.2px;
-          opacity: 0.7;
-        }
-
-        .pro-table tr:hover td {
-          background: var(--bg-hover);
+          opacity: 0.8;
         }
 
         .row-deleted td {
-          background: rgba(239, 68, 68, 0.22) !important;
+          background: rgba(239, 68, 68, 0.08) !important;
           color: #fca5a5 !important;
           text-decoration: line-through;
-          border-bottom: 1px solid rgba(239, 68, 68, 0.35) !important;
-          border-right: 1px solid rgba(239, 68, 68, 0.2) !important;
+          border-bottom: 1px solid rgba(239, 68, 68, 0.2) !important;
         }
         .row-deleted:hover td {
-          background: rgba(239, 68, 68, 0.3) !important;
+          background: rgba(239, 68, 68, 0.14) !important;
         }
 
         .delete-confirm-card {
-          width: 450px;
+          width: 440px;
           display: flex;
           flex-direction: column;
           gap: 12px;
-          box-shadow: 0 16px 36px rgba(0, 0, 0, 0.45);
+          box-shadow: var(--shadow-popup);
         }
         .danger-hdr {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          color: var(--accent-red);
-          font-weight: 700;
+          color: var(--text-main);
+          font-weight: 600;
           font-size: 13px;
         }
         .danger-hdr .hdr-left {
@@ -1881,8 +1879,8 @@ export const DataGrid: React.FC<DataGridProps> = ({
         .delete-step-hint {
           font-size: 11px;
           color: var(--text-sub);
-          background: rgba(245, 158, 11, 0.1);
-          border: 1px solid rgba(245, 158, 11, 0.25);
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-light);
           border-radius: var(--radius-sm);
           padding: 6px 10px;
           display: flex;
@@ -1890,8 +1888,8 @@ export const DataGrid: React.FC<DataGridProps> = ({
           line-height: 1.4;
         }
         .step-badge {
-          color: #f59e0b;
-          font-weight: 700;
+          color: var(--text-main);
+          font-weight: 600;
           flex-shrink: 0;
         }
         .delete-modal-actions {
@@ -1901,29 +1899,29 @@ export const DataGrid: React.FC<DataGridProps> = ({
         .cell-data { cursor: pointer; }
         .cell-null { color: var(--text-muted); font-style: italic; }
         .cell-modified {
-          background: rgba(245, 158, 11, 0.15) !important;
-          outline: 1px dashed rgba(245, 158, 11, 0.5);
+          background: rgba(245, 158, 11, 0.08) !important;
+          outline: 1px dashed rgba(245, 158, 11, 0.4);
         }
         .cell-new {
-          background: rgba(16, 185, 129, 0.1) !important;
+          background: rgba(16, 185, 129, 0.08) !important;
         }
         .cell-auto {
-          background: rgba(59, 130, 246, 0.08) !important;
+          background: rgba(255, 255, 255, 0.02) !important;
         }
 
         .auto-inc-pill-tag {
           display: inline-flex;
           align-items: center;
-          gap: 4px;
-          background: rgba(59, 130, 246, 0.15);
-          border: 1px solid rgba(59, 130, 246, 0.35);
-          color: var(--accent-blue);
-          font-size: 9.5px;
+          gap: 3px;
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-light);
+          color: var(--text-sub);
+          font-size: 9px;
           font-family: var(--font-mono);
-          font-weight: 700;
-          padding: 1px 6px;
-          border-radius: 4px;
-          letter-spacing: 0.3px;
+          font-weight: 600;
+          padding: 1px 5px;
+          border-radius: 3px;
+          letter-spacing: 0.2px;
         }
 
         .placeholder-text { color: var(--text-muted); font-style: italic; }
@@ -1950,14 +1948,14 @@ export const DataGrid: React.FC<DataGridProps> = ({
         }
 
         .pagination-info { color: var(--text-muted); }
-        .page-nav-btns { display: flex; gap: 6px; }
+        .page-nav-btns { display: flex; gap: 4px; }
 
         /* Cell Inspect Modal */
         .cell-overlay {
           position: fixed;
           inset: 0;
-          background: rgba(0, 0, 0, 0.65);
-          backdrop-filter: blur(6px);
+          background: rgba(0, 0, 0, 0.6);
+          backdrop-filter: blur(4px);
           display: flex;
           align-items: center;
           justify-content: center;
@@ -1970,7 +1968,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
           padding: 16px;
           border-radius: var(--radius-md);
           border: 1px solid var(--border-medium);
-          box-shadow: 0 20px 48px rgba(0, 0, 0, 0.45);
+          box-shadow: var(--shadow-popup);
           display: flex;
           flex-direction: column;
           gap: 12px;
@@ -1984,7 +1982,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
           display: flex;
           align-items: center;
           gap: 8px;
-          font-weight: 700;
+          font-weight: 600;
           font-size: 13px;
           color: var(--text-main);
         }
@@ -2002,15 +2000,15 @@ export const DataGrid: React.FC<DataGridProps> = ({
         .cell-card-footer {
           display: flex;
           justify-content: flex-end;
-          gap: 8px;
+          gap: 6px;
         }
 
         /* Full Row Edit / Insert Record Dialog */
         .row-dialog-overlay {
           position: fixed;
           inset: 0;
-          background: rgba(0, 0, 0, 0.72);
-          backdrop-filter: blur(8px);
+          background: rgba(0, 0, 0, 0.65);
+          backdrop-filter: blur(5px);
           display: flex;
           align-items: center;
           justify-content: center;
@@ -2018,16 +2016,16 @@ export const DataGrid: React.FC<DataGridProps> = ({
           padding: 20px;
         }
         .row-dialog-card {
-          width: 620px;
-          max-height: 86vh;
+          width: 580px;
+          max-height: 85vh;
           background: var(--bg-app);
           border: 1px solid var(--border-medium);
-          border-radius: 12px;
-          box-shadow: 0 24px 60px rgba(0, 0, 0, 0.52), 0 2px 8px rgba(0, 0, 0, 0.25);
+          border-radius: var(--radius-lg);
+          box-shadow: var(--shadow-popup);
           display: flex;
           flex-direction: column;
           overflow: hidden;
-          animation: modalAppear 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+          animation: modalAppear 0.14s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
         .row-dialog-header {
@@ -2041,18 +2039,18 @@ export const DataGrid: React.FC<DataGridProps> = ({
         .dialog-header-left {
           display: flex;
           align-items: center;
-          gap: 10px;
+          gap: 9px;
         }
         .dialog-icon-badge {
-          width: 28px;
-          height: 28px;
-          border-radius: 7px;
-          background: rgba(59, 130, 246, 0.15);
-          color: var(--accent-blue);
+          width: 26px;
+          height: 26px;
+          border-radius: 6px;
+          background: var(--bg-tertiary);
+          color: var(--text-main);
           display: flex;
           align-items: center;
           justify-content: center;
-          border: 1px solid rgba(59, 130, 246, 0.3);
+          border: 1px solid var(--border-light);
         }
         .dialog-title-group {
           display: flex;
@@ -2060,8 +2058,8 @@ export const DataGrid: React.FC<DataGridProps> = ({
           gap: 1px;
         }
         .dialog-title-text {
-          font-size: 13.5px;
-          font-weight: 700;
+          font-size: 13px;
+          font-weight: 600;
           color: var(--text-main);
         }
         .dialog-sub-text {
@@ -2070,9 +2068,10 @@ export const DataGrid: React.FC<DataGridProps> = ({
         }
         .table-code-tag {
           font-family: var(--font-mono);
-          font-weight: 600;
-          color: var(--accent-blue);
-          background: rgba(59, 130, 246, 0.08);
+          font-weight: 500;
+          color: var(--text-sub);
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-light);
           padding: 1px 4px;
           border-radius: 3px;
         }
@@ -2081,8 +2080,8 @@ export const DataGrid: React.FC<DataGridProps> = ({
           border: none;
           color: var(--text-muted);
           cursor: pointer;
-          padding: 6px;
-          border-radius: 6px;
+          padding: 5px;
+          border-radius: 5px;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -2096,27 +2095,27 @@ export const DataGrid: React.FC<DataGridProps> = ({
         .row-dialog-body {
           flex: 1;
           overflow-y: auto;
-          padding: 16px 20px;
+          padding: 16px 18px;
           display: flex;
           flex-direction: column;
-          gap: 12px;
+          gap: 10px;
         }
 
         .field-record-card {
           background: var(--bg-card);
           border: 1px solid var(--border-light);
-          border-radius: 8px;
-          padding: 10px 14px;
+          border-radius: var(--radius-sm);
+          padding: 10px 12px;
           display: flex;
           flex-direction: column;
           gap: 8px;
-          transition: all 0.12s ease;
+          transition: border-color 0.12s ease;
         }
         .field-record-card:hover {
           border-color: var(--border-medium);
         }
         .field-record-card.is-pk-record {
-          border-left: 3px solid #f59e0b;
+          border-left: 2px solid var(--border-focus);
         }
 
         .field-card-top {
@@ -2132,27 +2131,28 @@ export const DataGrid: React.FC<DataGridProps> = ({
           flex-wrap: wrap;
         }
         .field-name-title {
-          font-size: 12px;
-          font-weight: 700;
+          font-size: 11.5px;
+          font-weight: 600;
           color: var(--text-main);
         }
         .field-type-badge {
-          font-size: 9.5px;
+          font-size: 9px;
           color: var(--text-muted);
           background: var(--bg-tertiary);
-          padding: 1px 5px;
+          padding: 1px 4px;
           border-radius: 3px;
           border: 1px solid var(--border-light);
+          font-family: var(--font-mono);
         }
         .field-pk-badge {
           display: inline-flex;
           align-items: center;
           gap: 3px;
-          font-size: 9px;
-          font-weight: 700;
-          color: #f59e0b;
-          background: rgba(245, 158, 11, 0.12);
-          border: 1px solid rgba(245, 158, 11, 0.3);
+          font-size: 8.5px;
+          font-weight: 600;
+          color: var(--text-sub);
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-light);
           padding: 1px 4px;
           border-radius: 3px;
         }
@@ -2160,11 +2160,11 @@ export const DataGrid: React.FC<DataGridProps> = ({
           display: inline-flex;
           align-items: center;
           gap: 3px;
-          font-size: 9px;
-          font-weight: 700;
-          color: var(--accent-blue);
-          background: rgba(59, 130, 246, 0.12);
-          border: 1px solid rgba(59, 130, 246, 0.3);
+          font-size: 8.5px;
+          font-weight: 600;
+          color: var(--text-sub);
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-light);
           padding: 1px 4px;
           border-radius: 3px;
         }
@@ -2172,16 +2172,16 @@ export const DataGrid: React.FC<DataGridProps> = ({
         .field-toggles-right {
           display: flex;
           align-items: center;
-          gap: 5px;
+          gap: 4px;
         }
         .toggle-chip-btn {
           background: var(--bg-tertiary);
           border: 1px solid var(--border-light);
           color: var(--text-muted);
-          font-size: 10px;
-          font-weight: 600;
-          padding: 2px 7px;
-          border-radius: 4px;
+          font-size: 9.5px;
+          font-weight: 500;
+          padding: 1px 6px;
+          border-radius: 3px;
           cursor: pointer;
           display: inline-flex;
           align-items: center;
@@ -2193,14 +2193,16 @@ export const DataGrid: React.FC<DataGridProps> = ({
           border-color: var(--border-medium);
         }
         .toggle-chip-btn.auto-chip.active {
-          background: rgba(59, 130, 246, 0.18);
-          border-color: var(--accent-blue);
-          color: var(--accent-blue);
+          background: var(--bg-card);
+          border-color: var(--border-focus);
+          color: var(--text-main);
+          font-weight: 600;
         }
         .toggle-chip-btn.null-chip.active {
-          background: rgba(245, 158, 11, 0.18);
-          border-color: #f59e0b;
-          color: #f59e0b;
+          background: var(--bg-card);
+          border-color: var(--border-focus);
+          color: var(--text-muted);
+          font-weight: 600;
         }
 
         .field-card-control {
@@ -2209,93 +2211,83 @@ export const DataGrid: React.FC<DataGridProps> = ({
         }
         .form-input, .form-select {
           width: 100%;
-          height: 32px;
-          font-size: 12px;
-          border-radius: 6px;
+          height: 30px;
+          font-size: 11.5px;
+          border-radius: var(--radius-sm);
         }
         .form-textarea {
           width: 100%;
           font-size: 11.5px;
-          border-radius: 6px;
+          border-radius: var(--radius-sm);
           padding: 6px 8px;
           resize: vertical;
         }
 
         .auto-state-box, .null-state-box {
           width: 100%;
-          height: 32px;
-          border-radius: 6px;
+          height: 30px;
+          border-radius: var(--radius-sm);
           padding: 0 10px;
           display: flex;
           align-items: center;
           justify-content: space-between;
           cursor: pointer;
           user-select: none;
+          background: var(--bg-tertiary);
+          border: 1px dashed var(--border-medium);
           transition: all 0.12s ease;
         }
-        .auto-state-box {
-          background: rgba(59, 130, 246, 0.08);
-          border: 1px dashed rgba(59, 130, 246, 0.4);
-          color: var(--accent-blue);
+        .auto-state-box:hover, .null-state-box:hover {
+          background: var(--bg-hover);
         }
-        .auto-state-box:hover {
-          background: rgba(59, 130, 246, 0.14);
-        }
-        .auto-state-icon { flex-shrink: 0; margin-right: 6px; }
+        .auto-state-icon { flex-shrink: 0; margin-right: 6px; color: var(--text-muted); }
         .auto-state-text {
-          font-size: 11.5px;
-          font-weight: 600;
+          font-size: 11px;
+          font-weight: 500;
+          color: var(--text-sub);
           flex: 1;
         }
         .auto-switch-hint, .null-switch-hint {
-          font-size: 10.5px;
+          font-size: 10px;
           color: var(--text-muted);
-          text-decoration: underline;
         }
 
-        .null-state-box {
-          background: rgba(245, 158, 11, 0.08);
-          border: 1px dashed rgba(245, 158, 11, 0.4);
-        }
-        .null-state-box:hover {
-          background: rgba(245, 158, 11, 0.14);
-        }
         .null-state-badge {
-          font-size: 10px;
-          font-weight: 700;
-          color: #f59e0b;
-          background: rgba(245, 158, 11, 0.15);
-          padding: 1px 5px;
+          font-size: 9px;
+          font-weight: 600;
+          color: var(--text-muted);
+          background: var(--bg-card);
+          border: 1px solid var(--border-light);
+          padding: 0.5px 4px;
           border-radius: 3px;
           margin-right: 6px;
         }
         .null-state-text {
-          font-size: 11.5px;
-          color: var(--text-sub);
+          font-size: 11px;
+          color: var(--text-muted);
           flex: 1;
         }
 
         .row-dialog-footer {
-          padding: 12px 20px;
+          padding: 10px 18px;
           background: var(--bg-header);
           border-top: 1px solid var(--border-light);
           display: flex;
           justify-content: flex-end;
-          gap: 8px;
+          gap: 6px;
         }
         .apply-dialog-btn {
-          gap: 6px;
-          padding: 0 16px;
-          height: 32px;
-          font-size: 12px;
+          gap: 5px;
+          padding: 0 14px;
+          height: 28px;
+          font-size: 11.5px;
           font-weight: 600;
         }
 
         .filter-active-btn {
-          background: rgba(59, 130, 246, 0.15) !important;
-          color: var(--accent-blue) !important;
-          border-color: rgba(59, 130, 246, 0.4) !important;
-          font-weight: 600;
+          background: var(--bg-card) !important;
+          color: var(--text-main) !important;
+          border-color: var(--border-medium) !important;
         }
 
         .filter-drawer {

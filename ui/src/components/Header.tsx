@@ -217,17 +217,18 @@ export const Header: React.FC<HeaderProps> = ({
           box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
         }
         .brand-title {
-          font-weight: 700;
-          font-size: 13px;
-          letter-spacing: -0.3px;
+          font-weight: 600;
+          font-size: 12.5px;
+          letter-spacing: -0.2px;
         }
         .brand-badge {
           font-size: 9px;
-          font-weight: 700;
+          font-weight: 600;
           padding: 1px 5px;
           border-radius: 4px;
-          background: rgba(59, 130, 246, 0.15);
-          color: var(--accent-blue);
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-light);
+          color: var(--text-muted);
           text-transform: uppercase;
           letter-spacing: 0.3px;
         }
@@ -237,14 +238,14 @@ export const Header: React.FC<HeaderProps> = ({
           align-items: center;
           justify-content: center;
           -webkit-app-region: no-drag;
-          max-width: 520px;
+          max-width: 480px;
           flex: 1;
         }
         .nav-tabs {
           display: flex;
           background: var(--bg-tertiary);
-          padding: 2.5px;
-          border-radius: 8px;
+          padding: 2px;
+          border-radius: 6px;
           border: 1px solid var(--border-light);
           gap: 2px;
           width: 100%;
@@ -256,21 +257,21 @@ export const Header: React.FC<HeaderProps> = ({
           align-items: center;
           justify-content: center;
           gap: 5px;
-          padding: 4px 10px;
+          padding: 3px 8px;
           font-size: 11px;
           font-weight: 500;
-          border: none;
+          border: 1px solid transparent;
           background: transparent;
           color: var(--text-sub);
-          border-radius: 6px;
+          border-radius: 4px;
           cursor: pointer;
-          transition: all 0.16s cubic-bezier(0.4, 0, 0.2, 1);
-          height: 26px;
+          transition: all 0.12s ease;
+          height: 24px;
           white-space: nowrap;
         }
         .tab-icon {
           flex-shrink: 0;
-          opacity: 0.8;
+          opacity: 0.7;
         }
         .tab-btn:hover {
           color: var(--text-main);
@@ -280,10 +281,11 @@ export const Header: React.FC<HeaderProps> = ({
           background: var(--bg-card);
           color: var(--text-main);
           font-weight: 600;
-          box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18), 0 0 0 1px var(--border-light);
+          border-color: var(--border-light);
+          box-shadow: var(--shadow-sm);
         }
         .tab-btn.active .tab-icon {
-          color: var(--accent-blue);
+          color: var(--text-main);
           opacity: 1;
         }
 
@@ -306,21 +308,19 @@ export const Header: React.FC<HeaderProps> = ({
           background: var(--bg-card);
           border: 1px solid var(--border-light);
           padding: 0 8px;
-          height: 28px;
+          height: 26px;
           border-radius: var(--radius-sm);
           font-size: 11px;
-          box-shadow: 0 1px 2px rgba(0,0,0,0.05);
         }
         .active-conn-chip.offline {
           color: var(--text-muted);
         }
         .active-conn-chip.clickable {
           cursor: pointer;
-          transition: all 0.15s ease;
+          transition: all 0.12s ease;
         }
         .active-conn-chip.clickable:hover {
-          border-color: var(--accent-blue);
-          color: var(--text-main);
+          border-color: var(--border-medium);
           background: var(--bg-hover);
         }
         .chip-disconnect-btn {
@@ -334,28 +334,27 @@ export const Header: React.FC<HeaderProps> = ({
           padding: 3px;
           border-radius: 4px;
           margin-left: 2px;
-          transition: all 0.15s ease;
+          transition: all 0.12s ease;
         }
         .chip-disconnect-btn:hover {
-          background: rgba(239, 68, 68, 0.15);
+          background: rgba(239, 68, 68, 0.12);
           color: #ef4444;
         }
         .status-indicator {
-          width: 6.5px;
-          height: 6.5px;
+          width: 6px;
+          height: 6px;
           border-radius: 50%;
           flex-shrink: 0;
         }
         .status-indicator.online {
           background: var(--accent-green);
-          box-shadow: 0 0 8px rgba(16, 185, 129, 0.7);
         }
         .status-indicator.offline {
           background: var(--text-muted);
         }
 
         .profile-title {
-          font-weight: 600;
+          font-weight: 500;
           color: var(--text-main);
           max-width: 110px;
           white-space: nowrap;
@@ -374,7 +373,7 @@ export const Header: React.FC<HeaderProps> = ({
           border: none;
           color: var(--text-main);
           font-size: 11px;
-          font-weight: 600;
+          font-weight: 500;
           padding: 0 16px 0 0;
           outline: none;
           appearance: none;
@@ -386,7 +385,7 @@ export const Header: React.FC<HeaderProps> = ({
           text-overflow: ellipsis;
         }
         .profile-switcher-select:hover {
-          color: var(--accent-blue);
+          color: var(--text-main);
         }
 
         :global(.profile-select-chevron) {
@@ -398,22 +397,14 @@ export const Header: React.FC<HeaderProps> = ({
 
         .db-type-badge {
           font-size: 8.5px;
-          font-weight: 700;
+          font-family: var(--font-mono);
+          font-weight: 600;
           padding: 1px 4px;
           border-radius: 3px;
-          letter-spacing: 0.3px;
-        }
-        .db-type-badge.postgres {
-          background: rgba(59, 130, 246, 0.18);
-          color: #60a5fa;
-        }
-        .db-type-badge.mariadb {
-          background: rgba(249, 115, 22, 0.18);
-          color: #fb923c;
-        }
-        .db-type-badge.sqlite {
-          background: rgba(16, 185, 129, 0.18);
-          color: #34d399;
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-light);
+          color: var(--text-sub);
+          letter-spacing: 0.2px;
         }
 
         .db-select-wrap {
@@ -438,7 +429,7 @@ export const Header: React.FC<HeaderProps> = ({
           max-width: 100px;
         }
         .database-select:focus {
-          border-color: var(--accent-blue);
+          border-color: var(--border-focus);
         }
         .db-select-chevron {
           position: absolute;
