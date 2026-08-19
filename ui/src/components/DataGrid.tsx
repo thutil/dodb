@@ -133,7 +133,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
       <div className="grid-placeholder">
         <div className="placeholder-card">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/elephant.png" alt="Database Elephant" width={48} height={48} className="opacity-80" />
+          <img src="/mascot.jpg" alt="dodb Mascot" width={64} height={64} className="placeholder-mascot-img" />
           <h3>dodb Database Manager</h3>
           <p>Select a table from the sidebar to inspect records or open SQL Console</p>
         </div>
@@ -1527,6 +1527,35 @@ export const DataGrid: React.FC<DataGridProps> = ({
         }
         .btn-picker-trigger:hover {
           background: rgba(59, 130, 246, 0.15);
+        }
+
+        /* Small Screen Responsive Layout */
+        @media (max-width: 1050px) {
+          .grid-bar {
+            flex-wrap: wrap;
+            padding: 6px 10px;
+            gap: 8px;
+          }
+          .meta-group {
+            flex-wrap: wrap;
+            gap: 6px;
+          }
+          .bar-actions {
+            flex-wrap: wrap;
+            gap: 5px;
+          }
+          .search-input {
+            width: 120px;
+          }
+        }
+
+        @media (max-width: 780px) {
+          .search-wrap {
+            display: none;
+          }
+          .export-group {
+            display: none;
+          }
         }
       `}</style>
     </div>

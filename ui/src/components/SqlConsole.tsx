@@ -777,6 +777,35 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
           color: var(--text-muted);
           font-size: 11px;
         }
+
+        /* Small Screen Responsive Layout */
+        @media (max-width: 960px) {
+          .console-toolbar {
+            flex-wrap: wrap;
+            padding: 6px 10px;
+            gap: 8px;
+          }
+          .template-chips {
+            display: none;
+          }
+          .hint-pill {
+            display: none;
+          }
+          .results-bar {
+            flex-wrap: wrap;
+            padding: 6px 10px;
+            gap: 8px;
+          }
+          .results-bar-left {
+            gap: 8px;
+          }
+          .results-bar-right {
+            margin-left: 0;
+            width: 100%;
+            justify-content: flex-start;
+            flex-wrap: wrap;
+          }
+        }
       `}</style>
     </div>
   );

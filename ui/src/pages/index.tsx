@@ -5,13 +5,13 @@ import { Header } from "../components/Header";
 import { SidebarExplorer } from "../components/SidebarExplorer";
 import { ConnectionModal } from "../components/ConnectionModal";
 import { AuditLogDrawer } from "../components/AuditLogDrawer";
-import { GuiSizeModal } from "../components/GuiSizeModal";
 import { DataGrid, PendingChanges } from "../components/DataGrid";
 import { SqlConsole } from "../components/SqlConsole";
 import { AdminPanel } from "../components/AdminPanel";
 import { SchemaDiagram } from "../components/SchemaDiagram";
 import { ConnectionProfile, ColumnInfo, TableRowData, QueryExecutionResult, ColumnFilter } from "../types";
 import { apiClient } from "../utils/apiClient";
+import { auditLogger } from "../utils/auditLogger";
 
 const APP_VERSION = "1.0.0";
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:5820/api";
@@ -25,7 +25,6 @@ export default function Home() {
   const [activeProfile, setActiveProfile] = useState<ConnectionProfile | null>(null);
   const [isConnModalOpen, setIsConnModalOpen] = useState(false);
   const [isAuditLogOpen, setIsAuditLogOpen] = useState(false);
-  const [isGuiSizeOpen, setIsGuiSizeOpen] = useState(false);
 
   const [databases, setDatabases] = useState<string[]>([]);
   const [activeDatabase, setActiveDatabase] = useState<string>("");
@@ -38,23 +37,32 @@ export default function Home() {
   const [rows, setRows] = useState<TableRowData[]>([]);
   const [totalRows, setTotalRows] = useState(0);
   const [loadingData, setLoadingData] = useState(false);
-  const [page, setPage] = useState(0);
-  const pageSize = 50;
 
-  // Sorting, Search, and Filtering state
+  // Pagination & Filtering
+  const [page, setPage] = useState(0);
+  const [pageSize] = useState(50);
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortOrder, setSortOrder] = useState<"ASC" | "DESC">("ASC");
-  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [filters, setFilters] = useState<ColumnFilter[]>([]);
 
-  // Reset state when switching table or database
+  // Auto-detect OS Theme on mount
   useEffect(() => {
-    setSortColumn(null);
-    setSortOrder("ASC");
-    setSearchQuery("");
-    setFilters([]);
-    setPage(0);
-  }, [activeTable, activeDatabase]);
+    const isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const initialTheme = isDark ? "dark" : "light";
+    setTheme(initialTheme);
+    document.documentElement.setAttribute("data-theme", initialTheme);
+
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    const handleChange = (e: MediaQueryListEvent) => {
+      const updatedTheme = e.matches ? "dark" : "light";
+      setTheme(updatedTheme);
+      document.documentElement.setAttribute("data-theme", updatedTheme);
+    };
+
+    mediaQuery.addEventListener("change", handleChange);
+    return () => mediaQuery.removeEventListener("change", handleChange);
+  }, []);
 
   // Block F12, DevTools shortcuts, and Right-Click Inspect
   useEffect(() => {
@@ -82,24 +90,6 @@ export default function Home() {
       window.removeEventListener("contextmenu", handleContextMenu);
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, []);
-
-  // Auto Sync Theme with OS System Preference & Manual Toggle
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-    const initialTheme = mediaQuery.matches ? "dark" : "light";
-    setTheme(initialTheme);
-    document.documentElement.setAttribute("data-theme", initialTheme);
-
-    const handleChange = (e: MediaQueryListEvent) => {
-      const nextTheme = e.matches ? "dark" : "light";
-      setTheme(nextTheme);
-      document.documentElement.setAttribute("data-theme", nextTheme);
-    };
-
-    mediaQuery.addEventListener("change", handleChange);
-    return () => mediaQuery.removeEventListener("change", handleChange);
   }, []);
 
   const toggleTheme = () => {
@@ -204,7 +194,7 @@ export default function Home() {
     } finally {
       setLoadingData(false);
     }
-  }, [activeProfile, activeDatabase, activeTable, page, sortColumn, sortOrder, searchQuery, filters]);
+  }, [activeProfile, activeDatabase, activeTable, page, sortColumn, sortOrder, searchQuery, filters, pageSize]);
 
   useEffect(() => {
     if (activeDatabase && activeTable) {
@@ -218,7 +208,8 @@ export default function Home() {
       await fetchProfiles();
       setActiveProfile(saved);
     } catch (err: any) {
-      throw new Error(err.message || "Save profile failed");
+      const msg = typeof err === "string" ? err : err?.message || String(err);
+      throw new Error(msg || "Save profile failed");
     }
   };
 
@@ -231,11 +222,36 @@ export default function Home() {
   };
 
   const handleTestConnection = async (profileData: Partial<ConnectionProfile>): Promise<{ success: boolean; message?: string; error?: string }> => {
+    const start = performance.now();
     try {
       const msg: any = await apiClient.testConnection(profileData);
-      return { success: true, message: msg };
+      const duration = Math.round(performance.now() - start);
+      auditLogger.addLog({
+        profileId: profileData.id || "temp",
+        profileName: profileData.name || "Test Connection",
+        dbType: profileData.type || "postgres",
+        database: profileData.database || "",
+        actionType: "CONNECT",
+        sql: "TEST CONNECTION",
+        status: "SUCCESS",
+        executionTimeMs: duration,
+      });
+      return { success: true, message: typeof msg === "string" ? msg : "Connection successful" };
     } catch (err: any) {
-      return { success: false, error: err.message || String(err) };
+      const duration = Math.round(performance.now() - start);
+      const msg = typeof err === "string" ? err : err?.message || String(err);
+      auditLogger.addLog({
+        profileId: profileData.id || "temp",
+        profileName: profileData.name || "Test Connection",
+        dbType: profileData.type || "postgres",
+        database: profileData.database || "",
+        actionType: "CONNECT",
+        sql: "TEST CONNECTION",
+        status: "ERROR",
+        executionTimeMs: duration,
+        errorMessage: msg,
+      });
+      return { success: false, error: msg };
     }
   };
 
@@ -244,18 +260,53 @@ export default function Home() {
       throw new Error("โปรดเลือกการเชื่อมต่อฐานข้อมูลก่อนรันคำสั่ง");
     }
     
+    const start = performance.now();
     try {
       const data: any = await apiClient.executeCommand(
         activeProfile.id,
         activeDatabase || activeProfile.database,
         sql
       );
-      if (Array.isArray(data)) {
-        return { rows: data };
-      }
-      return { rows: data.rows || [], affectedRows: data.affectedRows || data.rowCount };
+      const duration = Math.round(performance.now() - start);
+      const rows = Array.isArray(data) ? data : data.rows || [];
+      const affected = data.affectedRows ?? data.rowCount ?? (Array.isArray(data) ? data.length : 0);
+
+      // Determine action type from SQL command
+      const trimmed = sql.trim().toUpperCase();
+      let actionType = "SELECT";
+      if (trimmed.startsWith("INSERT")) actionType = "INSERT";
+      else if (trimmed.startsWith("UPDATE")) actionType = "UPDATE";
+      else if (trimmed.startsWith("DELETE")) actionType = "DELETE";
+      else if (trimmed.startsWith("CREATE") || trimmed.startsWith("ALTER") || trimmed.startsWith("DROP") || trimmed.startsWith("TRUNCATE")) actionType = "DDL";
+
+      auditLogger.addLog({
+        profileId: activeProfile.id,
+        profileName: activeProfile.name,
+        dbType: activeProfile.type,
+        database: activeDatabase || activeProfile.database,
+        actionType,
+        sql,
+        status: "SUCCESS",
+        executionTimeMs: duration,
+        affectedRows: affected,
+      });
+
+      return { rows, affectedRows: affected };
     } catch (err: any) {
-      throw new Error(err.message || "Execution failed");
+      const duration = Math.round(performance.now() - start);
+      const msg = typeof err === "string" ? err : err?.message || String(err);
+      auditLogger.addLog({
+        profileId: activeProfile.id,
+        profileName: activeProfile.name,
+        dbType: activeProfile.type,
+        database: activeDatabase || activeProfile.database,
+        actionType: "QUERY",
+        sql,
+        status: "ERROR",
+        executionTimeMs: duration,
+        errorMessage: msg,
+      });
+      throw new Error(msg);
     }
   };
 
@@ -265,6 +316,12 @@ export default function Home() {
       return { success: false, error: "Missing active database connection or table" };
     }
     
+    const start = performance.now();
+    const numInserts = changes.inserts?.length || 0;
+    const numUpdates = changes.updates?.length || 0;
+    const numDeletes = changes.deletes?.length || 0;
+    const totalChanges = numInserts + numUpdates + numDeletes;
+
     try {
       await apiClient.commitChanges(
           activeProfile.id,
@@ -272,9 +329,36 @@ export default function Home() {
           activeTable,
           changes
       );
+      const duration = Math.round(performance.now() - start);
+
+      auditLogger.addLog({
+        profileId: activeProfile.id,
+        profileName: activeProfile.name,
+        dbType: activeProfile.type,
+        database: activeDatabase || activeProfile.database,
+        actionType: "COMMIT",
+        sql: `Table ${activeTable}: +${numInserts} inserts, ~${numUpdates} updates, -${numDeletes} deletes`,
+        status: "SUCCESS",
+        executionTimeMs: duration,
+        affectedRows: totalChanges,
+      });
+
       return { success: true };
     } catch (err: any) {
-      return { success: false, error: err.message };
+      const duration = Math.round(performance.now() - start);
+      const msg = typeof err === "string" ? err : err?.message || String(err);
+      auditLogger.addLog({
+        profileId: activeProfile.id,
+        profileName: activeProfile.name,
+        dbType: activeProfile.type,
+        database: activeDatabase || activeProfile.database,
+        actionType: "COMMIT",
+        sql: `Table ${activeTable}: Transaction failed`,
+        status: "ERROR",
+        executionTimeMs: duration,
+        errorMessage: msg,
+      });
+      return { success: false, error: msg };
     }
   };
 
@@ -305,7 +389,6 @@ export default function Home() {
           onChangeView={setActiveView}
           onOpenConnections={() => setIsConnModalOpen(true)}
           onOpenAuditLogs={() => setIsAuditLogOpen(true)}
-          onOpenGuiSize={() => setIsGuiSizeOpen(true)}
           theme={theme}
           onToggleTheme={toggleTheme}
         />
@@ -330,6 +413,9 @@ export default function Home() {
               onSelectTable={(tbl) => {
                 setActiveTable(tbl);
                 setPage(0);
+                if (activeView !== "explorer") {
+                  setActiveView("explorer");
+                }
               }}
               onRefresh={() => {
                 fetchDatabases();
@@ -413,13 +499,6 @@ export default function Home() {
           isOpen={isAuditLogOpen}
           onClose={() => setIsAuditLogOpen(false)}
           profiles={profiles}
-          apiBase={API_BASE}
-        />
-
-        <GuiSizeModal
-          isOpen={isGuiSizeOpen}
-          onClose={() => setIsGuiSizeOpen(false)}
-          apiBase={API_BASE}
         />
 
         <footer className="app-footer">

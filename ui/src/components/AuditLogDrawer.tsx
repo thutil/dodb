@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { X, Search, RefreshCw, Trash2, Download, CheckCircle2, XCircle, FileText } from "lucide-react";
 import { AuditLogEntry, ConnectionProfile } from "../types";
+import { auditLogger } from "../utils/auditLogger";
 
 interface AuditLogDrawerProps {
   isOpen: boolean;
@@ -13,7 +14,6 @@ export const AuditLogDrawer: React.FC<AuditLogDrawerProps> = ({
   isOpen,
   onClose,
   profiles,
-  apiBase = "http://localhost:5820/api",
 }) => {
   const [logs, setLogs] = useState<AuditLogEntry[]>([]);
   const [total, setTotal] = useState(0);
@@ -26,29 +26,36 @@ export const AuditLogDrawer: React.FC<AuditLogDrawerProps> = ({
   const [status, setStatus] = useState("");
   const [selectedLog, setSelectedLog] = useState<AuditLogEntry | null>(null);
 
-  const fetchLogs = useCallback(async () => {
+  const fetchLogs = useCallback(() => {
     setLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (search) params.append("search", search);
-      if (selectedProfileId) params.append("profileId", selectedProfileId);
-      if (actionType) params.append("actionType", actionType);
-      if (status) params.append("status", status);
-      params.append("limit", "150");
-
-      const baseUrl = apiBase.endsWith("/") ? apiBase.slice(0, -1) : apiBase;
-      const res = await fetch(`${baseUrl}/audit-logs?${params.toString()}`);
-      if (res.ok) {
-        const data = await res.json();
-        setLogs(data.logs || []);
-        setTotal(data.total || 0);
+      let all = auditLogger.getLogs();
+      if (search) {
+        const q = search.toLowerCase();
+        all = all.filter(l => 
+          (l.sql && l.sql.toLowerCase().includes(q)) ||
+          (l.database && l.database.toLowerCase().includes(q)) ||
+          (l.profileName && l.profileName.toLowerCase().includes(q)) ||
+          (l.actionType && l.actionType.toLowerCase().includes(q))
+        );
       }
+      if (selectedProfileId) {
+        all = all.filter(l => l.profileId === selectedProfileId);
+      }
+      if (actionType) {
+        all = all.filter(l => l.actionType === actionType);
+      }
+      if (status) {
+        all = all.filter(l => l.status === status);
+      }
+      setLogs(all);
+      setTotal(all.length);
     } catch (err) {
       console.error("Error fetching audit logs:", err);
     } finally {
       setLoading(false);
     }
-  }, [search, selectedProfileId, actionType, status, apiBase]);
+  }, [search, selectedProfileId, actionType, status]);
 
   useEffect(() => {
     if (isOpen) {
@@ -58,17 +65,10 @@ export const AuditLogDrawer: React.FC<AuditLogDrawerProps> = ({
 
   if (!isOpen) return null;
 
-  const handleClearLogs = async () => {
+  const handleClearLogs = () => {
     if (!confirm("Are you sure you want to clear all audit logs?")) return;
-    try {
-      const baseUrl = apiBase.endsWith("/") ? apiBase.slice(0, -1) : apiBase;
-      const res = await fetch(`${baseUrl}/audit-logs`, { method: "DELETE" });
-      if (res.ok) {
-        fetchLogs();
-      }
-    } catch (err) {
-      console.error("Failed to clear logs:", err);
-    }
+    auditLogger.clearLogs();
+    fetchLogs();
   };
 
   const handleExport = (format: "json" | "csv") => {

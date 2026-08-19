@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Database, Table2, RefreshCw, Search, HardDrive } from "lucide-react";
+import { Database, Table2, RefreshCw, Search, HardDrive, X } from "lucide-react";
 
 interface SidebarExplorerProps {
   databases: string[];
@@ -30,14 +30,15 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
 
   return (
     <aside className="sidebar">
+      {/* Database selection group */}
       <div className="sidebar-group">
         <div className="group-header">
           <div className="group-label">
-            <HardDrive size={13} />
+            <HardDrive size={12} />
             <span>Database</span>
           </div>
           <button className="icon-action-btn" onClick={onRefresh} title="Refresh Databases & Tables">
-            <RefreshCw size={12} className={loading ? "spin" : ""} />
+            <RefreshCw size={11} className={loading ? "spin" : ""} />
           </button>
         </div>
         <div className="select-container">
@@ -56,6 +57,7 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
         </div>
       </div>
 
+      {/* Filter tables input with clear button */}
       <div className="sidebar-group search-group">
         <div className="search-box">
           <Search size={12} className="search-icon" />
@@ -66,35 +68,49 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
+          {searchTerm && (
+            <button className="clear-search-btn" onClick={() => setSearchTerm("")} title="Clear filter">
+              <X size={11} />
+            </button>
+          )}
         </div>
       </div>
 
+      {/* Tables list */}
       <div className="sidebar-group tables-group">
         <div className="group-header">
           <div className="group-label">
-            <Database size={13} />
-            <span>Tables ({filteredTables.length})</span>
+            <Database size={12} />
+            <span>Tables</span>
           </div>
+          <span className="table-count-badge">{filteredTables.length}</span>
         </div>
 
         {loading ? (
-          <div className="sidebar-message">Loading tables...</div>
+          <div className="sidebar-message">
+            <RefreshCw size={14} className="spin loading-icon" />
+            <span>Loading tables...</span>
+          </div>
         ) : filteredTables.length === 0 ? (
           <div className="sidebar-message">
             {searchTerm ? "No tables match filter" : "No tables in database"}
           </div>
         ) : (
           <div className="table-tree">
-            {filteredTables.map((table) => (
-              <div
-                key={table}
-                className={`tree-item ${activeTable === table ? "active" : ""}`}
-                onClick={() => onSelectTable(table)}
-              >
-                <Table2 size={13} className="tree-icon" />
-                <span className="tree-label">{table}</span>
-              </div>
-            ))}
+            {filteredTables.map((table) => {
+              const isActive = activeTable === table;
+              return (
+                <div
+                  key={table}
+                  className={`tree-item ${isActive ? "active" : ""}`}
+                  onClick={() => onSelectTable(table)}
+                  title={table}
+                >
+                  <Table2 size={14} className={`tree-icon ${isActive ? "active-icon" : ""}`} />
+                  <span className="tree-label">{table}</span>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -107,14 +123,16 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
           border-right: 1px solid var(--border-light);
           display: flex;
           flex-direction: column;
-          padding: 10px;
-          gap: 12px;
+          padding: 8px 10px;
+          gap: 10px;
+          user-select: none;
+          flex-shrink: 0;
         }
 
         .sidebar-group {
           display: flex;
           flex-direction: column;
-          gap: 6px;
+          gap: 5px;
         }
 
         .group-header {
@@ -128,11 +146,21 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
           display: flex;
           align-items: center;
           gap: 6px;
-          font-size: 10px;
+          font-size: 11px;
           font-weight: 700;
           text-transform: uppercase;
-          letter-spacing: 0.6px;
+          letter-spacing: 0.5px;
           color: var(--text-muted);
+        }
+
+        .table-count-badge {
+          font-size: 10px;
+          font-weight: 600;
+          color: var(--text-muted);
+          background: var(--bg-tertiary);
+          padding: 1.5px 6px;
+          border-radius: 10px;
+          border: 1px solid var(--border-light);
         }
 
         .icon-action-btn {
@@ -140,17 +168,18 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
           border: none;
           color: var(--text-sub);
           cursor: pointer;
-          padding: 2px;
-          border-radius: 3px;
+          padding: 3px;
+          border-radius: 4px;
           display: flex;
           align-items: center;
-          transition: color 0.12s ease;
+          transition: all 0.12s ease;
         }
         .icon-action-btn:hover {
           color: var(--text-main);
+          background: var(--bg-hover);
         }
         .spin {
-          animation: spin 1s linear infinite;
+          animation: spin 0.9s linear infinite;
         }
         @keyframes spin {
           100% { transform: rotate(360deg); }
@@ -162,6 +191,9 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
         .db-dropdown {
           width: 100%;
           font-weight: 600;
+          font-size: 12px;
+          height: 30px;
+          padding: 4px 8px;
         }
 
         .search-box {
@@ -177,8 +209,26 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
         }
         .search-field {
           padding-left: 26px;
+          padding-right: 24px;
           width: 100%;
-          font-size: 11px;
+          font-size: 11.5px;
+          height: 28px;
+          border-radius: 5px;
+        }
+        .clear-search-btn {
+          position: absolute;
+          right: 6px;
+          background: transparent;
+          border: none;
+          color: var(--text-muted);
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          padding: 2px;
+          border-radius: 3px;
+        }
+        .clear-search-btn:hover {
+          color: var(--text-main);
         }
 
         .tables-group {
@@ -195,18 +245,20 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
           flex-direction: column;
           gap: 2px;
           margin-top: 4px;
+          padding-right: 2px;
         }
 
         .tree-item {
           display: flex;
           align-items: center;
           gap: 8px;
-          padding: 5px 8px;
-          border-radius: var(--radius-xs);
+          padding: 6px 10px;
+          border-radius: 6px;
           cursor: pointer;
           color: var(--text-sub);
-          font-size: 11px;
-          transition: all 0.1s ease;
+          font-size: 12.5px;
+          transition: all 0.12s ease;
+          position: relative;
         }
         .tree-item:hover {
           background: var(--bg-hover);
@@ -217,22 +269,55 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
           color: var(--accent-blue);
           font-weight: 600;
         }
+        .tree-item.active::before {
+          content: "";
+          position: absolute;
+          left: 0;
+          top: 4px;
+          bottom: 4px;
+          width: 3px;
+          background: var(--accent-blue);
+          border-radius: 2px;
+        }
 
         .tree-icon {
           flex-shrink: 0;
+          opacity: 0.75;
+        }
+        .tree-icon.active-icon {
+          opacity: 1;
+          color: var(--accent-blue);
         }
 
         .tree-label {
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
+          font-family: var(--font-mono);
+          font-size: 12px;
+          font-weight: 500;
+          letter-spacing: -0.2px;
         }
 
         .sidebar-message {
-          padding: 16px 8px;
+          padding: 24px 8px;
           font-size: 11px;
           color: var(--text-muted);
           text-align: center;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 8px;
+        }
+        .loading-icon {
+          color: var(--accent-blue);
+        }
+
+        @media (max-width: 900px) {
+          .sidebar {
+            width: 210px;
+            padding: 6px 8px;
+          }
         }
       `}</style>
     </aside>

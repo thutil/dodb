@@ -63,7 +63,7 @@ export interface AuditLogEntry {
   profileName?: string;
   dbType?: string;
   database?: string;
-  actionType: "QUERY" | "INSERT" | "UPDATE" | "DELETE" | "DDL" | "CONNECT" | "TEST";
+  actionType: "QUERY" | "SELECT" | "INSERT" | "UPDATE" | "DELETE" | "DDL" | "CONNECT" | "TEST" | "COMMIT" | string;
   sql?: string;
   status: "SUCCESS" | "ERROR";
   errorMessage?: string;

@@ -1,12 +1,18 @@
 use crate::models::{ConnectionProfile, SupportedDB};
-use sqlx::any::AnyPoolOptions;
-use sqlx::{AnyPool, AnyConnection, Connection, Executor, Row, Column};
+use sqlx::{Row, Column, ValueRef};
 use std::collections::HashMap;
 use std::sync::Mutex;
 use tauri::State;
 
+#[derive(Clone)]
+pub enum DbPool {
+    Postgres(sqlx::PgPool),
+    MySql(sqlx::MySqlPool),
+    Sqlite(sqlx::SqlitePool),
+}
+
 pub struct DbState {
-    pub pools: Mutex<HashMap<String, AnyPool>>,
+    pub pools: Mutex<HashMap<String, DbPool>>,
 }
 
 impl Default for DbState {
@@ -21,7 +27,7 @@ pub async fn get_pool(
     state: &State<'_, DbState>,
     profile: &ConnectionProfile,
     database_override: Option<&str>,
-) -> Result<AnyPool, String> {
+) -> Result<DbPool, String> {
     let db_name = match database_override {
         Some(db) if !db.trim().is_empty() => db.trim().to_string(),
         _ => {
@@ -56,36 +62,46 @@ pub async fn get_pool(
         }
     }
 
-    let url = match profile.r#type {
+    let pool = match profile.r#type {
+        SupportedDB::Postgres => {
+            let url = format!(
+                "postgres://{}:{}@{}:{}/{}",
+                profile.user, profile.password, profile.host, profile.port, db_name
+            );
+            let p = sqlx::postgres::PgPoolOptions::new()
+                .max_connections(5)
+                .connect(&url)
+                .await
+                .map_err(|e| format!("Failed to connect to Postgres database '{}': {}", db_name, e))?;
+            DbPool::Postgres(p)
+        }
+        SupportedDB::Mariadb => {
+            let url = format!(
+                "mysql://{}:{}@{}:{}/{}",
+                profile.user, profile.password, profile.host, profile.port, db_name
+            );
+            let p = sqlx::mysql::MySqlPoolOptions::new()
+                .max_connections(5)
+                .connect(&url)
+                .await
+                .map_err(|e| format!("Failed to connect to MySQL database '{}': {}", db_name, e))?;
+            DbPool::MySql(p)
+        }
         SupportedDB::Sqlite => {
             let path = if !db_name.is_empty() && db_name != "main" && db_name != ":memory:" {
                 db_name.clone()
             } else {
                 profile.file_path.clone().unwrap_or_else(|| ":memory:".to_string())
             };
-            format!("sqlite://{}", path)
+            let url = format!("sqlite://{}", path);
+            let p = sqlx::sqlite::SqlitePoolOptions::new()
+                .max_connections(5)
+                .connect(&url)
+                .await
+                .map_err(|e| format!("Failed to open SQLite database '{}': {}", path, e))?;
+            DbPool::Sqlite(p)
         }
-        SupportedDB::Postgres => {
-            format!(
-                "postgres://{}:{}@{}:{}/{}",
-                profile.user, profile.password, profile.host, profile.port, db_name
-            )
-        }
-        SupportedDB::Mariadb => {
-            format!(
-                "mysql://{}:{}@{}:{}/{}",
-                profile.user, profile.password, profile.host, profile.port, db_name
-            )
-        }
-
     };
-
-    sqlx::any::install_default_drivers();
-    let pool = AnyPoolOptions::new()
-        .max_connections(5)
-        .connect(&url)
-        .await
-        .map_err(|e| format!("Failed to connect to database '{}': {}", db_name, e))?;
 
     let mut pools = state.pools.lock().map_err(|e| e.to_string())?;
     pools.insert(cache_key, pool.clone());
@@ -93,72 +109,226 @@ pub async fn get_pool(
     Ok(pool)
 }
 
+pub async fn execute_query(pool: &DbPool, query: &str) -> Result<Vec<serde_json::Value>, String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            let rows = sqlx::query(query).fetch_all(p).await.map_err(|e| e.to_string())?;
+            let mut result = Vec::new();
+            for row in rows {
+                let mut map = serde_json::Map::new();
+                for (i, column) in row.columns().iter().enumerate() {
+                    if let Ok(raw) = row.try_get_raw(i) {
+                        if raw.is_null() {
+                            map.insert(column.name().to_string(), serde_json::Value::Null);
+                            continue;
+                        }
+                    }
 
-pub async fn execute_query(pool: &AnyPool, query: &str) -> Result<Vec<serde_json::Value>, String> {
-    let rows = sqlx::query(query).fetch_all(pool).await.map_err(|e| e.to_string())?;
-    
-    let mut result = Vec::new();
-    for row in rows {
-        let mut map = serde_json::Map::new();
-        for (i, column) in row.columns().iter().enumerate() {
-            use sqlx::ValueRef;
-            
-            let raw_res = row.try_get_raw(i);
-            if let Ok(raw) = raw_res {
-                if raw.is_null() {
-                    map.insert(column.name().to_string(), serde_json::Value::Null);
-                    continue;
+                    if let Ok(v) = row.try_get::<String, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::String(v));
+                    } else if let Ok(v) = row.try_get::<bool, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::Bool(v));
+                    } else if let Ok(v) = row.try_get::<i64, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
+                    } else if let Ok(v) = row.try_get::<i32, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
+                    } else if let Ok(v) = row.try_get::<i16, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
+                    } else if let Ok(v) = row.try_get::<f64, _>(i) {
+                        if let Some(num) = serde_json::Number::from_f64(v) {
+                            map.insert(column.name().to_string(), serde_json::Value::Number(num));
+                        } else {
+                            map.insert(column.name().to_string(), serde_json::Value::Null);
+                        }
+                    } else if let Ok(v) = row.try_get::<f32, _>(i) {
+                        if let Some(num) = serde_json::Number::from_f64(v as f64) {
+                            map.insert(column.name().to_string(), serde_json::Value::Number(num));
+                        } else {
+                            map.insert(column.name().to_string(), serde_json::Value::Null);
+                        }
+                    } else if let Ok(v) = row.try_get::<chrono::DateTime<chrono::Utc>, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::String(v.to_rfc3339()));
+                    } else if let Ok(v) = row.try_get::<chrono::DateTime<chrono::FixedOffset>, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::String(v.to_rfc3339()));
+                    } else if let Ok(v) = row.try_get::<chrono::NaiveDateTime, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::String(v.to_string()));
+                    } else if let Ok(v) = row.try_get::<chrono::NaiveDate, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::String(v.to_string()));
+                    } else if let Ok(v) = row.try_get::<chrono::NaiveTime, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::String(v.to_string()));
+                    } else if let Ok(v) = row.try_get::<uuid::Uuid, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::String(v.to_string()));
+                    } else if let Ok(v) = row.try_get::<serde_json::Value, _>(i) {
+                        map.insert(column.name().to_string(), v);
+                    } else if let Ok(v) = row.try_get::<Vec<String>, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::json!(v));
+                    } else if let Ok(v) = row.try_get::<Vec<i64>, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::json!(v));
+                    } else if let Ok(v) = row.try_get::<Vec<i32>, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::json!(v));
+                    } else if let Ok(v) = row.try_get::<Vec<u8>, _>(i) {
+                        let s = String::from_utf8_lossy(&v).into_owned();
+                        map.insert(column.name().to_string(), serde_json::Value::String(s));
+                    } else {
+                        map.insert(column.name().to_string(), serde_json::Value::Null);
+                    }
                 }
-            } else {
-                map.insert(column.name().to_string(), serde_json::Value::String("[Unsupported Type]".to_string()));
-                continue;
+                result.push(serde_json::Value::Object(map));
             }
-
-            if let Ok(s) = row.try_get::<String, _>(i) {
-                map.insert(column.name().to_string(), serde_json::Value::String(s));
-            } else if let Ok(b) = row.try_get::<bool, _>(i) {
-                map.insert(column.name().to_string(), serde_json::Value::Bool(b));
-            } else if let Ok(n) = row.try_get::<i64, _>(i) {
-                map.insert(column.name().to_string(), serde_json::Value::Number(n.into()));
-            } else if let Ok(n) = row.try_get::<i32, _>(i) {
-                map.insert(column.name().to_string(), serde_json::Value::Number(n.into()));
-            } else if let Ok(n) = row.try_get::<i16, _>(i) {
-                map.insert(column.name().to_string(), serde_json::Value::Number(n.into()));
-            } else if let Ok(f) = row.try_get::<f64, _>(i) {
-                if let Some(num) = serde_json::Number::from_f64(f) {
-                    map.insert(column.name().to_string(), serde_json::Value::Number(num));
-                } else {
-                    map.insert(column.name().to_string(), serde_json::Value::Null);
-                }
-            } else if let Ok(f) = row.try_get::<f32, _>(i) {
-                if let Some(num) = serde_json::Number::from_f64(f as f64) {
-                    map.insert(column.name().to_string(), serde_json::Value::Number(num));
-                } else {
-                    map.insert(column.name().to_string(), serde_json::Value::Null);
-                }
-            } else if let Ok(bytes) = row.try_get::<Vec<u8>, _>(i) {
-                let text = String::from_utf8_lossy(&bytes).into_owned();
-                map.insert(column.name().to_string(), serde_json::Value::String(text));
-            } else {
-                map.insert(column.name().to_string(), serde_json::Value::Null);
-            }
-
+            Ok(result)
         }
-        result.push(serde_json::Value::Object(map));
+        DbPool::MySql(p) => {
+            let rows = sqlx::query(query).fetch_all(p).await.map_err(|e| e.to_string())?;
+            let mut result = Vec::new();
+            for row in rows {
+                let mut map = serde_json::Map::new();
+                for (i, column) in row.columns().iter().enumerate() {
+                    if let Ok(raw) = row.try_get_raw(i) {
+                        if raw.is_null() {
+                            map.insert(column.name().to_string(), serde_json::Value::Null);
+                            continue;
+                        }
+                    }
+
+                    if let Ok(v) = row.try_get::<String, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::String(v));
+                    } else if let Ok(v) = row.try_get::<bool, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::Bool(v));
+                    } else if let Ok(v) = row.try_get::<i64, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
+                    } else if let Ok(v) = row.try_get::<i32, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
+                    } else if let Ok(v) = row.try_get::<i16, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
+                    } else if let Ok(v) = row.try_get::<f64, _>(i) {
+                        if let Some(num) = serde_json::Number::from_f64(v) {
+                            map.insert(column.name().to_string(), serde_json::Value::Number(num));
+                        } else {
+                            map.insert(column.name().to_string(), serde_json::Value::Null);
+                        }
+                    } else if let Ok(v) = row.try_get::<f32, _>(i) {
+                        if let Some(num) = serde_json::Number::from_f64(v as f64) {
+                            map.insert(column.name().to_string(), serde_json::Value::Number(num));
+                        } else {
+                            map.insert(column.name().to_string(), serde_json::Value::Null);
+                        }
+                    } else if let Ok(v) = row.try_get::<chrono::DateTime<chrono::Utc>, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::String(v.to_rfc3339()));
+                    } else if let Ok(v) = row.try_get::<chrono::NaiveDateTime, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::String(v.to_string()));
+                    } else if let Ok(v) = row.try_get::<chrono::NaiveDate, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::String(v.to_string()));
+                    } else if let Ok(v) = row.try_get::<chrono::NaiveTime, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::String(v.to_string()));
+                    } else if let Ok(v) = row.try_get::<serde_json::Value, _>(i) {
+                        map.insert(column.name().to_string(), v);
+                    } else if let Ok(v) = row.try_get::<Vec<u8>, _>(i) {
+                        let s = String::from_utf8_lossy(&v).into_owned();
+                        map.insert(column.name().to_string(), serde_json::Value::String(s));
+                    } else {
+                        map.insert(column.name().to_string(), serde_json::Value::Null);
+                    }
+                }
+                result.push(serde_json::Value::Object(map));
+            }
+            Ok(result)
+        }
+        DbPool::Sqlite(p) => {
+            let rows = sqlx::query(query).fetch_all(p).await.map_err(|e| e.to_string())?;
+            let mut result = Vec::new();
+            for row in rows {
+                let mut map = serde_json::Map::new();
+                for (i, column) in row.columns().iter().enumerate() {
+                    if let Ok(raw) = row.try_get_raw(i) {
+                        if raw.is_null() {
+                            map.insert(column.name().to_string(), serde_json::Value::Null);
+                            continue;
+                        }
+                    }
+
+                    if let Ok(v) = row.try_get::<String, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::String(v));
+                    } else if let Ok(v) = row.try_get::<bool, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::Bool(v));
+                    } else if let Ok(v) = row.try_get::<i64, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
+                    } else if let Ok(v) = row.try_get::<i32, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
+                    } else if let Ok(v) = row.try_get::<f64, _>(i) {
+                        if let Some(num) = serde_json::Number::from_f64(v) {
+                            map.insert(column.name().to_string(), serde_json::Value::Number(num));
+                        } else {
+                            map.insert(column.name().to_string(), serde_json::Value::Null);
+                        }
+                    } else if let Ok(v) = row.try_get::<chrono::NaiveDateTime, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::String(v.to_string()));
+                    } else if let Ok(v) = row.try_get::<chrono::NaiveDate, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::String(v.to_string()));
+                    } else if let Ok(v) = row.try_get::<serde_json::Value, _>(i) {
+                        map.insert(column.name().to_string(), v);
+                    } else if let Ok(v) = row.try_get::<Vec<u8>, _>(i) {
+                        let s = String::from_utf8_lossy(&v).into_owned();
+                        map.insert(column.name().to_string(), serde_json::Value::String(s));
+                    } else {
+                        map.insert(column.name().to_string(), serde_json::Value::Null);
+                    }
+                }
+                result.push(serde_json::Value::Object(map));
+            }
+            Ok(result)
+        }
     }
-    
-    Ok(result)
 }
 
-
-pub async fn execute_transaction(pool: &AnyPool, queries: &[String]) -> Result<(), String> {
-    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
-    for query in queries {
-        if let Err(e) = tx.execute(query.as_str()).await {
-            let _ = tx.rollback().await;
-            return Err(e.to_string());
+pub async fn execute_command_raw(pool: &DbPool, command: &str) -> Result<u64, String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            let res = sqlx::query(command).execute(p).await.map_err(|e| e.to_string())?;
+            Ok(res.rows_affected())
+        }
+        DbPool::MySql(p) => {
+            let res = sqlx::query(command).execute(p).await.map_err(|e| e.to_string())?;
+            Ok(res.rows_affected())
+        }
+        DbPool::Sqlite(p) => {
+            let res = sqlx::query(command).execute(p).await.map_err(|e| e.to_string())?;
+            Ok(res.rows_affected())
         }
     }
-    tx.commit().await.map_err(|e| e.to_string())?;
+}
+
+pub async fn execute_transaction(pool: &DbPool, queries: &[String]) -> Result<(), String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
+            for query in queries {
+                if let Err(e) = sqlx::query(query).execute(&mut *tx).await {
+                    let _ = tx.rollback().await;
+                    return Err(e.to_string());
+                }
+            }
+            tx.commit().await.map_err(|e| e.to_string())?;
+        }
+        DbPool::MySql(p) => {
+            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
+            for query in queries {
+                if let Err(e) = sqlx::query(query).execute(&mut *tx).await {
+                    let _ = tx.rollback().await;
+                    return Err(e.to_string());
+                }
+            }
+            tx.commit().await.map_err(|e| e.to_string())?;
+        }
+        DbPool::Sqlite(p) => {
+            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
+            for query in queries {
+                if let Err(e) = sqlx::query(query).execute(&mut *tx).await {
+                    let _ = tx.rollback().await;
+                    return Err(e.to_string());
+                }
+            }
+            tx.commit().await.map_err(|e| e.to_string())?;
+        }
+    }
     Ok(())
 }

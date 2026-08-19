@@ -1,6 +1,6 @@
 use tauri::{command, State};
 use crate::models::SupportedDB;
-use crate::db_core::{get_pool, execute_query, execute_transaction, DbState};
+use crate::db_core::{get_pool, execute_query, execute_command_raw, execute_transaction, DbState};
 use crate::profiles;
 
 #[command]
@@ -148,7 +148,7 @@ pub async fn get_rows(
     offset: u32,
     sort_column: Option<String>,
     sort_order: Option<String>,
-    search_query: Option<String>,
+    _search_query: Option<String>,
     filters: Option<Vec<serde_json::Value>>,
     state: State<'_, DbState>
 ) -> Result<serde_json::Value, String> {
@@ -261,8 +261,23 @@ pub async fn execute_command(id: String, database: String, command: String, stat
     let profiles = profiles::load_profiles()?;
     let profile = profiles.iter().find(|p| p.id == id).ok_or("Profile not found")?;
     let pool = get_pool(&state, profile, Some(&database)).await?;
-    let rows = execute_query(&pool, &command).await?;
-    Ok(serde_json::json!({ "rows": rows, "affectedRows": 0 }))
+    
+    // First try fetching rows (for SELECT / EXPLAIN / SHOW / RETURNING)
+    match execute_query(&pool, &command).await {
+        Ok(rows) => Ok(serde_json::json!({ "rows": rows, "affectedRows": rows.len() })),
+        Err(err) => {
+            // If fetch_all failed, try executing as DML/DDL (INSERT/UPDATE/DELETE/CREATE/DROP/ALTER)
+            match execute_command_raw(&pool, &command).await {
+                Ok(affected) => {
+                    Ok(serde_json::json!({ "rows": Vec::<serde_json::Value>::new(), "affectedRows": affected }))
+                }
+                Err(_) => {
+                    // Return the descriptive query error
+                    Err(err)
+                }
+            }
+        }
+    }
 }
 
 #[command]

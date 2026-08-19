@@ -8,6 +8,7 @@ use rand::Rng;
 use sha2::Sha256;
 use std::env;
 
+#[allow(dead_code)]
 const ALGORITHM: &str = "aes-256-gcm";
 const SALT: &[u8] = b"dodb-salt-salt-v1";
 const ITERATIONS: u32 = 100000;
