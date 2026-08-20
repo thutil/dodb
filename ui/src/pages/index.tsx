@@ -13,12 +13,14 @@ import { DataGrid, PendingChanges, CommitResult } from "../components/DataGrid";
 import { SqlConsole } from "../components/SqlConsole";
 import { AdminPanel } from "../components/AdminPanel";
 import { SchemaDiagram } from "../components/SchemaDiagram";
-import { AlertCircle, X } from "lucide-react";
+import { CommandPalette } from "../components/CommandPalette";
+import { AlertCircle, X, CheckCircle2, Download } from "lucide-react";
 import { ConnectionProfile, ColumnInfo, TableRowData, QueryExecutionResult, ColumnFilter, DBType } from "../types";
 import { DdlResult } from "../components/tableDesign/draft";
 import { quoteTableIdent } from "../utils/ddlBuilder";
 import { apiClient } from "../utils/apiClient";
 import { auditLogger } from "../utils/auditLogger";
+import { dumpManager, DumpProgress } from "../utils/dumpManager";
 
 const APP_VERSION = "1.0.0";
 const SESSION_ID_PREFIX = "session-";
@@ -34,6 +36,9 @@ export default function Home() {
   const [activeProfile, setActiveProfile] = useState<ConnectionProfile | null>(null);
   const [isConnModalOpen, setIsConnModalOpen] = useState(true);
   const [isAuditLogOpen, setIsAuditLogOpen] = useState(false);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [dumpProgress, setDumpProgress] = useState<DumpProgress>(dumpManager.getProgress());
+  const [showDumpToast, setShowDumpToast] = useState(false);
   const [structureModalTable, setStructureModalTable] = useState<string | null>(null);
   const [isCreateTableOpen, setIsCreateTableOpen] = useState(false);
   const [editTableModalTable, setEditTableModalTable] = useState<string | null>(null);
@@ -84,6 +89,16 @@ export default function Home() {
     return () => mediaQuery.removeEventListener("change", handleChange);
   }, []);
 
+  // Subscribe to background dump progress & notify
+  useEffect(() => {
+    return dumpManager.subscribe((p) => {
+      setDumpProgress(p);
+      if (p.status === "completed" || p.status === "error") {
+        setShowDumpToast(true);
+      }
+    });
+  }, []);
+
   // Block F12, DevTools shortcuts, and Right-Click Inspect
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -97,6 +112,13 @@ export default function Home() {
       const isF12 = key === "f12";
       const isInspect = (e.ctrlKey || e.metaKey) && (e.shiftKey || e.altKey) && (key === "i" || key === "j" || key === "c");
       const isViewSource = (e.ctrlKey || e.metaKey) && key === "u";
+
+      if ((e.ctrlKey || e.metaKey) && key === "k") {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsCommandPaletteOpen((prev) => !prev);
+        return;
+      }
 
       if (isF12 || isInspect || isViewSource) {
         e.preventDefault();
@@ -660,11 +682,13 @@ export default function Home() {
               setPage(0);
             }
           }}
+          activeTable={activeTable}
           activeView={activeView}
           onChangeView={setActiveView}
           onOpenConnections={() => setIsConnModalOpen(true)}
           onDisconnect={handleDisconnect}
           onOpenAuditLogs={() => setIsAuditLogOpen(true)}
+          onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
           theme={theme}
           onToggleTheme={toggleTheme}
         />
@@ -784,9 +808,9 @@ export default function Home() {
                 activeProfile={activeProfile}
                 activeDatabase={activeDatabase}
                 databases={databases}
+                tables={tables}
                 onRefreshDatabases={fetchDatabases}
               />
-
             )}
           </main>
         </div>
@@ -857,6 +881,78 @@ export default function Home() {
           onDone={handleDdlDone}
         />
 
+        <CommandPalette
+          isOpen={isCommandPaletteOpen}
+          onClose={() => setIsCommandPaletteOpen(false)}
+          tables={tables}
+          activeTable={activeTable}
+          onSelectTable={(tbl) => {
+            if (tbl !== activeTable) {
+              fetchSeqRef.current += 1;
+              setRows([]);
+              setColumns([]);
+              setTotalRows(0);
+              setLoadingData(true);
+              setActiveTable(tbl);
+              setPage(0);
+              if (activeView !== "explorer") {
+                setActiveView("explorer");
+              }
+            }
+          }}
+          databases={databases}
+          activeDatabase={activeDatabase}
+          onSelectDatabase={(db) => {
+            if (db !== activeDatabase) {
+              fetchSeqRef.current += 1;
+              setActiveDatabase(db);
+              setActiveTable(null);
+              setRows([]);
+              setColumns([]);
+              setTotalRows(0);
+              setPage(0);
+            }
+          }}
+          activeView={activeView}
+          onChangeView={setActiveView}
+          onOpenConnections={() => setIsConnModalOpen(true)}
+          onOpenCreateTable={() => setIsCreateTableOpen(true)}
+          onOpenAuditLogs={() => setIsAuditLogOpen(true)}
+          onToggleTheme={toggleTheme}
+          theme={theme}
+          activeProfile={activeProfile}
+        />
+
+        {/* Global Floating Background Dump Notification Toast */}
+        {showDumpToast && dumpProgress.status === "completed" && (
+          <div className="global-dump-toast success">
+            <div className="toast-left">
+              <CheckCircle2 size={16} className="toast-icon success" />
+              <div className="toast-body">
+                <span className="toast-title">Database Export Complete!</span>
+                <span className="toast-sub font-mono">
+                  {dumpProgress.fileName} ({((dumpProgress.fileSizeBytes || 0) / (1024 * 1024)).toFixed(2)} MB, {dumpProgress.rowsExported.toLocaleString()} rows)
+                </span>
+              </div>
+            </div>
+            <div className="toast-actions">
+              <button
+                className="btn btn-primary btn-sm toast-dl-btn"
+                onClick={() => {
+                  dumpManager.downloadCurrentBlob();
+                  setShowDumpToast(false);
+                }}
+              >
+                <Download size={11} />
+                <span>Save File</span>
+              </button>
+              <button className="toast-dismiss-btn" onClick={() => setShowDumpToast(false)} title="Dismiss">
+                <X size={12} />
+              </button>
+            </div>
+          </div>
+        )}
+
         <footer className="app-footer">
           <div className="footer-left">
             <span className="footer-version">dodb v{APP_VERSION}</span>
@@ -872,9 +968,17 @@ export default function Home() {
                 </span>
               </>
             )}
+            {dumpProgress.status === "running" && (
+              <>
+                <span className="footer-dot">•</span>
+                <span className="footer-dump-running font-mono">
+                  📦 Exporting {dumpProgress.currentTable} ({dumpProgress.rowsExported.toLocaleString()} rows)...
+                </span>
+              </>
+            )}
           </div>
           <div className="footer-right">
-            <span className="footer-text">Native Tauri IPC</span>
+            {totalRows > 0 && <span className="footer-text font-mono">{totalRows.toLocaleString()} rows in table</span>}
           </div>
         </footer>
 
@@ -882,25 +986,27 @@ export default function Home() {
 
       <style jsx>{`
         .app-layout {
-          width: 100vw;
-          height: 100vh;
           display: flex;
           flex-direction: column;
+          width: 100vw;
+          height: 100vh;
           overflow: hidden;
-          background: var(--bg-primary);
+          background: var(--bg-app);
         }
 
         .app-main-body {
-          flex: 1;
           display: flex;
+          flex: 1;
           overflow: hidden;
+          position: relative;
         }
 
         .app-content {
-          flex: 1;
           display: flex;
           flex-direction: column;
+          flex: 1;
           overflow: hidden;
+          background: var(--bg-content);
         }
 
         .connection-error-banner {
@@ -908,19 +1014,15 @@ export default function Home() {
           align-items: center;
           gap: 8px;
           padding: 8px 12px;
-          background: var(--bg-tertiary);
-          border-bottom: 1px solid var(--accent-red, #ef4444);
-          color: var(--accent-red, #ef4444);
-          font-size: 12px;
-          flex-shrink: 0;
+          background: rgba(239, 68, 68, 0.12);
+          border-bottom: 1px solid rgba(239, 68, 68, 0.25);
+          color: #ef4444;
+          font-size: 11.5px;
+          font-weight: 500;
         }
-
         .connection-error-text {
           flex: 1;
-          line-height: 1.4;
-          word-break: break-word;
         }
-
         .connection-error-dismiss {
           background: transparent;
           border: none;
@@ -931,8 +1033,73 @@ export default function Home() {
           padding: 2px;
         }
 
-        .footer-unsaved {
-          color: var(--accent-amber, #f59e0b);
+        .footer-dump-running {
+          color: var(--accent-blue);
+          font-weight: 600;
+          animation: pulse 1.5s infinite;
+        }
+
+        .global-dump-toast {
+          position: fixed;
+          bottom: 32px;
+          right: 20px;
+          background: var(--bg-card);
+          border: 1px solid var(--border-medium);
+          box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(16, 185, 129, 0.3);
+          border-radius: var(--radius-md);
+          padding: 10px 14px;
+          display: flex;
+          align-items: center;
+          gap: 16px;
+          z-index: 99999;
+          animation: slideUp 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .toast-left {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+        .toast-icon.success {
+          color: var(--accent-green);
+          flex-shrink: 0;
+        }
+        .toast-body {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+        .toast-title {
+          font-size: 12px;
+          font-weight: 600;
+          color: var(--text-main);
+        }
+        .toast-sub {
+          font-size: 10.5px;
+          color: var(--text-sub);
+        }
+        .toast-actions {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .toast-dl-btn {
+          background: var(--accent-green) !important;
+          color: #ffffff !important;
+          font-weight: 600;
+        }
+        .toast-dismiss-btn {
+          background: transparent;
+          border: none;
+          color: var(--text-muted);
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          padding: 3px;
+          border-radius: 4px;
+        }
+        .toast-dismiss-btn:hover {
+          color: var(--text-main);
+          background: var(--bg-hover);
         }
 
         .app-footer {
@@ -967,6 +1134,17 @@ export default function Home() {
 
         .footer-status, .footer-text {
           font-family: var(--font-mono);
+        }
+
+        @keyframes slideUp {
+          from {
+            transform: translateY(16px);
+            opacity: 0;
+          }
+          to {
+            transform: translateY(0);
+            opacity: 1;
+          }
         }
       `}</style>
     </React.Fragment>

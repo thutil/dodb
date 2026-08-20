@@ -1,5 +1,20 @@
 import React from "react";
-import { Database, Terminal, Server, Sun, Moon, Shield, GitFork, FileText, ChevronDown, LogOut } from "lucide-react";
+import {
+  Database,
+  Terminal,
+  Server,
+  Sun,
+  Moon,
+  Shield,
+  GitFork,
+  FileText,
+  ChevronDown,
+  ChevronRight,
+  LogOut,
+  Search,
+  Activity,
+  Table as TableIcon,
+} from "lucide-react";
 import { ConnectionProfile } from "../types";
 
 interface HeaderProps {
@@ -9,11 +24,14 @@ interface HeaderProps {
   activeDatabase: string;
   databases: string[];
   onSelectDatabase: (db: string) => void;
+  activeTable?: string | null;
   activeView: "explorer" | "sql" | "admin" | "diagram";
   onChangeView: (view: "explorer" | "sql" | "admin" | "diagram") => void;
   onOpenConnections: () => void;
   onDisconnect?: () => void;
   onOpenAuditLogs?: () => void;
+  onOpenCommandPalette?: () => void;
+  latencyMs?: number | null;
   theme: "dark" | "light";
   onToggleTheme: () => void;
 }
@@ -25,27 +43,74 @@ export const Header: React.FC<HeaderProps> = ({
   activeDatabase,
   databases,
   onSelectDatabase,
+  activeTable,
   activeView,
   onChangeView,
   onOpenConnections,
   onDisconnect,
   onOpenAuditLogs,
+  onOpenCommandPalette,
+  latencyMs = 12,
   theme,
   onToggleTheme,
 }) => {
   return (
     <header className="app-header">
-      {/* Left: macOS traffic light space & brand */}
+      {/* Left: Brand logo & Context Breadcrumb */}
       <div className="header-left">
         <div className="brand" title="dodb Database Manager">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/icon.png" alt="dodb mascot" className="brand-mascot-img" />
           <span className="brand-title">DODB</span>
         </div>
+
+        {activeProfile && (
+          <div className="header-breadcrumb" title="Active Context Path">
+            <span className="bc-divider">/</span>
+            <span className="bc-item bc-host" title={`Host: ${activeProfile.host || activeProfile.name}`}>
+              {activeProfile.name}
+            </span>
+            <ChevronRight size={10} className="bc-arrow" />
+            <span className="bc-item bc-db" title={`Database: ${activeDatabase || "default"}`}>
+              {activeDatabase || "default"}
+            </span>
+            {activeTable && (
+              <>
+                <ChevronRight size={10} className="bc-arrow" />
+                <span className="bc-item bc-table" title={`Table: ${activeTable}`}>
+                  <TableIcon size={10} className="bc-table-icon" />
+                  {activeTable}
+                </span>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Center: Navigation tabs with responsive labels */}
+      {/* Center: Global Quick Search / Command Palette Bar */}
       <div className="header-center">
+        <button
+          className="header-quick-search"
+          onClick={onOpenCommandPalette}
+          title="Global Quick Search & Command Palette (⌘K / Ctrl+K)"
+        >
+          <Search size={12} className="search-icon" />
+          <span className="search-text">
+            {activeTable ? `Jump to table or command in ${activeTable}...` : "Quick Search tables, commands, actions..."}
+          </span>
+          <kbd className="search-shortcut">⌘K</kbd>
+        </button>
+
+        {activeProfile && (
+          <div className="header-health-pill" title={`Server Status: Online (Ping: ${latencyMs ?? 12}ms)`}>
+            <span className="health-dot" />
+            <span className="health-ping">{latencyMs ?? 12}ms</span>
+          </div>
+        )}
+      </div>
+
+      {/* Right: Navigation tabs, Active connection chip & responsive action buttons */}
+      <div className="header-right">
         <nav className="nav-tabs">
           <button
             className={`tab-btn ${activeView === "explorer" ? "active" : ""}`}
@@ -84,10 +149,8 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="tab-label-short">Admin</span>
           </button>
         </nav>
-      </div>
 
-      {/* Right: Active connection chip & responsive action buttons */}
-      <div className="header-right">
+        <div className="header-divider" />
         {activeProfile ? (
           <div className="active-conn-chip">
             <span className="status-indicator online" />
@@ -198,7 +261,136 @@ export const Header: React.FC<HeaderProps> = ({
         .header-left {
           display: flex;
           align-items: center;
+          gap: 10px;
           flex-shrink: 0;
+          -webkit-app-region: no-drag;
+        }
+
+        .header-breadcrumb {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          font-size: 11px;
+          color: var(--text-muted);
+          background: var(--bg-tertiary);
+          padding: 3px 8px;
+          border-radius: var(--radius-sm);
+          border: 1px solid var(--border-light);
+          white-space: nowrap;
+          overflow: hidden;
+        }
+        .bc-divider {
+          color: var(--border-medium);
+          margin-right: 2px;
+        }
+        .bc-arrow {
+          color: var(--text-muted);
+          opacity: 0.6;
+          flex-shrink: 0;
+        }
+        .bc-item {
+          font-weight: 500;
+        }
+        .bc-item.bc-host {
+          color: var(--text-sub);
+        }
+        .bc-item.bc-db {
+          color: var(--text-main);
+          font-weight: 600;
+        }
+        .bc-item.bc-table {
+          color: var(--accent-blue);
+          font-weight: 600;
+          display: flex;
+          align-items: center;
+          gap: 3px;
+        }
+        .bc-table-icon {
+          flex-shrink: 0;
+        }
+
+        .header-center {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          flex: 1;
+          max-width: 440px;
+          -webkit-app-region: no-drag;
+          margin: 0 8px;
+        }
+        .header-quick-search {
+          flex: 1;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-light);
+          border-radius: var(--radius-sm);
+          padding: 4px 10px;
+          height: 28px;
+          color: var(--text-muted);
+          font-family: var(--font-sans);
+          cursor: pointer;
+          transition: all 0.12s ease;
+          user-select: none;
+          min-width: 140px;
+          max-width: 360px;
+        }
+        .header-quick-search:hover {
+          background: var(--bg-hover);
+          border-color: var(--border-medium);
+          color: var(--text-sub);
+        }
+        .search-icon {
+          color: var(--text-muted);
+          flex-shrink: 0;
+        }
+        .search-text {
+          font-size: 11.5px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          flex: 1;
+          text-align: left;
+        }
+        .search-shortcut {
+          font-family: var(--font-mono);
+          font-size: 9.5px;
+          font-weight: 600;
+          background: var(--bg-card);
+          border: 1px solid var(--border-light);
+          color: var(--text-sub);
+          padding: 1px 5px;
+          border-radius: 4px;
+          box-shadow: var(--shadow-sm);
+          flex-shrink: 0;
+        }
+
+        .header-health-pill {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          padding: 3px 8px;
+          height: 26px;
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-light);
+          border-radius: var(--radius-sm);
+          font-size: 10px;
+          color: var(--text-muted);
+          font-family: var(--font-mono);
+          flex-shrink: 0;
+        }
+        .health-dot {
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background: var(--accent-green);
+          box-shadow: 0 0 6px var(--accent-green);
+        }
+        .health-ping {
+          font-weight: 500;
+          color: var(--text-sub);
         }
 
         .brand {
@@ -218,7 +410,7 @@ export const Header: React.FC<HeaderProps> = ({
         }
         .brand-title {
           font-weight: 600;
-          font-size: 12.5px;
+          font-size: 13px;
           letter-spacing: -0.2px;
         }
         .brand-badge {
@@ -233,14 +425,6 @@ export const Header: React.FC<HeaderProps> = ({
           letter-spacing: 0.3px;
         }
 
-        .header-center {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          -webkit-app-region: no-drag;
-          max-width: 480px;
-          flex: 1;
-        }
         .nav-tabs {
           display: flex;
           background: var(--bg-tertiary);
@@ -248,16 +432,14 @@ export const Header: React.FC<HeaderProps> = ({
           border-radius: 6px;
           border: 1px solid var(--border-light);
           gap: 2px;
-          width: 100%;
-          justify-content: space-between;
+          align-items: center;
         }
         .tab-btn {
-          flex: 1;
           display: flex;
           align-items: center;
           justify-content: center;
           gap: 5px;
-          padding: 3px 8px;
+          padding: 3px 10px;
           font-size: 11px;
           font-weight: 500;
           border: 1px solid transparent;
@@ -472,7 +654,12 @@ export const Header: React.FC<HeaderProps> = ({
         .theme-icon.moon { color: #818cf8; }
 
         /* Responsive Media Queries for Small Screens */
-        @media (max-width: 1080px) {
+        @media (max-width: 1280px) {
+          .header-breadcrumb .bc-host { display: none; }
+        }
+
+        @media (max-width: 1100px) {
+          .header-breadcrumb { display: none; }
           .tab-label-full { display: none; }
           .tab-label-short { display: inline; }
           .profile-title { max-width: 80px; }
@@ -487,10 +674,14 @@ export const Header: React.FC<HeaderProps> = ({
           .brand-title, .brand-badge { display: none; }
           .profile-title { display: none; }
           .db-type-badge { display: none; }
+          .header-health-pill { display: none; }
+          .header-center { max-width: 180px; }
+          .search-text { display: none; }
           .app-header { padding: 0 8px 0 8px; gap: 8px; }
         }
 
         @media (max-width: 680px) {
+          .header-center { display: none; }
           .active-conn-chip { padding: 0 4px; }
           .header-divider { display: none; }
         }

@@ -19,6 +19,8 @@ import {
   ArrowDown,
   FolderPlus,
   AlertTriangle,
+  Copy,
+  Check,
 } from "lucide-react";
 import { ConnectionProfile, DBType } from "../types";
 import { apiClient } from "../utils/apiClient";
@@ -65,6 +67,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
   });
   const [portText, setPortText] = useState<string>("5432");
   const [testResult, setTestResult] = useState<{ success: boolean; text: string } | null>(null);
+  const [copiedErrorText, setCopiedErrorText] = useState(false);
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [connecting, setConnecting] = useState(false);
@@ -915,8 +918,25 @@ if (!isOpen) return null;
 
               {testResult && (
                 <div className={`status-feedback-box ${testResult.success ? "success" : "error"}`}>
-                  {testResult.success ? <CheckCircle2 size={15} /> : <XCircle size={15} />}
-                  <span className="feedback-text">{testResult.text}</span>
+                  <div className="feedback-content-left">
+                    {testResult.success ? <CheckCircle2 size={14} className="feedback-icon" /> : <XCircle size={14} className="feedback-icon" />}
+                    <span className="feedback-text">{testResult.text}</span>
+                  </div>
+                  {!testResult.success && (
+                    <button
+                      type="button"
+                      className="btn-feedback-copy"
+                      onClick={() => {
+                        navigator.clipboard.writeText(testResult.text);
+                        setCopiedErrorText(true);
+                        setTimeout(() => setCopiedErrorText(false), 2000);
+                      }}
+                      title="Copy error message"
+                    >
+                      {copiedErrorText ? <Check size={11} /> : <Copy size={11} />}
+                      <span>{copiedErrorText ? "Copied" : "Copy"}</span>
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -1279,7 +1299,6 @@ if (!isOpen) return null;
           display: flex;
           align-items: center;
           justify-content: center;
-          border: 1px solid rgba(59, 130, 246, 0.3);
         }
         .title-text-group {
           display: flex;
@@ -1782,10 +1801,21 @@ if (!isOpen) return null;
         .status-feedback-box {
           display: flex;
           align-items: center;
+          justify-content: space-between;
           gap: 8px;
           padding: 8px 12px;
-          border-radius: var(--radius-sm);
+          border-radius: var(--radius-xs);
           font-size: 11.5px;
+        }
+        .feedback-content-left {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex: 1;
+          min-width: 0;
+        }
+        .feedback-icon {
+          flex-shrink: 0;
         }
         .status-feedback-box.success {
           background: var(--bg-tertiary);
@@ -1793,11 +1823,33 @@ if (!isOpen) return null;
           border: 1px solid var(--border-light);
         }
         .status-feedback-box.error {
-          background: rgba(239, 68, 68, 0.08);
-          color: #f87171;
-          border: 1px solid rgba(239, 68, 68, 0.2);
+          background: var(--bg-tertiary);
+          color: var(--accent-rose);
+          border: 1px solid rgba(244, 63, 94, 0.3);
         }
-        .feedback-text { font-weight: 500; }
+        .feedback-text {
+          font-weight: 500;
+          word-break: break-word;
+          user-select: text;
+        }
+        .btn-feedback-copy {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          padding: 2px 7px;
+          background: var(--bg-card);
+          border: 1px solid var(--border-medium);
+          border-radius: var(--radius-xs);
+          font-size: 10px;
+          color: var(--text-main);
+          cursor: pointer;
+          flex-shrink: 0;
+          transition: all 0.12s ease;
+        }
+        .btn-feedback-copy:hover {
+          background: var(--bg-hover);
+          border-color: var(--text-muted);
+        }
 
         /* Sticky Footer Bar */
         .editor-footer-bar {

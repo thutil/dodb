@@ -146,6 +146,9 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
             placeholder="Filter tables..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
           />
           {searchTerm && (
             <button className="clear-search-btn" onClick={() => setSearchTerm("")} title="Clear filter">

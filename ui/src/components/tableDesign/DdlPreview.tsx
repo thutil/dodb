@@ -11,6 +11,7 @@ interface DdlPreviewProps {
 
 export const DdlPreview: React.FC<DdlPreviewProps> = ({ statements, errors = [], failure = null }) => {
   const [copied, setCopied] = useState(false);
+  const [copiedError, setCopiedError] = useState(false);
 
   const sql = statements.join("\n");
 
@@ -18,6 +19,13 @@ export const DdlPreview: React.FC<DdlPreviewProps> = ({ statements, errors = [],
     navigator.clipboard.writeText(sql);
     setCopied(true);
     setTimeout(() => setCopied(false), 1600);
+  };
+
+  const handleCopyError = () => {
+    if (!failure) return;
+    navigator.clipboard.writeText(failure.error);
+    setCopiedError(true);
+    setTimeout(() => setCopiedError(false), 1600);
   };
 
   return (
@@ -65,11 +73,20 @@ export const DdlPreview: React.FC<DdlPreviewProps> = ({ statements, errors = [],
       {failure && (
         <div className="failure-box">
           <AlertTriangle size={13} className="issue-icon" />
-          <div>
-            <div className="failure-title">
-              Statement {failure.failedIndex + 1} failed. {failure.executed} of the earlier statement
-              {failure.executed === 1 ? " was" : "s were"} already applied and{" "}
-              {failure.executed === 1 ? "has" : "have"} not been rolled back.
+          <div className="failure-body">
+            <div className="failure-top">
+              <span className="failure-title">
+                Statement {failure.failedIndex + 1} failed. ({failure.executed} executed)
+              </span>
+              <button
+                type="button"
+                className="btn btn-secondary btn-copy-fail-err"
+                onClick={handleCopyError}
+                title="Copy error message"
+              >
+                {copiedError ? <Check size={11} /> : <Copy size={11} />}
+                <span>{copiedError ? "Copied" : "Copy Error"}</span>
+              </button>
             </div>
             <div className="failure-msg font-mono">{failure.error}</div>
           </div>
@@ -153,6 +170,7 @@ export const DdlPreview: React.FC<DdlPreviewProps> = ({ statements, errors = [],
         }
         .failure-box {
           color: var(--accent-red);
+          border-color: rgba(244, 63, 94, 0.35);
         }
         .ddl-preview :global(.issue-icon) {
           flex-shrink: 0;
@@ -163,13 +181,37 @@ export const DdlPreview: React.FC<DdlPreviewProps> = ({ statements, errors = [],
           flex-direction: column;
           gap: 2px;
         }
+        .failure-body {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          min-width: 0;
+        }
+        .failure-top {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 6px;
+        }
         .failure-title {
-          margin-bottom: 3px;
+          font-size: 11px;
+          font-weight: 600;
+        }
+        .btn-copy-fail-err {
+          height: 20px;
+          font-size: 10px;
+          padding: 1px 6px;
+          display: inline-flex;
+          align-items: center;
+          gap: 3px;
         }
         .failure-msg {
           color: var(--text-sub);
           font-size: 10.5px;
           user-select: text;
+          word-break: break-word;
+          line-height: 1.45;
         }
       `}</style>
     </div>

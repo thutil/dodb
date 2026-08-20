@@ -242,7 +242,6 @@ export const DataGrid: React.FC<DataGridProps> = ({
             height: 68px;
             border-radius: var(--radius-md);
             background: rgba(59, 130, 246, 0.1);
-            border: 1px solid rgba(59, 130, 246, 0.25);
             display: flex;
             align-items: center;
             justify-content: center;
@@ -329,7 +328,6 @@ export const DataGrid: React.FC<DataGridProps> = ({
             height: 68px;
             border-radius: var(--radius-md);
             background: rgba(59, 130, 246, 0.1);
-            border: 1px solid rgba(59, 130, 246, 0.25);
             display: flex;
             align-items: center;
             justify-content: center;

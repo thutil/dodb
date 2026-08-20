@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, Loader2 } from "lucide-react";
+import { AlertTriangle, Loader2, Copy, Check } from "lucide-react";
 import { DdlResult } from "./tableDesign/draft";
 
 export interface ConfirmDdlRequest {
@@ -30,6 +30,7 @@ export const ConfirmDdlModal: React.FC<ConfirmDdlModalProps> = ({
   const [typed, setTyped] = useState("");
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copiedError, setCopiedError] = useState(false);
 
   useEffect(() => setMounted(true), []);
 
@@ -37,6 +38,7 @@ export const ConfirmDdlModal: React.FC<ConfirmDdlModalProps> = ({
     setTyped("");
     setError(null);
     setRunning(false);
+    setCopiedError(false);
   }, [request]);
 
   const handleCancel = useCallback(() => {
@@ -67,11 +69,18 @@ export const ConfirmDdlModal: React.FC<ConfirmDdlModalProps> = ({
     }
   };
 
+  const handleCopyError = () => {
+    if (!error) return;
+    navigator.clipboard.writeText(error);
+    setCopiedError(true);
+    setTimeout(() => setCopiedError(false), 2000);
+  };
+
   const content = (
     <div className="confirm-ddl-portal-root">
       <div className="submodal-overlay">
         <div className="submodal-card" onClick={(e) => e.stopPropagation()}>
-          <div className="submodal-header danger-header">
+          <div className="submodal-header">
             <AlertTriangle size={14} className="danger-icon" />
             <span>{request.title}</span>
           </div>
@@ -81,7 +90,7 @@ export const ConfirmDdlModal: React.FC<ConfirmDdlModalProps> = ({
 
             <div className="sql-block font-mono">
               {request.statements.map((s, i) => (
-                <div key={`${i}-${s}`}>{s}</div>
+                <div key={i}>{s}</div>
               ))}
             </div>
 
@@ -100,7 +109,23 @@ export const ConfirmDdlModal: React.FC<ConfirmDdlModalProps> = ({
               </div>
             )}
 
-            {error && <div className="error-box font-mono">{error}</div>}
+            {error && (
+              <div className="error-wrap">
+                <div className="error-head">
+                  <span className="error-label">Execution Error</span>
+                  <button
+                    type="button"
+                    className="btn-copy-error"
+                    onClick={handleCopyError}
+                    title="Copy error message"
+                  >
+                    {copiedError ? <Check size={11} /> : <Copy size={11} />}
+                    <span>{copiedError ? "Copied" : "Copy"}</span>
+                  </button>
+                </div>
+                <div className="error-box font-mono">{error}</div>
+              </div>
+            )}
           </div>
 
           <div className="submodal-actions">
@@ -204,15 +229,50 @@ export const ConfirmDdlModal: React.FC<ConfirmDdlModalProps> = ({
         .confirm-ddl-portal-root :global(.input) {
           width: 100%;
         }
+        .error-wrap {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+        .error-head {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+        }
+        .error-label {
+          font-size: 10px;
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
+          color: var(--accent-red);
+          font-weight: 600;
+        }
+        .btn-copy-error {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          padding: 2px 7px;
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-medium);
+          border-radius: var(--radius-xs);
+          font-size: 10px;
+          color: var(--text-main);
+          cursor: pointer;
+          transition: all 0.12s ease;
+        }
+        .btn-copy-error:hover {
+          background: var(--bg-hover);
+          border-color: var(--text-muted);
+        }
         .error-box {
-          font-size: 10.5px;
+          font-size: 11px;
           color: var(--accent-red);
           background: var(--bg-tertiary);
-          border: 1px solid var(--border-light);
+          border: 1px solid rgba(244, 63, 94, 0.35);
           border-radius: var(--radius-xs);
-          padding: 7px 9px;
+          padding: 8px 10px;
           user-select: text;
           word-break: break-word;
+          line-height: 1.45;
         }
         .submodal-actions {
           display: flex;
