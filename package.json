@@ -21,9 +21,7 @@
     "@tauri-apps/cli": "^2.11.4",
     "typescript": "^5.8.3"
   },
-  "pnpm": {
-    "overrides": {
-      "dompurify": "^3.4.14"
-    }
+  "overrides": {
+    "dompurify": "^3.4.14"
   }
 }

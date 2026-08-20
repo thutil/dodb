@@ -58,11 +58,10 @@ export const CreateTableModal: React.FC<CreateTableModalProps> = ({
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       if (step === "review") setStep("design");
-      else handleClose();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [isOpen, step, handleClose]);
+  }, [isOpen, step]);
 
   const errors = useMemo(() => validateDraft(draft), [draft]);
 
@@ -103,7 +102,7 @@ export const CreateTableModal: React.FC<CreateTableModalProps> = ({
 
   const content = (
     <div className="create-table-portal-root">
-      <div className="modal-overlay" onClick={handleClose}>
+      <div className="modal-overlay">
         <div className="modal-card" onClick={(e) => e.stopPropagation()}>
           <div className="modal-header">
             <div className="title-group">

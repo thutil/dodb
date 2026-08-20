@@ -6,12 +6,17 @@ import { SidebarExplorer } from "../components/SidebarExplorer";
 import { ConnectionModal } from "../components/ConnectionModal";
 import { AuditLogDrawer } from "../components/AuditLogDrawer";
 import { TableStructureModal } from "../components/TableStructureModal";
+import { CreateTableModal } from "../components/CreateTableModal";
+import { EditTableModal } from "../components/EditTableModal";
+import { ConfirmDdlModal, ConfirmDdlRequest } from "../components/ConfirmDdlModal";
 import { DataGrid, PendingChanges, CommitResult } from "../components/DataGrid";
 import { SqlConsole } from "../components/SqlConsole";
 import { AdminPanel } from "../components/AdminPanel";
 import { SchemaDiagram } from "../components/SchemaDiagram";
 import { AlertCircle, X } from "lucide-react";
-import { ConnectionProfile, ColumnInfo, TableRowData, QueryExecutionResult, ColumnFilter } from "../types";
+import { ConnectionProfile, ColumnInfo, TableRowData, QueryExecutionResult, ColumnFilter, DBType } from "../types";
+import { DdlResult } from "../components/tableDesign/draft";
+import { quoteTableIdent } from "../utils/ddlBuilder";
 import { apiClient } from "../utils/apiClient";
 import { auditLogger } from "../utils/auditLogger";
 
@@ -30,6 +35,9 @@ export default function Home() {
   const [isConnModalOpen, setIsConnModalOpen] = useState(true);
   const [isAuditLogOpen, setIsAuditLogOpen] = useState(false);
   const [structureModalTable, setStructureModalTable] = useState<string | null>(null);
+  const [isCreateTableOpen, setIsCreateTableOpen] = useState(false);
+  const [editTableModalTable, setEditTableModalTable] = useState<string | null>(null);
+  const [confirmDdlRequest, setConfirmDdlRequest] = useState<ConfirmDdlRequest | null>(null);
 
   const [databases, setDatabases] = useState<string[]>([]);
   const [activeDatabase, setActiveDatabase] = useState<string>("");
@@ -517,6 +525,113 @@ export default function Home() {
     }
   };
 
+  const handleApplyDdl = async (statements: string[]): Promise<DdlResult> => {
+    if (!activeProfile || !activeDatabase) {
+      return { success: false, executed: 0, error: "No active connection or database" };
+    }
+    const start = performance.now();
+    try {
+      const res: any = await apiClient.executeDdl(activeProfile.id, activeDatabase, statements);
+      const duration = Math.round(performance.now() - start);
+      auditLogger.addLog({
+        profileId: activeProfile.id,
+        profileName: activeProfile.name,
+        dbType: activeProfile.type,
+        database: activeDatabase,
+        actionType: "DDL",
+        sql: statements.join("\n"),
+        status: res?.success ? "SUCCESS" : "ERROR",
+        errorMessage: res?.error,
+        executionTimeMs: duration,
+      });
+      return res as DdlResult;
+    } catch (err: unknown) {
+      const duration = Math.round(performance.now() - start);
+      const msg = err instanceof Error ? err.message : String(err);
+      auditLogger.addLog({
+        profileId: activeProfile.id,
+        profileName: activeProfile.name,
+        dbType: activeProfile.type,
+        database: activeDatabase,
+        actionType: "DDL",
+        sql: statements.join("\n"),
+        status: "ERROR",
+        errorMessage: msg,
+        executionTimeMs: duration,
+      });
+      return {
+        success: false,
+        executed: 0,
+        error: msg,
+      };
+    }
+  };
+
+  const handleFetchColumnsForTable = async (tbl: string): Promise<string[]> => {
+    if (!activeProfile || !activeDatabase || !tbl) return [];
+    try {
+      const data: any = await apiClient.getColumns(activeProfile.id, activeDatabase, tbl);
+      return (data?.columns || []).map((c: any) => c.name);
+    } catch (err) {
+      console.warn(`Could not fetch columns for ${tbl}:`, err);
+      return [];
+    }
+  };
+
+  const handleTableCreated = async (tableName: string) => {
+    await fetchTables();
+    setActiveTable(tableName);
+    if (activeView !== "explorer") setActiveView("explorer");
+  };
+
+  const handleTableSaved = async (oldName: string, newName: string) => {
+    await fetchTables();
+    if (activeTable === oldName) {
+      setActiveTable(newName);
+    }
+    fetchTableData();
+  };
+
+  const handleRequestTruncate = (tbl: string) => {
+    const dialect: DBType = activeProfile?.type === "mariadb" ? "mariadb" : activeProfile?.type === "sqlite" ? "sqlite" : "postgres";
+    const sql = dialect === "sqlite"
+      ? `DELETE FROM ${quoteTableIdent(tbl, "sqlite")};`
+      : `TRUNCATE TABLE ${quoteTableIdent(tbl, dialect)};`;
+    setConfirmDdlRequest({
+      title: `Truncate Table "${tbl}"`,
+      description: `Are you sure you want to delete all rows in table "${tbl}"? This action cannot be undone.`,
+      statements: [sql],
+      confirmLabel: "Truncate Table",
+      typeToConfirm: tbl,
+    });
+  };
+
+  const handleRequestDrop = (tbl: string) => {
+    const dialect: DBType = activeProfile?.type === "mariadb" ? "mariadb" : activeProfile?.type === "sqlite" ? "sqlite" : "postgres";
+    const sql = `DROP TABLE ${quoteTableIdent(tbl, dialect)};`;
+    setConfirmDdlRequest({
+      title: `Drop Table "${tbl}"`,
+      description: `Are you sure you want to permanently DROP table "${tbl}" and all of its schema, indexes, and data? This action cannot be undone.`,
+      statements: [sql],
+      confirmLabel: "Drop Table",
+      typeToConfirm: tbl,
+    });
+  };
+
+  const handleDdlDone = async () => {
+    const req = confirmDdlRequest;
+    setConfirmDdlRequest(null);
+    await fetchTables();
+    if (req?.typeToConfirm && req.typeToConfirm === activeTable && req.title.startsWith("Drop")) {
+      setActiveTable(null);
+      setRows([]);
+      setColumns([]);
+      setTotalRows(0);
+    } else {
+      fetchTableData();
+    }
+  };
+
   return (
     <React.Fragment>
       <Head>
@@ -587,6 +702,10 @@ export default function Home() {
                 }
               }}
               onViewStructure={(tbl) => setStructureModalTable(tbl)}
+              onCreateTable={() => setIsCreateTableOpen(true)}
+              onEditStructure={(tbl) => setEditTableModalTable(tbl)}
+              onTruncateTable={(tbl) => handleRequestTruncate(tbl)}
+              onDropTable={(tbl) => handleRequestDrop(tbl)}
               onOpenInSql={(sql) => {
                 setActiveView("sql");
                 handleExecuteSql(sql);
@@ -704,6 +823,37 @@ export default function Home() {
             setActiveTable(tbl);
             setActiveView("explorer");
           }}
+        />
+
+        <CreateTableModal
+          isOpen={isCreateTableOpen}
+          onClose={() => setIsCreateTableOpen(false)}
+          dbType={activeProfile?.type || "postgres"}
+          activeDatabase={activeDatabase}
+          availableTables={tables}
+          onFetchColumns={handleFetchColumnsForTable}
+          onApplyDdl={handleApplyDdl}
+          onCreated={handleTableCreated}
+        />
+
+        <EditTableModal
+          isOpen={!!editTableModalTable}
+          onClose={() => setEditTableModalTable(null)}
+          tableName={editTableModalTable || ""}
+          dbType={activeProfile?.type || "postgres"}
+          activeDatabase={activeDatabase}
+          activeProfile={activeProfile}
+          availableTables={tables}
+          onFetchColumns={handleFetchColumnsForTable}
+          onApplyDdl={handleApplyDdl}
+          onSaved={handleTableSaved}
+        />
+
+        <ConfirmDdlModal
+          request={confirmDdlRequest}
+          onCancel={() => setConfirmDdlRequest(null)}
+          onApplyDdl={handleApplyDdl}
+          onDone={handleDdlDone}
         />
 
         <footer className="app-footer">

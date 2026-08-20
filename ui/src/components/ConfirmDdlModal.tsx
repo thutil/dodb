@@ -44,15 +44,6 @@ export const ConfirmDdlModal: React.FC<ConfirmDdlModalProps> = ({
     onCancel();
   }, [running, onCancel]);
 
-  useEffect(() => {
-    if (!request) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") handleCancel();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [request, handleCancel]);
-
   if (!request || !mounted || typeof document === "undefined") return null;
 
   const needsTyping = !!request.typeToConfirm;
@@ -78,7 +69,7 @@ export const ConfirmDdlModal: React.FC<ConfirmDdlModalProps> = ({
 
   const content = (
     <div className="confirm-ddl-portal-root">
-      <div className="submodal-overlay" onClick={handleCancel}>
+      <div className="submodal-overlay">
         <div className="submodal-card" onClick={(e) => e.stopPropagation()}>
           <div className="submodal-header danger-header">
             <AlertTriangle size={14} className="danger-icon" />

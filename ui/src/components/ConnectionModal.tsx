@@ -99,7 +99,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
     return () => window.removeEventListener("click", handleWindowClick);
   }, []);
 
-  // Escape key handler for all submodals and modal
+  // Escape key handler for submodals and menus (does not close the main connection modal)
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -114,14 +114,12 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           setRenamingGroup(null);
         } else if (groupContextMenu) {
           setGroupContextMenu(null);
-        } else {
-          onClose();
         }
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, pendingConnect, confirmDeleteProfile, deletingGroup, renamingGroup, groupContextMenu, onClose]);
+  }, [isOpen, pendingConnect, confirmDeleteProfile, deletingGroup, renamingGroup, groupContextMenu]);
 
   const availableGroups = useMemo(() => {
     return Array.from(
@@ -304,15 +302,51 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
     if (cleanData.type !== "sqlite" && !cleanData.host) return;
     if (cleanData.type === "sqlite" && !cleanData.filePath && !cleanData.database) return;
 
+    // For brand-new connections: enforce save to disk and then connect.
+    if (selectedId === "__NEW__") {
+      setConnecting(true);
+      setTestResult(null);
+      try {
+        const testRes = await onTestConnection(cleanData);
+        if (!testRes.success) {
+          setTestResult({ success: false, text: `Connection failed: ${testRes.error || "Could not reach database"}` });
+          return;
+        }
+        setSaving(true);
+        const saved = (await onSaveProfile(cleanData)) as ConnectionProfile | undefined;
+        setSaving(false);
+        if (!saved || !saved.id) {
+          setTestResult({ success: false, text: "Failed to save profile before connecting." });
+          return;
+        }
+        setSelectedId(saved.id);
+        const outcome = await onConnect(saved, { ephemeral: false });
+        if (outcome && !outcome.success) {
+          setTestResult({ success: false, text: outcome.error || "Connected, but the database list could not be loaded." });
+          return;
+        }
+        setTestResult({
+          success: true,
+          text: "Profile saved & connected successfully!",
+        });
+        onClose();
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setTestResult({ success: false, text: `Connection error: ${msg}` });
+      } finally {
+        setConnecting(false);
+        setSaving(false);
+      }
+      return;
+    }
+
     // A saved profile with pending edits: let the user decide which values to use.
     if (isFormDirty()) {
       setPendingConnect(cleanData);
       return;
     }
 
-    // A brand-new form has no saved profile behind it, so connect it as a
-    // session-only connection instead of failing silently.
-    await connectWith(cleanData, selectedId === "__NEW__");
+    await connectWith(cleanData, false);
   };
 
   const handleConnectDirectly = async (profile: ConnectionProfile) => {
@@ -511,7 +545,7 @@ if (!isOpen) return null;
               </span>
             )}
           </div>
-          <button className="window-close-btn" onClick={onClose} title="Close (Esc)">
+          <button className="window-close-btn" onClick={onClose} title="Close">
             <X size={15} />
           </button>
         </div>
@@ -933,7 +967,15 @@ if (!isOpen) return null;
                   disabled={connecting || testing || saving || disconnecting}
                 >
                   {connecting ? <RefreshCw size={13} className="spin" /> : <Zap size={13} />}
-                  <span>{connecting ? "Connecting..." : (isCurrentActive ? "Reconnect" : "Connect")}</span>
+                  <span>
+                    {connecting
+                      ? "Connecting..."
+                      : selectedId === "__NEW__"
+                      ? "Save & Connect"
+                      : isCurrentActive
+                      ? "Reconnect"
+                      : "Connect"}
+                  </span>
                 </button>
               </div>
             </footer>

@@ -6,3 +6,6 @@ allowBuilds:
   unrs-resolver: true
   better-sqlite3: false
   electron-winstaller: false
+
+minimumReleaseAgeExclude:
+  - lucide-react@1.33.0
