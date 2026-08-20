@@ -6,10 +6,11 @@ pub mod commands;
 
 use db_core::DbState;
 use commands::*;
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-  tauri::Builder::default()
+  let app = tauri::Builder::default()
     .manage(DbState::default())
     .invoke_handler(tauri::generate_handler![
         // Profile Management
@@ -43,6 +44,13 @@ pub fn run() {
         admin_drop_user,
         admin_kill_process
     ])
+    .on_window_event(|window, event| {
+      #[cfg(target_os = "macos")]
+      if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+        api.prevent_close();
+        let _ = window.hide();
+      }
+    })
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -53,6 +61,16 @@ pub fn run() {
       }
       Ok(())
     })
-    .run(tauri::generate_context!())
+    .build(tauri::generate_context!())
     .expect("error while running tauri application");
+
+  app.run(|app_handle, event| {
+    #[cfg(target_os = "macos")]
+    if let tauri::RunEvent::Reopen { .. } = event {
+      if let Some(window) = app_handle.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+      }
+    }
+  });
 }

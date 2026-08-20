@@ -1,94 +1,329 @@
-# dodb - Modern macOS Native Database Manager
+# dodb
 
-dodb is a high-performance, native macOS database management tool engineered for developer productivity. Designed around macOS native design language, dodb provides complete control over PostgreSQL, MySQL/MariaDB, and SQLite databases with zero clutter.
+**A native database manager for macOS.**
 
-Features include an Interactive Data Explorer (Full CRUD), Inline Cell Editor, Atomic Transactional Commit Bar, and more.
+> **dodb — “ดู DB”**
+> *See your data. Understand your database.*
 
-## Architecture & Technology Stack
+dodb is a modern, native macOS database manager built around a simple idea: **working with a database should start with seeing it clearly.**
 
-The architecture has been completely rewritten from Node.js/Electron to a highly optimized native Rust stack.
+The name **dodb** comes from the Thai pronunciation of “do,” meaning **“to see”**, combined with **DB** for database.
 
-| Layer | Technology |
-| :--- | :--- |
-| Desktop Shell | Tauri 2.0 (macOS Native Frameless window) |
-| Frontend Framework | Next.js 15.3.3 (React 19), Tailwind CSS |
-| Backend Core | Rust, Tokio |
-| Database Clients | sqlx (AnyPool for connection pooling) |
+It represents what dodb is about:
 
-## Prerequisites & System Requirements
+**See the data. See the structure. See what is happening.**
 
-- Operating System: macOS 11.0+ (Apple Silicon arm64 or Intel x64)
-- Rust Toolchain: rustup, cargo
-- Node.js: v18.0.0 or higher
-- Package Manager: pnpm (v8+)
+dodb is designed to make databases feel less intimidating and more approachable without hiding the power that developers need.
 
-## Getting Started (Development Setup)
+---
 
-1. Clone the Repository & Install Dependencies
+## Why dodb?
+
+Database tools often become complicated as more features are added.
+
+dodb takes a different approach.
+
+Instead of building another application filled with panels, dashboards, and abstractions, dodb focuses on the core things developers actually do with databases:
+
+* Connect
+* Explore
+* Query
+* Edit
+* Understand
+* Commit
+
+Everything is designed around clarity, speed, and a native macOS experience.
+
+**No unnecessary clutter. No artificial complexity. Just your database.**
+
+---
+
+## ✨ Features
+
+### Interactive Data Explorer
+
+Explore and manage database records through a familiar table interface.
+
+* Browse rows and columns
+* Create records
+* Edit records
+* Delete records
+* Sort and filter data
+* Pagination
+* Database-aware cell rendering
+
+### Inline Cell Editing
+
+Edit values directly inside the data grid.
+
+No unnecessary dialogs or multi-step forms when all you need to do is change a value.
+
+### Transactional Commit Bar
+
+Changes are clearly separated from the database until you decide to commit them.
+
+**Edit → Review → Commit**
+
+This makes data editing more deliberate, transparent, and predictable.
+
+### Multi-Database Support
+
+dodb currently supports:
+
+* PostgreSQL
+* MySQL
+* MariaDB
+* SQLite
+
+The database layer is designed to make adding additional engines possible as the project evolves.
+
+### Native macOS Experience
+
+dodb is built with macOS as the primary platform.
+
+The goal isn't to make a web application look like a Mac application.
+
+The goal is to build a database application that **feels at home on macOS**.
+
+From window behavior and keyboard interaction to layout, typography, and performance, dodb is designed with the platform in mind.
+
+---
+
+## 🏗 Architecture
+
+dodb was completely rewritten from its original Node.js/Electron architecture into a Rust-based native stack.
+
+| Layer            | Technology            |
+| ---------------- | --------------------- |
+| Desktop Shell    | Tauri 2               |
+| Frontend         | Next.js 15 · React 19 |
+| Styling          | Tailwind CSS          |
+| Application Core | Rust · Tokio          |
+| Database Access  | SQLx                  |
+| Communication    | Tauri IPC             |
+| Platform         | macOS                 |
+
+### Why Rust?
+
+Database applications deal with network connections, concurrent queries, large datasets, and long-running operations.
+
+Rust provides dodb with a foundation that is:
+
+* Memory safe
+* Efficient
+* Concurrent
+* Predictable
+* Well suited for native applications
+
+The goal is not simply to make dodb fast.
+
+It is to give the application a solid foundation that can scale with the features we want to build next.
+
+---
+
+## 🔐 Privacy
+
+Your database is your data.
+
+dodb is designed around direct connections from your Mac to your database.
+
+There is no requirement for a cloud account just to connect to a database, and dodb does not need to upload your database contents to a remote service in order to function.
+
+**Your databases stay yours.**
+
+---
+
+## 🚀 Getting Started
+
+### Requirements
+
+* macOS 11.0 or later
+* Apple Silicon or Intel
+* Rust toolchain
+* Node.js 18 or later
+* pnpm 8 or later
+
+### Clone the repository
 
 ```bash
-# Clone repository
 git clone https://github.com/bankjirapan/dodb.git
 cd dodb
+```
 
-# Install frontend dependencies
+### Install dependencies
+
+```bash
 pnpm install
 ```
 
-2. Run in Development Mode
-
-Run the complete Tauri desktop app with live reload (Hot Module Replacement for UI and hot-reloading for Rust):
+### Start development
 
 ```bash
 pnpm dev
 ```
 
-Note: Development mode disables Rust compiler optimizations. The application might feel slower than usual during development due to the unoptimized binary.
+This starts the Tauri application with frontend hot reload and a development Rust build.
 
-## Building for Production
+> Development builds are intentionally unoptimized, so the application may feel slower than a production build.
 
-To experience the true speed and performance of the native Rust backend, you must compile the application in Release mode.
+---
 
-### Compile Application Assets and Build Packaged macOS App
+## 📦 Production Build
 
-Compile the Next.js frontend and build the optimized Rust binary:
+Build the optimized macOS application with:
 
 ```bash
 pnpm tauri build
 ```
 
-### Output Artifacts
+Build artifacts are generated under:
 
-Upon completion, the final installers and app bundles are generated under:
-`src-tauri/target/release/bundle/`
-
-You will find:
-- `.dmg` - macOS Disk Image Installer
-- `.app` - macOS Standalone Application Bundle
-
-Simply drag and drop the `.app` file into your `/Applications` folder.
-
-## Configuration & Ports
-
-The Next.js development server runs on port 5821. The Tauri backend communicates natively over IPC (Inter-Process Communication) and does not require a local REST server port, avoiding any port conflicts.
-
-## Project Structure
-
+```text
+src-tauri/target/release/bundle/
 ```
+
+This includes:
+
+* `.app` — macOS application bundle
+* `.dmg` — macOS disk image
+
+---
+
+## 📁 Project Structure
+
+```text
 dodb/
-├── src-tauri/               # Tauri Rust backend
-│   ├── src/                 # Rust source code (db_core, profiles, main)
-│   ├── Cargo.toml           # Rust dependencies
-│   └── tauri.conf.json      # Tauri configuration
-├── ui/                      # Next.js 15 Frontend UI
-│   ├── src/                 # React components and pages
-│   └── package.json         # UI dependencies & scripts
-├── package.json             # Root scripts
-└── README.md                # Project documentation
+├── src-tauri/
+│   ├── src/
+│   │   ├── db_core/
+│   │   ├── profiles/
+│   │   └── main.rs
+│   ├── Cargo.toml
+│   └── tauri.conf.json
+│
+├── ui/
+│   ├── src/
+│   └── package.json
+│
+├── package.json
+└── README.md
 ```
 
-## License
+The project is separated into two primary layers:
 
-Distributed under the MIT License. See LICENSE for more information.
+**UI**
+Handles presentation, interaction, and the user experience.
 
-Designed & Developed by thutil
+**Rust Core**
+Handles database connections, queries, application logic, and native functionality.
+
+Communication between the two layers happens through Tauri's IPC layer rather than a local REST server.
+
+---
+
+## 🛣 Roadmap
+
+dodb is actively evolving.
+
+Areas currently being explored include:
+
+* [ ] Advanced SQL editor
+* [ ] Query history
+* [ ] Multiple database connections
+* [ ] Improved schema browser
+* [ ] Relationship visualization
+* [ ] Import and export workflows
+* [ ] Database comparison
+* [ ] Migration tools
+* [ ] Additional database engines
+* [ ] Advanced keyboard workflows
+* [ ] Large dataset performance improvements
+
+The roadmap is intentionally flexible.
+
+New features should make dodb **more useful**, not simply **more complicated**.
+
+---
+
+## 🤝 Contributing
+
+dodb is open source and contributions are welcome.
+
+You can contribute by:
+
+* Reporting bugs
+* Suggesting improvements
+* Improving the UI
+* Optimizing the Rust core
+* Adding database support
+* Improving documentation
+* Submitting pull requests
+
+For larger changes, opening an issue before starting implementation is encouraged so the direction can be discussed first.
+
+---
+
+## 🧭 Design Principles
+
+dodb is built around a few principles.
+
+### Clarity over complexity
+
+A powerful database tool does not need a complicated interface.
+
+### Native over wrapped
+
+Desktop applications should feel like desktop applications.
+
+### Visible over hidden
+
+Users should understand what their database tool is doing.
+
+### Fast over flashy
+
+Performance is part of the experience.
+
+### Open over locked-in
+
+Your database belongs to you.
+
+### Useful over feature-heavy
+
+Every feature should solve a real problem.
+
+---
+
+## The idea behind dodb
+
+The name started with a simple word:
+
+**ดู**
+
+In Thai, *ดู* means **to see, to look, or to watch**.
+
+And that's exactly what we want dodb to help you do.
+
+**See your data.**
+**See your schema.**
+**See your changes.**
+**See your database.**
+
+Then, when you're ready:
+
+**Change it.**
+
+---
+
+## 📄 License
+
+dodb is distributed under the [MIT License](LICENSE).
+
+---
+
+## Made by thutil
+
+dodb is designed and developed by **thutil**.
+
+Built in 2026 for developers who want a database tool that stays out of the way.
+
+**dodb — See your data. Understand your database.**

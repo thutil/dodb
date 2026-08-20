@@ -95,6 +95,7 @@ interface DataGridProps {
   onFiltersChange?: (filters: ColumnFilter[]) => void;
   theme?: "dark" | "light";
   errorMessage?: string | null;
+  onCreateTable?: () => void;
 }
 
 export const DataGrid: React.FC<DataGridProps> = ({
@@ -119,6 +120,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
   onFiltersChange,
   theme = "dark",
   errorMessage = null,
+  onCreateTable,
 }) => {
   const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
 
@@ -159,46 +161,38 @@ export const DataGrid: React.FC<DataGridProps> = ({
     return t.includes("date") || t.includes("time") || t.includes("timestamp");
   };
 
-  // Row Edit Modal State
-  const [rowEditModal, setRowEditModal] = useState<{ pkKey: string; rowIdx: number; isNew?: boolean; data: TableRowData } | null>(null);
-  
-  // Commit Status
-  const [submitting, setSubmitting] = useState(false);
-  const [commitMsg, setCommitMsg] = useState<{ success: boolean; text: string } | null>(null);
+  // Full Row Insert/Edit Modal State
+  const [rowEditModal, setRowEditModal] = useState<{
+    pkKey: string;
+    rowIdx: number;
+    isNew: boolean;
+    data: TableRowData;
+  } | null>(null);
 
-  // Reset local pending changes whenever the underlying row set is swapped out:
-  // pending keys computed against the old rows must never reach the database.
+  // Status message for transactions
+  const [commitMsg, setCommitMsg] = useState<{ success: boolean; text: string } | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  // Reset local transaction draft on table, database, or page/sort change
   const filtersKey = JSON.stringify(filters);
   useEffect(() => {
-    setEditedCells({});
     setNewRows([]);
+    setEditedCells({});
     setDeletedRowKeys(new Set());
-    setConfirmDeleteRow(null);
     setEditingCell(null);
     setRowEditModal(null);
+    setConfirmDeleteRow(null);
     setCommitMsg(null);
   }, [tableName, activeDatabase, page, sortColumn, sortOrder, searchQuery, filtersKey]);
 
-  // Global Escape key listener
+  // Handle ESC key to dismiss sub-modals (Inspector, Row Modal, Delete Confirm, Inline Edit)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        if (confirmDeleteRow) {
-          setConfirmDeleteRow(null);
-          return;
-        }
-        if (rowEditModal) {
-          setRowEditModal(null);
-          return;
-        }
-        if (selectedCell) {
-          setSelectedCell(null);
-          return;
-        }
-        if (editingCell) {
-          setEditingCell(null);
-          return;
-        }
+        if (confirmDeleteRow) setConfirmDeleteRow(null);
+        else if (rowEditModal) setRowEditModal(null);
+        else if (selectedCell) setSelectedCell(null);
+        else if (editingCell) setEditingCell(null);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -208,9 +202,66 @@ export const DataGrid: React.FC<DataGridProps> = ({
   if (!activeProfile) {
     return (
       <div className="empty-state-panel">
-        <Server size={32} className="empty-icon" />
-        <span className="empty-title">No Database Selected</span>
-        <span className="empty-sub">Please connect to a profile from the top bar.</span>
+        <div className="empty-state-card">
+          <div className="empty-icon-wrap">
+            <Server size={32} className="empty-icon" />
+          </div>
+          <h3 className="empty-title">No Database Connected</h3>
+          <p className="empty-sub">
+            Connect to a database server using the top bar to inspect schemas, run queries, and manage records.
+          </p>
+        </div>
+        <style jsx>{`
+          .empty-state-panel {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            width: 100%;
+            background: var(--bg-content);
+            padding: 32px;
+            box-sizing: border-box;
+          }
+          .empty-state-card {
+            max-width: 440px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            background: var(--bg-card);
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-lg);
+            padding: 40px 32px;
+            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.08);
+            gap: 12px;
+          }
+          .empty-icon-wrap {
+            width: 68px;
+            height: 68px;
+            border-radius: var(--radius-md);
+            background: rgba(59, 130, 246, 0.1);
+            border: 1px solid rgba(59, 130, 246, 0.25);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--accent-blue);
+            margin-bottom: 6px;
+          }
+          .empty-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--text-main);
+            margin: 0;
+          }
+          .empty-sub {
+            font-size: 13px;
+            color: var(--text-muted);
+            line-height: 1.5;
+            margin: 0;
+          }
+        `}</style>
       </div>
     );
   }
@@ -218,9 +269,107 @@ export const DataGrid: React.FC<DataGridProps> = ({
   if (!tableName) {
     return (
       <div className="empty-state-panel">
-        <Database size={32} className="empty-icon" />
-        <span className="empty-title">No Table Selected</span>
-        <span className="empty-sub">Select a table from the sidebar to inspect records.</span>
+        <div className="empty-state-card">
+          <div className="empty-icon-wrap">
+            <Database size={32} className="empty-icon" />
+          </div>
+          <h3 className="empty-title">Select a Table to View Records</h3>
+          <p className="empty-sub">
+            Choose an existing table from the sidebar on the left to inspect records, or create a brand new table schema.
+          </p>
+          <div className="empty-actions">
+            {onCreateTable && (
+              <button
+                className="btn btn-primary create-tbl-btn"
+                onClick={onCreateTable}
+                title="Create a new table in this database"
+              >
+                <Plus size={13} />
+                <span>Create New Table</span>
+              </button>
+            )}
+            <button
+              className="btn btn-secondary refresh-btn"
+              onClick={onRefresh}
+              title="Refresh database tables"
+            >
+              <RefreshCw size={13} />
+              <span>Refresh Explorer</span>
+            </button>
+          </div>
+        </div>
+        <style jsx>{`
+          .empty-state-panel {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            width: 100%;
+            background: var(--bg-content);
+            padding: 32px;
+            box-sizing: border-box;
+          }
+          .empty-state-card {
+            max-width: 460px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            background: var(--bg-card);
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-lg);
+            padding: 40px 32px;
+            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.08);
+            gap: 14px;
+          }
+          .empty-icon-wrap {
+            width: 68px;
+            height: 68px;
+            border-radius: var(--radius-md);
+            background: rgba(59, 130, 246, 0.1);
+            border: 1px solid rgba(59, 130, 246, 0.25);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--accent-blue);
+            margin-bottom: 6px;
+          }
+          .empty-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--text-main);
+            margin: 0;
+          }
+          .empty-sub {
+            font-size: 13px;
+            color: var(--text-muted);
+            line-height: 1.5;
+            margin: 0;
+          }
+          .empty-actions {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 8px;
+            flex-wrap: wrap;
+          }
+          .create-tbl-btn {
+            gap: 6px;
+            padding: 0 16px;
+            height: 32px;
+            font-size: 12px;
+            font-weight: 600;
+          }
+          .refresh-btn {
+            gap: 6px;
+            padding: 0 14px;
+            height: 32px;
+            font-size: 12px;
+          }
+        `}</style>
       </div>
     );
   }
@@ -303,7 +452,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
     const pkKey = isNew ? `new_${rowIdx}` : getRowKey(row, rowIdx);
     const currentEdits = isNew ? {} : (editedCells[pkKey] || {});
     const merged = { ...row, ...currentEdits };
-    setRowEditModal({ pkKey, rowIdx, isNew, data: merged });
+    setRowEditModal({ pkKey, rowIdx, isNew: !!isNew, data: merged });
   };
 
   // Save Full Row Modal Edits
@@ -711,15 +860,20 @@ export const DataGrid: React.FC<DataGridProps> = ({
           ) : (
             <>
               <button
-                className={`btn btn-secondary ${filters.length > 0 ? "filter-active-btn" : ""}`}
+                className={`btn btn-secondary filter-toggle-btn ${filters.length > 0 ? "filter-active-btn" : ""}`}
                 onClick={() => setIsFilterPanelOpen(!isFilterPanelOpen)}
+                title={isFilterPanelOpen ? "Close Filter Drawer" : "Open Filter Drawer (Add column filter rules)"}
               >
-                <Filter size={12} />
+                <Filter size={13} />
                 <span>Filter {filters.length > 0 ? `(${filters.length})` : ""}</span>
               </button>
 
-              <button className="btn btn-secondary" onClick={handleAddRow}>
-                <Plus size={12} />
+              <button
+                className="btn btn-secondary add-row-btn"
+                onClick={handleAddRow}
+                title="Add a new row draft to this table"
+              >
+                <Plus size={13} />
                 <span>Add Row</span>
               </button>
 
@@ -730,7 +884,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                   onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
                   title="Export table data (JSON, SQL, CSV)"
                 >
-                  <Download size={12} />
+                  <Download size={13} />
                   <span>Export</span>
                   <ChevronDown size={11} className={`export-chevron ${isExportMenuOpen ? "open" : ""}`} />
                 </button>
@@ -742,6 +896,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                         setIsExportMenuOpen(false);
                         handleFetchExport("json");
                       }}
+                      title="Export query results as JSON file"
                     >
                       <FileJson size={13} className="menu-icon json-icon" />
                       <span>Export JSON</span>
@@ -752,6 +907,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                         setIsExportMenuOpen(false);
                         handleFetchExport("sql");
                       }}
+                      title="Export query results as SQL INSERT statements"
                     >
                       <Download size={13} className="menu-icon sql-icon" />
                       <span>Export SQL</span>
@@ -762,6 +918,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                         setIsExportMenuOpen(false);
                         handleFetchExport("csv");
                       }}
+                      title="Export query results as CSV spreadsheet"
                     >
                       <FileCode size={13} className="menu-icon csv-icon" />
                       <span>Export CSV</span>
@@ -772,21 +929,27 @@ export const DataGrid: React.FC<DataGridProps> = ({
             </>
           )}
 
-          <div className="search-wrap">
-            <Search size={12} className="search-icon" />
+          <div className="search-wrap" title="Quick text search across visible data">
+            <Search size={13} className="search-icon" />
             <input
               type="text"
               className="input search-input"
               placeholder="Search table..."
               value={searchQuery}
+              title="Search table across loaded records"
               onChange={(e) => {
                 if (onSearchChange) onSearchChange(e.target.value);
                 onPageChange(0);
               }}
             />
           </div>
-          <button className="btn btn-secondary" onClick={onRefresh} disabled={loading}>
-            <RefreshCw size={12} className={loading ? "spin" : ""} />
+          <button
+            className="btn btn-secondary refresh-table-btn"
+            onClick={onRefresh}
+            disabled={loading}
+            title="Reload table records from database"
+          >
+            <RefreshCw size={13} className={loading ? "spin" : ""} />
             <span>Refresh</span>
           </button>
         </div>
@@ -797,33 +960,46 @@ export const DataGrid: React.FC<DataGridProps> = ({
         <div className="filter-drawer">
           <div className="filter-drawer-header">
             <div className="filter-drawer-title">
-              <Filter size={13} className="filter-icon" />
-              <span>Filter Records</span>
+              <Filter size={14} className="filter-icon" />
+              <span>Filter Rules</span>
               {filters.length > 0 && <span className="filter-count-badge">{filters.length} active</span>}
             </div>
             <div className="filter-drawer-actions">
-              <button className="btn btn-secondary btn-sm" onClick={addFilter}>
-                <Plus size={11} />
+              <button
+                className="btn btn-secondary filter-action-btn"
+                onClick={addFilter}
+                title="Add a new filter condition"
+              >
+                <Plus size={13} />
                 <span>Add Filter Rule</span>
               </button>
               {filters.length > 0 && (
-                <button className="btn btn-secondary btn-sm" onClick={clearAllFilters}>
-                  Clear All
+                <button
+                  className="btn btn-secondary filter-clear-btn"
+                  onClick={clearAllFilters}
+                  title="Remove all filter conditions"
+                >
+                  <Trash2 size={12} />
+                  <span>Clear All</span>
                 </button>
               )}
             </div>
           </div>
 
           {filters.length === 0 ? (
-            <div className="empty-filters-msg">No active filters. Click &quot;Add Filter Rule&quot; to filter table columns.</div>
+            <div className="empty-filters-msg">
+              <span>No active filter rules. Click <strong>&quot;Add Filter Rule&quot;</strong> to filter rows by column values.</span>
+            </div>
           ) : (
             <div className="filter-list">
-              {filters.map((f) => (
+              {filters.map((f, idx) => (
                 <div key={f.id} className="filter-row">
+                  <span className="filter-row-num" title={`Filter rule #${idx + 1}`}>{idx + 1}</span>
                   <select
-                    className="select select-column"
+                    className="select select-column font-mono"
                     value={f.column}
                     onChange={(e) => updateFilter(f.id, { column: e.target.value })}
+                    title="Select column to filter"
                   >
                     {columns.map((c) => (
                       <option key={c.name} value={c.name}>
@@ -836,11 +1012,12 @@ export const DataGrid: React.FC<DataGridProps> = ({
                     className="select select-operator"
                     value={f.operator}
                     onChange={(e) => updateFilter(f.id, { operator: e.target.value as FilterOperator })}
+                    title="Select comparison operator"
                   >
                     <option value="equals">= Equals</option>
-                    <option value="contains">Contains</option>
-                    <option value="startsWith">Starts with</option>
-                    <option value="endsWith">Ends with</option>
+                    <option value="contains">Contains (LIKE %val%)</option>
+                    <option value="startsWith">Starts with (LIKE val%)</option>
+                    <option value="endsWith">Ends with (LIKE %val)</option>
                     <option value="gt">&gt; Greater than</option>
                     <option value="gte">&gt;= Greater or equal</option>
                     <option value="lt">&lt; Less than</option>
@@ -850,16 +1027,25 @@ export const DataGrid: React.FC<DataGridProps> = ({
                     <option value="isNotNull">IS NOT NULL</option>
                   </select>
 
-                  {f.operator !== "isNull" && f.operator !== "isNotNull" && (
+                  {f.operator === "isNull" || f.operator === "isNotNull" ? (
+                    <div className="filter-null-placeholder" title="No value needed for NULL checks">
+                      <span>(No value required)</span>
+                    </div>
+                  ) : (
                     <input
-                      className="input filter-val-input"
+                      className="input filter-val-input font-mono"
                       placeholder="Filter value..."
                       value={f.value}
                       onChange={(e) => updateFilter(f.id, { value: e.target.value })}
+                      title="Enter value to compare against"
                     />
                   )}
 
-                  <button className="btn btn-icon delete-filter-btn" onClick={() => removeFilter(f.id)}>
+                  <button
+                    className="btn btn-icon delete-filter-btn"
+                    onClick={() => removeFilter(f.id)}
+                    title="Remove this filter rule"
+                  >
                     <Trash2 size={13} />
                   </button>
                 </div>
@@ -1154,6 +1340,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
             className="btn btn-secondary btn-sm"
             onClick={() => onPageChange(Math.max(0, page - 1))}
             disabled={page === 0}
+            title={page === 0 ? "Already on first page" : `Go to page ${page}`}
           >
             <ChevronLeft size={12} />
             <span>Prev</span>
@@ -1162,6 +1349,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
             className="btn btn-secondary btn-sm"
             onClick={() => onPageChange(page + 1)}
             disabled={(page + 1) * pageSize >= totalRows}
+            title={(page + 1) * pageSize >= totalRows ? "Already on last page" : `Go to page ${page + 2}`}
           >
             <span>Next</span>
             <ChevronRight size={12} />
@@ -2336,10 +2524,15 @@ export const DataGrid: React.FC<DataGridProps> = ({
         .filter-drawer {
           background: var(--bg-tertiary);
           border-bottom: 1px solid var(--border-light);
-          padding: 10px 14px;
+          padding: 12px 16px;
           display: flex;
           flex-direction: column;
-          gap: 10px;
+          gap: 12px;
+          animation: filterSlide 0.15s ease;
+        }
+        @keyframes filterSlide {
+          from { opacity: 0; transform: translateY(-4px); }
+          to { opacity: 1; transform: translateY(0); }
         }
 
         .filter-drawer-header {
@@ -2350,50 +2543,118 @@ export const DataGrid: React.FC<DataGridProps> = ({
         .filter-drawer-title {
           display: flex;
           align-items: center;
-          gap: 6px;
-          font-size: 11px;
+          gap: 8px;
+          font-size: 12px;
           font-weight: 700;
           color: var(--text-main);
+        }
+        .filter-count-badge {
+          font-size: 10px;
+          padding: 1px 7px;
+          background: rgba(59, 130, 246, 0.15);
+          color: var(--accent-blue);
+          border: 1px solid rgba(59, 130, 246, 0.3);
+          border-radius: var(--radius-full);
+          font-weight: 600;
         }
         .filter-icon { color: var(--accent-blue); }
         .filter-drawer-actions {
           display: flex;
-          gap: 6px;
+          gap: 8px;
+          align-items: center;
         }
-        .btn-sm {
-          padding: 3px 8px;
-          font-size: 10px;
+        .filter-action-btn {
+          padding: 5px 12px;
+          font-size: 11.5px;
+          font-weight: 600;
+          gap: 5px;
+          background: var(--bg-card);
+          border-color: var(--border-medium);
+        }
+        .filter-clear-btn {
+          padding: 5px 12px;
+          font-size: 11.5px;
+          gap: 5px;
+          color: var(--accent-rose);
+        }
+        .filter-clear-btn:hover {
+          background: rgba(244, 63, 94, 0.1) !important;
+          border-color: rgba(244, 63, 94, 0.3) !important;
         }
 
         .empty-filters-msg {
-          font-size: 11px;
+          font-size: 11.5px;
           color: var(--text-muted);
-          font-style: italic;
-          padding: 4px 0;
+          padding: 6px 0;
         }
 
         .filter-list {
           display: flex;
           flex-direction: column;
-          gap: 6px;
+          gap: 8px;
         }
         .filter-row {
           display: flex;
           align-items: center;
-          gap: 8px;
+          gap: 10px;
+        }
+        .filter-row-num {
+          font-size: 11px;
+          font-weight: 700;
+          color: var(--text-muted);
+          width: 20px;
+          text-align: center;
+          flex-shrink: 0;
         }
         .select-column {
-          width: 160px;
-          font-size: 11px;
+          width: 200px;
+          height: 32px;
+          font-size: 11.5px;
+          flex-shrink: 0;
         }
         .select-operator {
-          width: 150px;
-          font-size: 11px;
+          width: 180px;
+          height: 32px;
+          font-size: 11.5px;
+          flex-shrink: 0;
         }
         .filter-val-input {
           flex: 1;
-          max-width: 260px;
+          max-width: 340px;
+          height: 32px;
+          font-size: 11.5px;
+        }
+        .filter-null-placeholder {
+          flex: 1;
+          max-width: 340px;
+          height: 32px;
+          display: flex;
+          align-items: center;
+          padding: 0 10px;
+          background: var(--bg-card);
+          border: 1px dashed var(--border-medium);
+          border-radius: var(--radius-xs);
           font-size: 11px;
+          color: var(--text-muted);
+          font-style: italic;
+        }
+        .delete-filter-btn {
+          width: 32px;
+          height: 32px;
+          padding: 0;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: var(--radius-xs);
+          color: var(--text-muted);
+          border: 1px solid var(--border-light);
+          background: var(--bg-card);
+          flex-shrink: 0;
+        }
+        .delete-filter-btn:hover {
+          color: var(--accent-rose);
+          border-color: rgba(244, 63, 94, 0.4);
+          background: rgba(244, 63, 94, 0.12);
         }
 
         .sorted-hdr {

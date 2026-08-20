@@ -92,15 +92,41 @@ pub async fn admin_drop_database(id: String, database: String, name: String, sta
         return Err("Database name cannot be empty".to_string());
     }
 
-    let query = match profile.r#type {
-        SupportedDB::Postgres => format!("DROP DATABASE \"{}\"", clean_name.replace("\"", "\"\"")),
-        SupportedDB::Mariadb => format!("DROP DATABASE `{}`", clean_name.replace("`", "``")),
-        SupportedDB::Sqlite => return Ok(()),
-    };
     close_profile_pools(&state, Some(&profile.id)).await?;
 
-    let pool = get_pool(&state, profile, Some(&database)).await?;
-    execute_query(&pool, &query).await?;
+    match profile.r#type {
+        SupportedDB::Postgres => {
+            let maint_db = if database == clean_name {
+                "postgres".to_string()
+            } else {
+                database.clone()
+            };
+
+            let pool = get_pool(&state, profile, Some(&maint_db)).await?;
+            let esc_name = clean_name.replace("\"", "\"\"");
+            let esc_lit = clean_name.replace("'", "''");
+
+            // Terminate other active connections to target database first
+            let terminate_sql = format!(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{}' AND pid <> pg_backend_pid()",
+                esc_lit
+            );
+            let _ = execute_query(&pool, &terminate_sql).await;
+
+            let drop_sql = format!("DROP DATABASE \"{}\"", esc_name);
+            execute_query(&pool, &drop_sql).await?;
+        }
+        SupportedDB::Mariadb => {
+            let pool = get_pool(&state, profile, Some(&database)).await?;
+            let query = format!("DROP DATABASE `{}`", clean_name.replace("`", "``"));
+            execute_query(&pool, &query).await?;
+        }
+        SupportedDB::Sqlite => {
+            return Err("SQLite databases cannot be dropped via SQL command".to_string());
+        }
+    }
+
+    close_profile_pools(&state, Some(&profile.id)).await?;
     Ok(())
 }
 

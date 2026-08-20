@@ -1,6 +1,21 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useState, useEffect, useCallback } from "react";
-import { Database, Users, Plus, Trash2, Shield, ShieldCheck, CheckCircle2, XCircle, RefreshCw, Activity, Layers, Server } from "lucide-react";
+import {
+  Database,
+  Users,
+  Plus,
+  Trash2,
+  Shield,
+  ShieldCheck,
+  CheckCircle2,
+  XCircle,
+  RefreshCw,
+  Activity,
+  Layers,
+  Server,
+  AlertTriangle,
+  X,
+} from "lucide-react";
 import { ConnectionProfile } from "../types";
 import { apiClient } from "../utils/apiClient";
 
@@ -40,6 +55,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [newDbName, setNewDbName] = useState("");
   const [dbLoading, setDbLoading] = useState(false);
   const [dbMsg, setDbMsg] = useState<{ success: boolean; text: string } | null>(null);
+
+  // Drop Database Modal State
+  const [dbToDrop, setDbToDrop] = useState<string | null>(null);
+  const [confirmDropInput, setConfirmDropInput] = useState("");
+  const [dropDbLoading, setDropDbLoading] = useState(false);
+  const [dropDbError, setDropDbError] = useState<string | null>(null);
+
+  // Drop User Modal State
+  const [userToDrop, setUserToDrop] = useState<DbUser | null>(null);
+  const [dropUserLoading, setDropUserLoading] = useState(false);
+
+  // Kill Process Modal State
+  const [processToKill, setProcessToKill] = useState<DbProcess | null>(null);
+  const [killProcLoading, setKillProcLoading] = useState(false);
 
   // Users state
   const [users, setUsers] = useState<DbUser[]>([]);
@@ -110,19 +139,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
   };
 
-  // Drop Database Handler
-  const handleDropDatabase = async (name: string) => {
-    if (!activeProfile || !window.confirm(`Are you sure you want to drop database '${name}'? This action cannot be undone.`)) return;
-    setDbLoading(true);
+  // Drop Database Handlers
+  const handleOpenDropDbModal = (name: string) => {
+    setDbToDrop(name);
+    setConfirmDropInput("");
+    setDropDbError(null);
+  };
+
+  const handleConfirmDropDatabase = async () => {
+    if (!activeProfile || !dbToDrop) return;
+    if (confirmDropInput.trim() !== dbToDrop) return;
+    setDropDbLoading(true);
+    setDropDbError(null);
     try {
-      await apiClient.adminDropDatabase(activeProfile.id, currentDb, name);
-      setDbMsg({ success: true, text: `Database '${name}' dropped` });
+      await apiClient.adminDropDatabase(activeProfile.id, currentDb, dbToDrop);
+      setDbMsg({ success: true, text: `Database '${dbToDrop}' dropped successfully` });
+      setDbToDrop(null);
       onRefreshDatabases();
     } catch (err: any) {
       const msg = err?.message || String(err);
-      setDbMsg({ success: false, text: msg });
+      setDropDbError(msg);
     } finally {
-      setDbLoading(false);
+      setDropDbLoading(false);
     }
   };
 
@@ -151,29 +189,37 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   };
 
   // Drop User Handler
-  const handleDropUser = async (u: DbUser) => {
-    if (!activeProfile || !window.confirm(`Drop user '${u.username}'?`)) return;
+  const handleConfirmDropUser = async () => {
+    if (!activeProfile || !userToDrop) return;
+    setDropUserLoading(true);
     try {
-      await apiClient.adminDropUser(activeProfile.id, currentDb, u.username, u.host);
-      setUserMsg({ success: true, text: `User '${u.username}' dropped` });
+      await apiClient.adminDropUser(activeProfile.id, currentDb, userToDrop.username, userToDrop.host);
+      setUserMsg({ success: true, text: `User '${userToDrop.username}' dropped successfully` });
+      setUserToDrop(null);
       fetchUsers();
     } catch (err: any) {
       const msg = err?.message || String(err);
       setUserMsg({ success: false, text: msg });
+    } finally {
+      setDropUserLoading(false);
     }
   };
 
   // Kill Process Handler
-  const handleKillProcess = async (pid: number | string) => {
-    if (!activeProfile || !window.confirm(`Kill database query process PID ${pid}?`)) return;
+  const handleConfirmKillProcess = async () => {
+    if (!activeProfile || !processToKill) return;
+    setKillProcLoading(true);
     setProcessMsg(null);
     try {
-      await apiClient.adminKillProcess(activeProfile.id, currentDb, String(pid));
-      setProcessMsg({ success: true, text: `Process ${pid} killed successfully` });
+      await apiClient.adminKillProcess(activeProfile.id, currentDb, String(processToKill.pid));
+      setProcessMsg({ success: true, text: `Process ${processToKill.pid} killed successfully` });
+      setProcessToKill(null);
       fetchProcesses();
     } catch (err: any) {
       const msg = err?.message || String(err);
       setProcessMsg({ success: false, text: msg });
+    } finally {
+      setKillProcLoading(false);
     }
   };
 
@@ -321,10 +367,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         <td style={{ textAlign: "right" }}>
                           <button
                             className="btn btn-danger icon-only-btn"
-                            onClick={() => handleDropDatabase(db)}
+                            onClick={() => handleOpenDropDbModal(db)}
                             title={`Drop database '${db}'`}
                           >
-                            <Trash2 size={12} />
+                            <Trash2 size={13} />
                           </button>
                         </td>
                       </tr>
@@ -344,22 +390,31 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </div>
 
               <form onSubmit={handleCreateUser} className="create-user-form">
-                <div className="user-form-inputs">
-                  <input
-                    type="text"
-                    className="input form-control font-mono"
-                    placeholder="Username (e.g. app_user)"
-                    value={newUsername}
-                    onChange={(e) => setNewUsername(e.target.value)}
-                  />
-                  <input
-                    type="password"
-                    className="input form-control font-mono"
-                    placeholder="Secure password"
-                    value={newUserPass}
-                    onChange={(e) => setNewUserPass(e.target.value)}
-                  />
-                  <label className="checkbox-label">
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>Username</label>
+                    <input
+                      type="text"
+                      className="input form-control font-mono"
+                      placeholder="e.g. app_service_user"
+                      value={newUsername}
+                      onChange={(e) => setNewUsername(e.target.value)}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Password</label>
+                    <input
+                      type="password"
+                      className="input form-control font-mono"
+                      placeholder="••••••••••••"
+                      value={newUserPass}
+                      onChange={(e) => setNewUserPass(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="form-options">
+                  <label className="checkbox-label" title="Grant superuser administrative rights">
                     <input
                       type="checkbox"
                       checked={isSuperuser}
@@ -367,11 +422,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     />
                     <span>Grant Superuser / Admin Privileges</span>
                   </label>
+
+                  <button
+                    className="btn btn-primary"
+                    type="submit"
+                    disabled={!newUsername.trim() || !newUserPass.trim()}
+                  >
+                    <Plus size={13} />
+                    <span>Create User</span>
+                  </button>
                 </div>
-                <button className="btn btn-primary create-btn" type="submit" disabled={!newUsername.trim() || !newUserPass.trim()}>
-                  <Plus size={13} />
-                  <span>Create User</span>
-                </button>
               </form>
 
               {userMsg && (
@@ -386,12 +446,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             <div className="pane-section full-table-card">
               <div className="section-top-row">
                 <div className="section-header">
-                  <h4 className="section-heading">Users & Role Privileges ({users.length})</h4>
-                  <span className="section-sub">Manage database accounts and permissions</span>
+                  <h4 className="section-heading">Database Users ({users.length})</h4>
+                  <span className="section-sub">Accounts registered on this database server</span>
                 </div>
                 <button className="btn btn-secondary" onClick={fetchUsers} disabled={usersLoading}>
                   <RefreshCw size={12} className={usersLoading ? "spin" : ""} />
-                  <span>Refresh</span>
+                  <span>Refresh Users</span>
                 </button>
               </div>
 
@@ -401,8 +461,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     <tr>
                       <th style={{ width: "60px" }}>#</th>
                       <th>Username</th>
-                      <th>Host Filter</th>
-                      <th>Privilege Role</th>
+                      <th>Host Mask</th>
+                      <th>Privilege Level</th>
                       <th style={{ width: "80px", textAlign: "right" }}>Actions</th>
                     </tr>
                   </thead>
@@ -410,16 +470,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     {users.length === 0 ? (
                       <tr>
                         <td colSpan={5} className="empty-td">
-                          {usersLoading ? "Loading database users..." : "No users found or insufficient permissions"}
+                          {usersLoading ? "Loading users..." : "No users found or insufficient permissions"}
                         </td>
                       </tr>
                     ) : (
                       users.map((u, idx) => (
-                        <tr key={u.username + (u.host || "")}>
+                        <tr key={`${u.username}-${u.host || ""}`}>
                           <td className="row-num font-mono">{idx + 1}</td>
                           <td className="font-mono user-name-col">
-                            <ShieldCheck size={13} className="user-icon" />
-                            <span>{u.username}</span>
+                            <div className="user-name-wrap">
+                              <Users size={13} className="tbl-user-icon" />
+                              <span>{u.username}</span>
+                            </div>
                           </td>
                           <td className="font-mono host-cell">{u.host || "%"}</td>
                           <td>
@@ -432,10 +494,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           <td style={{ textAlign: "right" }}>
                             <button
                               className="btn btn-danger icon-only-btn"
-                              onClick={() => handleDropUser(u)}
+                              onClick={() => setUserToDrop(u)}
                               title={`Drop user '${u.username}'`}
                             >
-                              <Trash2 size={12} />
+                              <Trash2 size={13} />
                             </button>
                           </td>
                         </tr>
@@ -506,10 +568,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                           <td style={{ textAlign: "right" }}>
                             <button
                               className="btn btn-danger icon-only-btn"
-                              onClick={() => handleKillProcess(p.pid)}
+                              onClick={() => setProcessToKill(p)}
                               title={`Kill process ${p.pid}`}
                             >
-                              <XCircle size={12} />
+                              <XCircle size={13} />
                             </button>
                           </td>
                         </tr>
@@ -522,6 +584,180 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           </div>
         )}
       </div>
+
+      {/* Confirmation Modal: Drop Database */}
+      {dbToDrop && (
+        <div className="admin-modal-overlay">
+          <div className="admin-modal-card danger-card">
+            <div className="admin-modal-header danger-header">
+              <div className="modal-title-wrap">
+                <AlertTriangle size={16} className="danger-icon" />
+                <span className="modal-title">Drop Database</span>
+              </div>
+              <button
+                className="modal-close-btn"
+                onClick={() => !dropDbLoading && setDbToDrop(null)}
+                disabled={dropDbLoading}
+              >
+                <X size={14} />
+              </button>
+            </div>
+
+            <div className="admin-modal-body">
+              <div className="danger-callout">
+                <span className="callout-bold">Permanent Deletion Warning:</span>
+                <span>
+                  You are about to permanently drop the database <strong>&quot;{dbToDrop}&quot;</strong>.
+                  All tables, rows, views, and schemas inside this database will be destroyed immediately.
+                </span>
+              </div>
+
+              <div className="confirm-input-section">
+                <label className="confirm-label">
+                  To confirm, type <code>{dbToDrop}</code> below:
+                </label>
+                <input
+                  type="text"
+                  className="input confirm-input font-mono"
+                  placeholder={dbToDrop}
+                  value={confirmDropInput}
+                  autoFocus
+                  disabled={dropDbLoading}
+                  onChange={(e) => setConfirmDropInput(e.target.value)}
+                />
+              </div>
+
+              {dropDbError && (
+                <div className="modal-error-box">
+                  <XCircle size={13} />
+                  <span>{dropDbError}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="admin-modal-footer">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setDbToDrop(null)}
+                disabled={dropDbLoading}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger confirm-danger-btn"
+                disabled={confirmDropInput.trim() !== dbToDrop || dropDbLoading}
+                onClick={handleConfirmDropDatabase}
+              >
+                <Trash2 size={13} />
+                <span>{dropDbLoading ? "Dropping Database..." : "Drop Database"}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal: Drop User */}
+      {userToDrop && (
+        <div className="admin-modal-overlay">
+          <div className="admin-modal-card danger-card">
+            <div className="admin-modal-header danger-header">
+              <div className="modal-title-wrap">
+                <AlertTriangle size={16} className="danger-icon" />
+                <span className="modal-title">Drop User</span>
+              </div>
+              <button
+                className="modal-close-btn"
+                onClick={() => !dropUserLoading && setUserToDrop(null)}
+                disabled={dropUserLoading}
+              >
+                <X size={14} />
+              </button>
+            </div>
+
+            <div className="admin-modal-body">
+              <p className="modal-confirm-text">
+                Are you sure you want to drop user <strong>&quot;{userToDrop.username}&quot;</strong>
+                {userToDrop.host ? ` (Host: ${userToDrop.host})` : ""}? All granted server permissions for this account will be revoked.
+              </p>
+            </div>
+
+            <div className="admin-modal-footer">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setUserToDrop(null)}
+                disabled={dropUserLoading}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger confirm-danger-btn"
+                disabled={dropUserLoading}
+                onClick={handleConfirmDropUser}
+              >
+                <Trash2 size={13} />
+                <span>{dropUserLoading ? "Dropping User..." : "Drop User"}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal: Kill Process */}
+      {processToKill && (
+        <div className="admin-modal-overlay">
+          <div className="admin-modal-card danger-card">
+            <div className="admin-modal-header danger-header">
+              <div className="modal-title-wrap">
+                <AlertTriangle size={16} className="danger-icon" />
+                <span className="modal-title">Terminate Query Process</span>
+              </div>
+              <button
+                className="modal-close-btn"
+                onClick={() => !killProcLoading && setProcessToKill(null)}
+                disabled={killProcLoading}
+              >
+                <X size={14} />
+              </button>
+            </div>
+
+            <div className="admin-modal-body">
+              <p className="modal-confirm-text">
+                Are you sure you want to kill process PID <strong>#{processToKill.pid}</strong>
+                {processToKill.user ? ` running by user "${processToKill.user}"` : ""}?
+              </p>
+              {processToKill.query && (
+                <div className="process-query-preview font-mono">
+                  <code>{processToKill.query}</code>
+                </div>
+              )}
+            </div>
+
+            <div className="admin-modal-footer">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setProcessToKill(null)}
+                disabled={killProcLoading}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger confirm-danger-btn"
+                disabled={killProcLoading}
+                onClick={handleConfirmKillProcess}
+              >
+                <XCircle size={13} />
+                <span>{killProcLoading ? "Terminating..." : "Kill Process"}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <style jsx>{`
         .admin-container {
@@ -856,6 +1092,176 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         .spin { animation: spin 1s linear infinite; }
         @keyframes spin { 100% { transform: rotate(360deg); } }
         .empty-td { padding: 32px; text-align: center; color: var(--text-muted); }
+
+        /* Admin Confirmation Modals */
+        .admin-modal-overlay {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0, 0, 0, 0.65);
+          backdrop-filter: blur(4px);
+          -webkit-backdrop-filter: blur(4px);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 9999;
+          padding: 16px;
+          animation: adminFadeIn 0.15s ease;
+        }
+        @keyframes adminFadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+
+        .admin-modal-card {
+          width: 100%;
+          max-width: 480px;
+          background: var(--bg-card);
+          border: 1px solid var(--border-medium);
+          border-radius: var(--radius-lg);
+          box-shadow: 0 20px 48px rgba(0, 0, 0, 0.4);
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+          animation: adminScaleIn 0.15s ease;
+        }
+        @keyframes adminScaleIn {
+          from { opacity: 0; transform: scale(0.96); }
+          to { opacity: 1; transform: scale(1); }
+        }
+
+        .admin-modal-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 14px 18px;
+          border-bottom: 1px solid var(--border-light);
+          background: var(--bg-header);
+        }
+        .danger-header {
+          background: rgba(244, 63, 94, 0.08);
+          border-bottom-color: rgba(244, 63, 94, 0.2);
+        }
+        .modal-title-wrap {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .modal-title {
+          font-size: 13px;
+          font-weight: 700;
+          color: var(--text-main);
+        }
+        .danger-icon {
+          color: var(--accent-rose);
+        }
+        .modal-close-btn {
+          background: transparent;
+          border: none;
+          color: var(--text-muted);
+          cursor: pointer;
+          padding: 4px;
+          border-radius: var(--radius-xs);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .modal-close-btn:hover:not(:disabled) {
+          color: var(--text-main);
+          background: var(--bg-hover);
+        }
+
+        .admin-modal-body {
+          padding: 18px;
+          display: flex;
+          flex-direction: column;
+          gap: 14px;
+        }
+        .danger-callout {
+          background: rgba(244, 63, 94, 0.08);
+          border: 1px solid rgba(244, 63, 94, 0.25);
+          border-radius: var(--radius-sm);
+          padding: 12px 14px;
+          font-size: 12px;
+          color: var(--text-main);
+          line-height: 1.5;
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+        .callout-bold {
+          font-weight: 700;
+          color: var(--accent-rose);
+        }
+        .confirm-input-section {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+        }
+        .confirm-label {
+          font-size: 11.5px;
+          color: var(--text-muted);
+        }
+        .confirm-label code {
+          color: var(--accent-rose);
+          background: var(--bg-tertiary);
+          padding: 1px 5px;
+          border-radius: var(--radius-xs);
+          font-weight: 600;
+        }
+        .confirm-input {
+          font-size: 12px;
+          height: 34px;
+          padding: 0 10px;
+        }
+        .modal-confirm-text {
+          font-size: 12.5px;
+          color: var(--text-main);
+          line-height: 1.5;
+          margin: 0;
+        }
+        .process-query-preview {
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-light);
+          border-radius: var(--radius-sm);
+          padding: 10px 12px;
+          font-size: 11px;
+          color: var(--text-sub);
+          max-height: 120px;
+          overflow: auto;
+          white-space: pre-wrap;
+          word-break: break-all;
+        }
+        .modal-error-box {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          background: rgba(244, 63, 94, 0.12);
+          border: 1px solid rgba(244, 63, 94, 0.3);
+          border-radius: var(--radius-sm);
+          padding: 10px 12px;
+          font-size: 11.5px;
+          color: var(--accent-rose);
+        }
+
+        .admin-modal-footer {
+          display: flex;
+          align-items: center;
+          justify-content: flex-end;
+          gap: 8px;
+          padding: 12px 18px;
+          background: var(--bg-header);
+          border-top: 1px solid var(--border-light);
+        }
+        .confirm-danger-btn {
+          gap: 6px;
+          padding: 0 14px;
+          height: 30px;
+          font-size: 11.5px;
+          font-weight: 600;
+        }
       `}</style>
     </div>
   );

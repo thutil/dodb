@@ -91,15 +91,16 @@ export const ForeignKeysEditor: React.FC<ForeignKeysEditorProps> = ({
                 className="input font-mono fk-name"
                 value={fk.name}
                 placeholder="constraint_name (optional)"
+                title="Foreign Key constraint name (optional)"
                 onChange={(e) => patch(fk.id, { name: e.target.value })}
               />
               <button
                 type="button"
                 className="mini-btn danger"
-                title="Remove foreign key"
+                title="Remove this foreign key"
                 onClick={() => onChange(foreignKeys.filter((f) => f.id !== fk.id))}
               >
-                <Trash2 size={12} />
+                <Trash2 size={13} />
               </button>
             </div>
 
@@ -113,6 +114,7 @@ export const ForeignKeysEditor: React.FC<ForeignKeysEditorProps> = ({
               <select
                 className="select font-mono"
                 value={fk.refTable}
+                title="Select the referenced database table"
                 onChange={(e) => {
                   patch(fk.id, { refTable: e.target.value, refColumns: [] });
                   ensureColumns(e.target.value);
@@ -140,6 +142,7 @@ export const ForeignKeysEditor: React.FC<ForeignKeysEditorProps> = ({
                 <select
                   className="select"
                   value={fk.onDelete}
+                  title="Foreign key ON DELETE action (e.g. CASCADE, RESTRICT, SET NULL)"
                   onChange={(e) => patch(fk.id, { onDelete: e.target.value as ForeignKeyDraft["onDelete"] })}
                 >
                   {ON_ACTIONS.map((a) => (
@@ -154,6 +157,7 @@ export const ForeignKeysEditor: React.FC<ForeignKeysEditorProps> = ({
                 <select
                   className="select"
                   value={fk.onUpdate}
+                  title="Foreign key ON UPDATE action (e.g. CASCADE, RESTRICT, SET NULL)"
                   onChange={(e) => patch(fk.id, { onUpdate: e.target.value as ForeignKeyDraft["onUpdate"] })}
                 >
                   {ON_ACTIONS.map((a) => (
@@ -178,8 +182,9 @@ export const ForeignKeysEditor: React.FC<ForeignKeysEditorProps> = ({
         type="button"
         className="btn btn-secondary add-btn"
         onClick={() => onChange([...foreignKeys, newForeignKey()])}
+        title="Add a new foreign key constraint"
       >
-        <Plus size={12} />
+        <Plus size={13} />
         <span>Add Foreign Key</span>
       </button>
 

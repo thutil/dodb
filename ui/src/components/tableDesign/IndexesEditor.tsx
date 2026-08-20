@@ -34,9 +34,10 @@ export const IndexesEditor: React.FC<IndexesEditorProps> = ({ indexes, available
               className="input font-mono idx-name"
               value={idx.name}
               placeholder="index_name"
+              title="Index name"
               onChange={(e) => patch(idx.id, { name: e.target.value })}
             />
-            <label className="unique-toggle" title="Enforce uniqueness">
+            <label className="unique-toggle" title="Unique constraint: enforce distinct values">
               <input
                 type="checkbox"
                 checked={idx.unique}
@@ -47,10 +48,10 @@ export const IndexesEditor: React.FC<IndexesEditorProps> = ({ indexes, available
             <button
               type="button"
               className="mini-btn danger"
-              title="Remove index"
+              title="Remove this index"
               onClick={() => onChange(indexes.filter((i) => i.id !== idx.id))}
             >
-              <Trash2 size={12} />
+              <Trash2 size={13} />
             </button>
           </div>
 
@@ -65,7 +66,7 @@ export const IndexesEditor: React.FC<IndexesEditorProps> = ({ indexes, available
                   type="button"
                   className={`col-chip font-mono ${on ? "on" : ""}`}
                   onClick={() => toggleColumn(idx, col)}
-                  title={on ? `Position ${order} — click to remove` : "Click to add"}
+                  title={on ? `Included in index at position ${order} (click to remove)` : `Click to include "${col}" in index`}
                 >
                   {on && <span className="chip-order">{order}</span>}
                   {col}
@@ -76,8 +77,13 @@ export const IndexesEditor: React.FC<IndexesEditorProps> = ({ indexes, available
         </div>
       ))}
 
-      <button type="button" className="btn btn-secondary add-btn" onClick={() => onChange([...indexes, newIndex()])}>
-        <Plus size={12} />
+      <button
+        type="button"
+        className="btn btn-secondary add-btn"
+        onClick={() => onChange([...indexes, newIndex()])}
+        title="Add a new index definition"
+      >
+        <Plus size={13} />
         <span>Add Index</span>
       </button>
 

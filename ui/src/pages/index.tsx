@@ -760,6 +760,7 @@ export default function Home() {
                 onFiltersChange={setFilters}
                 theme={theme}
                 errorMessage={tableError}
+                onCreateTable={() => setIsCreateTableOpen(true)}
               />
             ) : activeView === "sql" ? (
               <SqlConsole
