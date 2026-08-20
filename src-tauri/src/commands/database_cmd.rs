@@ -1,7 +1,6 @@
 use tauri::{command, State};
 use crate::models::SupportedDB;
-use crate::db_core::{get_pool, execute_query, execute_command_raw, execute_transaction, DbState, TxStep};
-use crate::profiles;
+use crate::db_core::{get_pool, execute_query, execute_command_raw, execute_transaction, escape_sql_literal, resolve_profile, DbState, TxStep};
 
 // ==========================================
 // Dialect Helpers (Postgres / MariaDB / SQLite)
@@ -53,37 +52,108 @@ fn format_sql_value(db_type: SupportedDB, val: &serde_json::Value) -> String {
     }
 }
 
-/// Escapes a string for use inside single quotes. MySQL/MariaDB treat backslash
-/// as an escape character by default, so it must be doubled there too.
-fn escape_sql_literal(db_type: SupportedDB, raw: &str) -> String {
-    match db_type {
-        SupportedDB::Mariadb => raw.replace('\\', "\\\\").replace('\'', "''"),
-        SupportedDB::Postgres | SupportedDB::Sqlite => raw.replace('\'', "''"),
-    }
-}
-
-fn build_filter_clause(db_type: SupportedDB, col: &str, op: &str, val: &str) -> Option<String> {
-    if col.is_empty() {
-        return None;
+/// Builds one `WHERE` clause for a grid filter.
+///
+/// Returns `Err` for anything it cannot express: a filter that is silently
+/// dropped shows the user unfiltered data that looks filtered (the COUNT query
+/// uses the same clause list, so even the total agrees with the wrong rows).
+fn build_filter_clause(
+    db_type: SupportedDB,
+    col: &str,
+    op: &str,
+    val: &serde_json::Value,
+) -> Result<String, String> {
+    if col.trim().is_empty() {
+        return Err(format!("Filter with operator '{}' has no column selected.", op));
     }
     let col_ident = quote_column_ident(db_type, col);
-    let val_escaped = val.replace('\'', "''");
+
+    // Comparisons against NULL never match, so spell them out instead.
+    if val.is_null() {
+        return match op {
+            "equals" | "isNull" => Ok(format!("{} IS NULL", col_ident)),
+            "neq" | "isNotNull" => Ok(format!("{} IS NOT NULL", col_ident)),
+            _ => Err(format!("Operator '{}' cannot be used with an empty value on {}.", op, col)),
+        };
+    }
 
     let clause = match op {
-        "equals" => format!("{} = '{}'", col_ident, val_escaped),
-        "contains" => format!("{} LIKE '%{}%'", col_ident, val_escaped),
-        "startsWith" => format!("{} LIKE '{}%'", col_ident, val_escaped),
-        "endsWith" => format!("{} LIKE '%{}'", col_ident, val_escaped),
-        "gt" => format!("{} > '{}'", col_ident, val_escaped),
-        "gte" => format!("{} >= '{}'", col_ident, val_escaped),
-        "lt" => format!("{} < '{}'", col_ident, val_escaped),
-        "lte" => format!("{} <= '{}'", col_ident, val_escaped),
-        "neq" => format!("{} != '{}'", col_ident, val_escaped),
+        "equals" => format!("{} = {}", col_ident, format_sql_value(db_type, val)),
+        "neq" => format!("{} <> {}", col_ident, format_sql_value(db_type, val)),
+        "gt" => format!("{} > {}", col_ident, format_sql_value(db_type, val)),
+        "gte" => format!("{} >= {}", col_ident, format_sql_value(db_type, val)),
+        "lt" => format!("{} < {}", col_ident, format_sql_value(db_type, val)),
+        "lte" => format!("{} <= {}", col_ident, format_sql_value(db_type, val)),
+        "contains" => like_clause(db_type, &col_ident, val, true, true)?,
+        "startsWith" => like_clause(db_type, &col_ident, val, false, true)?,
+        "endsWith" => like_clause(db_type, &col_ident, val, true, false)?,
         "isNull" => format!("{} IS NULL", col_ident),
         "isNotNull" => format!("{} IS NOT NULL", col_ident),
-        _ => return None,
+        other => return Err(format!("Unsupported filter operator '{}' on column {}.", other, col)),
     };
-    Some(clause)
+    Ok(clause)
+}
+
+fn like_clause(
+    db_type: SupportedDB,
+    col_ident: &str,
+    val: &serde_json::Value,
+    lead: bool,
+    trail: bool,
+) -> Result<String, String> {
+    let raw = match val {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        _ => return Err("LIKE filters need a text value.".to_string()),
+    };
+
+    let mut pattern = String::with_capacity(raw.len() + 2);
+    if lead { pattern.push('%'); }
+    for ch in raw.chars() {
+        if ch == '%' || ch == '_' || ch == LIKE_ESCAPE {
+            pattern.push(LIKE_ESCAPE);
+        }
+        pattern.push(ch);
+    }
+    if trail { pattern.push('%'); }
+
+    Ok(format!(
+        "{} LIKE '{}' ESCAPE '{}'",
+        col_ident,
+        escape_sql_literal(db_type, &pattern),
+        escape_sql_literal(db_type, &LIKE_ESCAPE.to_string())
+    ))
+}
+
+const LIKE_ESCAPE: char = '\\';
+
+fn statement_returns_rows(sql: &str) -> bool {
+    let mut body = String::new();
+    for line in sql.lines() {
+        let line = line.trim_start();
+        if line.starts_with("--") || line.starts_with('#') {
+            continue;
+        }
+        body.push_str(line);
+        body.push(' ');
+    }
+    while let (Some(open), Some(close)) = (body.find("/*"), body.find("*/")) {
+        if close < open { break; }
+        body.replace_range(open..close + 2, " ");
+    }
+    let lowered = body.trim().to_lowercase();
+    if lowered.contains(" returning ") || lowered.ends_with(" returning") {
+        return true;
+    }
+    let first = lowered
+        .split(|c: char| c.is_whitespace() || c == '(' || c == ';')
+        .find(|w| !w.is_empty())
+        .unwrap_or("");
+    matches!(
+        first,
+        "select" | "with" | "show" | "explain" | "describe" | "desc" | "pragma" | "values" | "table" | "analyze"
+    )
 }
 
 // ==========================================
@@ -92,8 +162,7 @@ fn build_filter_clause(db_type: SupportedDB, col: &str, op: &str, val: &str) -> 
 
 #[command]
 pub async fn get_databases(id: String, state: State<'_, DbState>) -> Result<Vec<String>, String> {
-    let profiles = profiles::load_profiles()?;
-    let profile = profiles.iter().find(|p| p.id == id).ok_or("Profile not found")?;
+    let profile = &resolve_profile(&state, &id)?;
     
     let query = match profile.r#type {
         SupportedDB::Postgres => "SELECT datname::text as name FROM pg_database WHERE datistemplate = false ORDER BY datname",
@@ -119,8 +188,7 @@ pub async fn get_databases(id: String, state: State<'_, DbState>) -> Result<Vec<
 
 #[command]
 pub async fn get_tables(id: String, database: String, state: State<'_, DbState>) -> Result<serde_json::Value, String> {
-    let profiles = profiles::load_profiles()?;
-    let profile = profiles.iter().find(|p| p.id == id).ok_or("Profile not found")?;
+    let profile = &resolve_profile(&state, &id)?;
     
     let query = match profile.r#type {
         SupportedDB::Postgres => "
@@ -155,8 +223,7 @@ pub async fn get_tables(id: String, database: String, state: State<'_, DbState>)
 
 #[command]
 pub async fn get_columns(id: String, database: String, table: String, state: State<'_, DbState>) -> Result<serde_json::Value, String> {
-    let profiles = profiles::load_profiles()?;
-    let profile = profiles.iter().find(|p| p.id == id).ok_or("Profile not found")?;
+    let profile = &resolve_profile(&state, &id)?;
     
     let query = match profile.r#type {
         SupportedDB::Postgres => {
@@ -275,29 +342,35 @@ pub async fn get_columns(id: String, database: String, table: String, state: Sta
             SupportedDB::Postgres => {
                 if table.contains('.') {
                     let parts: Vec<&str> = table.splitn(2, '.').collect();
-                    format!("SELECT * FROM \"{}\".\"{}\" LIMIT 0", parts[0].replace('"', ""), parts[1].replace('"', ""))
+                    format!("SELECT * FROM \"{}\".\"{}\" LIMIT 1", parts[0].replace('"', ""), parts[1].replace('"', ""))
                 } else {
-                    format!("SELECT * FROM \"{}\" LIMIT 0", table.replace('"', ""))
+                    format!("SELECT * FROM \"{}\" LIMIT 1", table.replace('"', ""))
                 }
             },
-            SupportedDB::Mariadb => format!("SELECT * FROM `{}` LIMIT 0", table.replace('`', "")),
-            SupportedDB::Sqlite => format!("SELECT * FROM \"{}\" LIMIT 0", table.replace('"', "")),
+            SupportedDB::Mariadb => format!("SELECT * FROM `{}` LIMIT 1", table.replace('`', "")),
+            SupportedDB::Sqlite => format!("SELECT * FROM \"{}\" LIMIT 1", table.replace('"', "")),
         };
-        if let Ok(dummy_rows) = execute_query(&pool, &fallback_query).await {
-            if let Some(first) = dummy_rows.first() {
-                if let Some(obj) = first.as_object() {
-                    for key in obj.keys() {
-                        let mut col_info = serde_json::Map::new();
-                        col_info.insert("name".to_string(), serde_json::Value::String(key.clone()));
-                        col_info.insert("type".to_string(), serde_json::Value::String("text".to_string()));
-                        col_info.insert("nullable".to_string(), serde_json::Value::Bool(true));
-                        col_info.insert("primaryKey".to_string(), serde_json::Value::Bool(key.to_lowercase() == "id"));
-                        col_info.insert("default".to_string(), serde_json::Value::Null);
-                        col_info.insert("autoIncrement".to_string(), serde_json::Value::Bool(key.to_lowercase() == "id"));
-                        columns.push(serde_json::Value::Object(col_info));
-                    }
-                }
+        let dummy_rows = execute_query(&pool, &fallback_query)
+            .await
+            .map_err(|e| format!("Could not read the columns of {}: {}", table, e))?;
+        if let Some(obj) = dummy_rows.first().and_then(|r| r.as_object()) {
+            for key in obj.keys() {
+                let mut col_info = serde_json::Map::new();
+                col_info.insert("name".to_string(), serde_json::Value::String(key.clone()));
+                col_info.insert("type".to_string(), serde_json::Value::String("text".to_string()));
+                col_info.insert("nullable".to_string(), serde_json::Value::Bool(true));
+                col_info.insert("primaryKey".to_string(), serde_json::Value::Bool(key.to_lowercase() == "id"));
+                col_info.insert("default".to_string(), serde_json::Value::Null);
+                col_info.insert("autoIncrement".to_string(), serde_json::Value::Bool(key.to_lowercase() == "id"));
+                columns.push(serde_json::Value::Object(col_info));
             }
+        }
+
+        if columns.is_empty() {
+            return Err(format!(
+                "Could not determine the columns of {}: the catalog lookup returned nothing and the table has no rows to probe.",
+                table
+            ));
         }
     }
     
@@ -317,8 +390,7 @@ pub async fn get_rows(
     filters: Option<Vec<serde_json::Value>>,
     state: State<'_, DbState>
 ) -> Result<serde_json::Value, String> {
-    let profiles = profiles::load_profiles()?;
-    let profile = profiles.iter().find(|p| p.id == id).ok_or("Profile not found")?;
+    let profile = &resolve_profile(&state, &id)?;
     
     let table_ident = quote_table_ident(profile.r#type, &table);
     
@@ -326,15 +398,12 @@ pub async fn get_rows(
     let mut where_clauses = Vec::new();
     if let Some(flts) = filters {
         for f in flts {
-            if let Some(obj) = f.as_object() {
-                let col = obj.get("column").and_then(|v| v.as_str()).unwrap_or("");
-                let op = obj.get("operator").and_then(|v| v.as_str()).unwrap_or("");
-                let val = obj.get("value").and_then(|v| v.as_str()).unwrap_or("");
-                
-                if let Some(clause) = build_filter_clause(profile.r#type, col, op, val) {
-                    where_clauses.push(clause);
-                }
-            }
+            let obj = f.as_object().ok_or("Malformed filter")?;
+            let col = obj.get("column").and_then(|v| v.as_str()).unwrap_or("");
+            let op = obj.get("operator").and_then(|v| v.as_str()).unwrap_or("");
+            let val = obj.get("value").cloned().unwrap_or(serde_json::Value::Null);
+
+            where_clauses.push(build_filter_clause(profile.r#type, col, op, &val)?);
         }
     }
     
@@ -369,14 +438,23 @@ pub async fn get_rows(
         execute_query(&pool, &count_query)
     ) {
         (Ok(r), Ok(c)) => (r, c),
-        _ => {
+        (first_rows, first_count) => {
+            // Retry unquoted for the casing-mismatch case, but report the ORIGINAL
+            // error if that fails too: the retry's error is usually about the bare
+            // identifier and hides the real cause (a bad filter, permissions, ...).
             let unquoted_query = format!("SELECT * FROM {} {} {} LIMIT {} OFFSET {}", table, where_sql, order_sql, limit, offset);
             let unquoted_count = format!("SELECT COUNT(*) AS total FROM {} {}", table, where_sql);
             let (r2, c2) = tokio::join!(
                 execute_query(&pool, &unquoted_query),
                 execute_query(&pool, &unquoted_count)
             );
-            (r2?, c2?)
+            match (r2, c2) {
+                (Ok(r), Ok(c)) => (r, c),
+                _ => {
+                    let original = first_rows.err().or_else(|| first_count.err());
+                    return Err(original.unwrap_or_else(|| "Failed to read table rows".to_string()));
+                }
+            }
         }
     };
     
@@ -400,25 +478,28 @@ pub async fn get_rows(
 
 #[command]
 pub async fn execute_command(id: String, database: String, command: String, state: State<'_, DbState>) -> Result<serde_json::Value, String> {
-    let profiles = profiles::load_profiles()?;
-    let profile = profiles.iter().find(|p| p.id == id).ok_or("Profile not found")?;
+    let profile = &resolve_profile(&state, &id)?;
     let pool = get_pool(&state, profile, Some(&database)).await?;
     
-    // First try fetching rows (for SELECT / EXPLAIN / SHOW / RETURNING)
-    match execute_query(&pool, &command).await {
-        Ok(rows) => Ok(serde_json::json!({ "rows": rows, "affectedRows": rows.len() })),
-        Err(err) => {
-            // If fetch_all failed, try executing as DML/DDL (INSERT/UPDATE/DELETE/CREATE/DROP/ALTER)
-            match execute_command_raw(&pool, &command).await {
-                Ok(affected) => {
-                    Ok(serde_json::json!({ "rows": Vec::<serde_json::Value>::new(), "affectedRows": affected }))
-                }
-                Err(_) => {
-                    // Return the original query error
-                    Err(err)
-                }
-            }
-        }
+    // Row-returning statements go through fetch_all; everything else through
+    // execute(), which is the only call that reports rows_affected. Retrying a
+    // failed statement with the other call would re-run side effects, so we
+    // don't: the classification decides once.
+    if statement_returns_rows(&command) {
+        let rows = execute_query(&pool, &command).await?;
+        let returned = rows.len();
+        Ok(serde_json::json!({
+            "rows": rows,
+            "rowsReturned": returned,
+            "affectedRows": serde_json::Value::Null
+        }))
+    } else {
+        let affected = execute_command_raw(&pool, &command).await?;
+        Ok(serde_json::json!({
+            "rows": Vec::<serde_json::Value>::new(),
+            "rowsReturned": 0,
+            "affectedRows": affected
+        }))
     }
 }
 
@@ -550,8 +631,7 @@ fn build_commit_steps(
 
 #[command]
 pub async fn commit_changes(id: String, database: String, table: String, changes: serde_json::Value, state: State<'_, DbState>) -> Result<serde_json::Value, String> {
-    let profiles = profiles::load_profiles()?;
-    let profile = profiles.iter().find(|p| p.id == id).ok_or("Profile not found")?;
+    let profile = &resolve_profile(&state, &id)?;
 
     let (steps, queries) = build_commit_steps(profile.r#type, &table, &changes)?;
 
@@ -666,5 +746,72 @@ mod tests {
         let (steps, dml) = build_commit_steps(SupportedDB::Sqlite, "t", &changes).unwrap();
         assert_eq!(dml, vec![r#"DELETE FROM "t" WHERE "id" = 3"#]);
         assert!(matches!(steps[0], TxStep::RequireOne { .. }));
+    }
+
+    #[test]
+    fn filter_values_keep_their_type() {
+        let v = serde_json::json!(5);
+        assert_eq!(build_filter_clause(SupportedDB::Postgres, "age", "gt", &v).unwrap(), "\"age\" > 5");
+        let b = serde_json::json!(true);
+        assert_eq!(build_filter_clause(SupportedDB::Mariadb, "ok", "equals", &b).unwrap(), "`ok` = TRUE");
+    }
+
+    #[test]
+    fn like_filters_escape_user_wildcards() {
+        let v = serde_json::json!("50%_x");
+        let sql = build_filter_clause(SupportedDB::Postgres, "note", "contains", &v).unwrap();
+        assert_eq!(sql, r#""note" LIKE '%50\%\_x%' ESCAPE '\'"#);
+    }
+
+    #[test]
+    fn like_filters_double_backslashes_on_mariadb() {
+        let v = serde_json::json!(r"a\b");
+        let sql = build_filter_clause(SupportedDB::Mariadb, "note", "startsWith", &v).unwrap();
+        // One backslash escapes the next in a MySQL literal, so both the escape
+        // marker and the user's own backslash are doubled.
+        assert_eq!(sql, r"`note` LIKE 'a\\\\b%' ESCAPE '\\'");
+    }
+
+    #[test]
+    fn unknown_operator_is_an_error_not_a_dropped_filter() {
+        let v = serde_json::json!("x");
+        let err = build_filter_clause(SupportedDB::Postgres, "c", "between", &v).unwrap_err();
+        assert!(err.contains("Unsupported filter operator"), "{err}");
+        let err = build_filter_clause(SupportedDB::Postgres, "", "equals", &v).unwrap_err();
+        assert!(err.contains("no column selected"), "{err}");
+    }
+
+    #[test]
+    fn null_filter_value_becomes_is_null() {
+        let v = serde_json::Value::Null;
+        assert_eq!(build_filter_clause(SupportedDB::Sqlite, "c", "equals", &v).unwrap(), "\"c\" IS NULL");
+        assert_eq!(build_filter_clause(SupportedDB::Sqlite, "c", "neq", &v).unwrap(), "\"c\" IS NOT NULL");
+    }
+
+    #[test]
+    fn row_returning_statements_are_classified_correctly() {
+        for sql in [
+            "SELECT 1",
+            "  select * from t",
+            "WITH x AS (SELECT 1) SELECT * FROM x",
+            "-- comment\nSELECT 1",
+            "/* hi */ SELECT 1",
+            "UPDATE t SET a = 1 RETURNING id",
+            "SHOW TABLES",
+            "EXPLAIN SELECT 1",
+            "PRAGMA table_info(\"t\")",
+        ] {
+            assert!(statement_returns_rows(sql), "should return rows: {sql}");
+        }
+        for sql in [
+            "UPDATE t SET a = 1",
+            "INSERT INTO t VALUES (1)",
+            "DELETE FROM t",
+            "CREATE TABLE t (id int)",
+            "  alter table t add column b int",
+            "TRUNCATE TABLE t",
+        ] {
+            assert!(!statement_returns_rows(sql), "should not return rows: {sql}");
+        }
     }
 }

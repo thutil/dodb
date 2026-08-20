@@ -1,12 +1,17 @@
 use tauri::{command, State};
 use crate::models::SupportedDB;
-use crate::db_core::{get_pool, execute_query, DbState};
-use crate::profiles;
+use crate::db_core::{close_profile_pools, escape_sql_literal, execute_query, get_pool, resolve_profile, DbState};
+
+fn is_valid_host(host: &str) -> bool {
+    !host.is_empty()
+        && host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '%' | '-' | ':'))
+}
 
 #[command]
 pub async fn admin_get_users(id: String, database: String, state: State<'_, DbState>) -> Result<Vec<serde_json::Value>, String> {
-    let profiles = profiles::load_profiles()?;
-    let profile = profiles.iter().find(|p| p.id == id).ok_or("Profile not found")?;
+    let profile = &resolve_profile(&state, &id)?;
     let pool = get_pool(&state, profile, Some(&database)).await?;
     
     let query = match profile.r#type {
@@ -15,7 +20,9 @@ pub async fn admin_get_users(id: String, database: String, state: State<'_, DbSt
         SupportedDB::Sqlite => return Ok(vec![]),
     };
     
-    let rows = execute_query(&pool, query).await.unwrap_or_default();
+    let rows = execute_query(&pool, query)
+        .await
+        .map_err(|e| format!("Could not list users: {}", e))?;
     let mut users = Vec::new();
     for r in rows {
         if let Some(obj) = r.as_object() {
@@ -38,8 +45,7 @@ pub async fn admin_get_users(id: String, database: String, state: State<'_, DbSt
 
 #[command]
 pub async fn admin_get_processes(id: String, database: String, state: State<'_, DbState>) -> Result<Vec<serde_json::Value>, String> {
-    let profiles = profiles::load_profiles()?;
-    let profile = profiles.iter().find(|p| p.id == id).ok_or("Profile not found")?;
+    let profile = &resolve_profile(&state, &id)?;
     let pool = get_pool(&state, profile, Some(&database)).await?;
     
     let query = match profile.r#type {
@@ -48,14 +54,15 @@ pub async fn admin_get_processes(id: String, database: String, state: State<'_, 
         SupportedDB::Sqlite => return Ok(vec![]),
     };
     
-    let rows = execute_query(&pool, query).await.unwrap_or_default();
+    let rows = execute_query(&pool, query)
+        .await
+        .map_err(|e| format!("Could not list processes: {}", e))?;
     Ok(rows)
 }
 
 #[command]
 pub async fn admin_create_database(id: String, database: String, name: String, state: State<'_, DbState>) -> Result<(), String> {
-    let profiles = profiles::load_profiles()?;
-    let profile = profiles.iter().find(|p| p.id == id).ok_or("Profile not found")?;
+    let profile = &resolve_profile(&state, &id)?;
     let pool = get_pool(&state, profile, Some(&database)).await?;
     
     let clean_name = name.trim();
@@ -69,39 +76,46 @@ pub async fn admin_create_database(id: String, database: String, name: String, s
         SupportedDB::Sqlite => return Ok(()),
     };
     
-    execute_query(&pool, &query).await.map(|_| ())
+    execute_query(&pool, &query).await?;
+    // The pool cache is keyed per database name; clear it so a later connect
+    // to this name builds a fresh pool instead of reusing a stale entry.
+    close_profile_pools(&state, Some(&profile.id)).await?;
+    Ok(())
 }
 
 #[command]
 pub async fn admin_drop_database(id: String, database: String, name: String, state: State<'_, DbState>) -> Result<(), String> {
-    let profiles = profiles::load_profiles()?;
-    let profile = profiles.iter().find(|p| p.id == id).ok_or("Profile not found")?;
-    let pool = get_pool(&state, profile, Some(&database)).await?;
-    
+    let profile = &resolve_profile(&state, &id)?;
+
     let clean_name = name.trim();
     if clean_name.is_empty() {
         return Err("Database name cannot be empty".to_string());
     }
-    
+
     let query = match profile.r#type {
         SupportedDB::Postgres => format!("DROP DATABASE \"{}\"", clean_name.replace("\"", "\"\"")),
         SupportedDB::Mariadb => format!("DROP DATABASE `{}`", clean_name.replace("`", "``")),
         SupportedDB::Sqlite => return Ok(()),
     };
-    
-    execute_query(&pool, &query).await.map(|_| ())
+    close_profile_pools(&state, Some(&profile.id)).await?;
+
+    let pool = get_pool(&state, profile, Some(&database)).await?;
+    execute_query(&pool, &query).await?;
+    Ok(())
 }
 
 #[command]
 pub async fn admin_create_user(id: String, database: String, username: String, password: String, is_superuser: bool, state: State<'_, DbState>) -> Result<(), String> {
-    let profiles = profiles::load_profiles()?;
-    let profile = profiles.iter().find(|p| p.id == id).ok_or("Profile not found")?;
+    let profile = &resolve_profile(&state, &id)?;
     let pool = get_pool(&state, profile, Some(&database)).await?;
     
     let u = username.trim();
-    let p = password.trim().replace("'", "''");
     if u.is_empty() { return Err("Username cannot be empty".to_string()); }
-    
+    if password.is_empty() { return Err("Password cannot be empty".to_string()); }
+    // Do NOT trim the password: the account would end up with a different
+    // password than the one the user typed.
+    let p = escape_sql_literal(profile.r#type, &password);
+
     match profile.r#type {
         SupportedDB::Postgres => {
             let u_esc = u.replace("\"", "\"\"");
@@ -118,7 +132,9 @@ pub async fn admin_create_user(id: String, database: String, username: String, p
             execute_query(&pool, &sql).await?;
             if is_superuser {
                 let grant_sql = format!("GRANT ALL PRIVILEGES ON *.* TO `{}`@'%' WITH GRANT OPTION", u_esc);
-                let _ = execute_query(&pool, &grant_sql).await;
+                execute_query(&pool, &grant_sql)
+                    .await
+                    .map_err(|e| format!("User {} was created but the privilege grant failed: {}", u, e))?;
             }
             Ok(())
         }
@@ -128,8 +144,7 @@ pub async fn admin_create_user(id: String, database: String, username: String, p
 
 #[command]
 pub async fn admin_drop_user(id: String, database: String, username: String, host: Option<String>, state: State<'_, DbState>) -> Result<(), String> {
-    let profiles = profiles::load_profiles()?;
-    let profile = profiles.iter().find(|p| p.id == id).ok_or("Profile not found")?;
+    let profile = &resolve_profile(&state, &id)?;
     let pool = get_pool(&state, profile, Some(&database)).await?;
     
     let u = username.trim();
@@ -142,7 +157,10 @@ pub async fn admin_drop_user(id: String, database: String, username: String, hos
         }
         SupportedDB::Mariadb => {
             let h = host.unwrap_or_else(|| "%".to_string());
-            let sql = format!("DROP USER `{}`@'{}'", u.replace("`", "``"), h.replace("'", "''"));
+            if !is_valid_host(&h) {
+                return Err(format!("'{}' is not a valid host pattern.", h));
+            }
+            let sql = format!("DROP USER `{}`@'{}'", u.replace("`", "``"), h);
             execute_query(&pool, &sql).await.map(|_| ())
         }
         SupportedDB::Sqlite => Ok(()),
@@ -151,19 +169,38 @@ pub async fn admin_drop_user(id: String, database: String, username: String, hos
 
 #[command]
 pub async fn admin_kill_process(id: String, database: String, pid: String, state: State<'_, DbState>) -> Result<(), String> {
-    let profiles = profiles::load_profiles()?;
-    let profile = profiles.iter().find(|p| p.id == id).ok_or("Profile not found")?;
+    let profile = &resolve_profile(&state, &id)?;
     let pool = get_pool(&state, profile, Some(&database)).await?;
     
+    let pid_num: i64 = pid
+        .trim()
+        .parse()
+        .map_err(|_| format!("'{}' is not a valid process id.", pid))?;
+
     match profile.r#type {
         SupportedDB::Postgres => {
-            let sql = format!("SELECT pg_terminate_backend({})", pid);
+            let sql = format!("SELECT pg_terminate_backend({})", pid_num);
             execute_query(&pool, &sql).await.map(|_| ())
         }
         SupportedDB::Mariadb => {
-            let sql = format!("KILL {}", pid);
+            let sql = format!("KILL {}", pid_num);
             execute_query(&pool, &sql).await.map(|_| ())
         }
         SupportedDB::Sqlite => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn host_patterns_are_validated_not_escaped() {
+        assert!(is_valid_host("%"));
+        assert!(is_valid_host("localhost"));
+        assert!(is_valid_host("10.0.%"));
+        assert!(!is_valid_host(""));
+        assert!(!is_valid_host("' OR 1=1 --"));
+        assert!(!is_valid_host("host'; DROP USER x"));
     }
 }

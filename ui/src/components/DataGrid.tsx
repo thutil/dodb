@@ -151,7 +151,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
   }, [isExportMenuOpen]);
 
   // Active Inline Editing Cell
-  const [editingCell, setEditingCell] = useState<{ pkKey: string; isNew: boolean; nIdx?: number; colName: string } | null>(null);
+  const [editingCell, setEditingCell] = useState<{ pkKey: string; isNew: boolean; nIdx?: number; colName: string; originalVal: unknown } | null>(null);
   const [editValue, setEditValue] = useState<string>("");
 
   const isDateTimeColumn = (colType: string = ""): boolean => {
@@ -260,17 +260,25 @@ export const DataGrid: React.FC<DataGridProps> = ({
 
   // Handle Cell Double Click to start inline editing
   const startEditing = (pkKey: string, isNew: boolean, nIdx: number | undefined, colName: string, currentVal: unknown) => {
-    setEditingCell({ pkKey, isNew, nIdx, colName });
+    setEditingCell({ pkKey, isNew, nIdx, colName, originalVal: currentVal });
     setEditValue(currentVal === null || currentVal === undefined || currentVal === "__AUTO__" ? "" : String(currentVal));
   };
 
   // Save inline cell edit
   const saveCellEdit = () => {
     if (!editingCell) return;
-    const { pkKey, isNew, nIdx, colName } = editingCell;
-    
-    const col = columns.find((c) => c.name === colName);
-    const value = coerceCellValue(col, editValue);
+    const { pkKey, isNew, nIdx, colName, originalVal } = editingCell;
+
+    // A NULL cell is shown as an empty box; leaving it empty must keep it NULL
+    // rather than writing an empty string over it.
+    const wasNullAndStillEmpty = originalVal === null && editValue === "";
+    const value = wasNullAndStillEmpty ? null : coerceCellValue(columns.find((c) => c.name === colName), editValue);
+
+    if (!isNew && value === originalVal) {
+      // Nothing actually changed - don't queue a pending update for it.
+      setEditingCell(null);
+      return;
+    }
 
     if (isNew && nIdx !== undefined) {
       setNewRows((prev) => {

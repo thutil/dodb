@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { ConnectionProfile } from "../types";
 
 export const apiClient = {
   getProfiles: async () => {
@@ -14,6 +15,14 @@ export const apiClient = {
   },
   deleteProfile: async (id: string) => {
     return await invoke("delete_profile", { id });
+  },
+  // Connect without saving: the backend keeps the connection in memory only and
+  // returns it with a "session-" id that every other command accepts.
+  registerSessionProfile: async (profile: unknown) => {
+    return await invoke<ConnectionProfile>("register_session_profile", { profile });
+  },
+  unregisterSessionProfile: async (id: string) => {
+    return await invoke("unregister_session_profile", { id });
   },
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   testConnection: async (profile: any) => {

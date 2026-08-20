@@ -28,10 +28,13 @@ interface ConnectionModalProps {
   onClose: () => void;
   profiles: ConnectionProfile[];
   activeProfile?: ConnectionProfile | null;
-  onSaveProfile: (profile: Partial<ConnectionProfile>) => Promise<void>;
+  onSaveProfile: (profile: Partial<ConnectionProfile>) => Promise<ConnectionProfile | void>;
   onSaveAllProfiles?: (profiles: ConnectionProfile[]) => Promise<void>;
   onDeleteProfile: (id: string) => Promise<void>;
-  onConnect: (profile: ConnectionProfile) => void;
+  onConnect: (
+    profile: ConnectionProfile,
+    opts?: { ephemeral?: boolean }
+  ) => Promise<{ success: boolean; error?: string }> | void;
   onDisconnect?: () => Promise<void> | void;
   onTestConnection: (profile: Partial<ConnectionProfile>) => Promise<{ success: boolean; message?: string; error?: string }>;
 }
@@ -86,6 +89,8 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
   const [renamingGroup, setRenamingGroup] = useState<{ oldName: string; newName: string } | null>(null);
   const [deletingGroup, setDeletingGroup] = useState<string | null>(null);
   const [confirmDeleteProfile, setConfirmDeleteProfile] = useState<ConnectionProfile | null>(null);
+  // Set when Connect is pressed on a saved profile that has unsaved edits.
+  const [pendingConnect, setPendingConnect] = useState<Partial<ConnectionProfile> | null>(null);
 
   // Close context menu when clicking outside
   useEffect(() => {
@@ -99,7 +104,9 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        if (confirmDeleteProfile) {
+        if (pendingConnect) {
+          setPendingConnect(null);
+        } else if (confirmDeleteProfile) {
           setConfirmDeleteProfile(null);
         } else if (deletingGroup) {
           setDeletingGroup(null);
@@ -114,7 +121,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, confirmDeleteProfile, deletingGroup, renamingGroup, groupContextMenu, onClose]);
+  }, [isOpen, pendingConnect, confirmDeleteProfile, deletingGroup, renamingGroup, groupContextMenu, onClose]);
 
   const availableGroups = useMemo(() => {
     return Array.from(
@@ -245,31 +252,67 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
     }
   };
 
+  // True when the form differs from the saved profile it was loaded from.
+  // Connecting would otherwise use the stored credentials while showing the
+  // edited ones, because the backend looks the profile up by id.
+  const isFormDirty = (): boolean => {
+    if (selectedId === "__NEW__") return false;
+    const saved = profiles.find((p) => p.id === selectedId);
+    if (!saved) return false;
+    const current = getCleanForm();
+    const fields: (keyof ConnectionProfile)[] = [
+      "name", "type", "host", "port", "user", "password", "database", "filePath", "group",
+    ];
+    return fields.some((f) => {
+      const a = current[f] ?? "";
+      const b = saved[f] ?? "";
+      return String(a) !== String(b);
+    });
+  };
+
+  /// Tests the connection, hands it to the app, and only closes the modal when
+  /// the app could actually use it.
+  const connectWith = async (data: Partial<ConnectionProfile>, ephemeral: boolean) => {
+    setConnecting(true);
+    setTestResult(null);
+    try {
+      const res = await onTestConnection(data);
+      if (!res.success) {
+        setTestResult({ success: false, text: `Connection failed: ${res.error || "Could not reach database"}` });
+        return;
+      }
+      const outcome = await onConnect(data as ConnectionProfile, { ephemeral });
+      if (outcome && !outcome.success) {
+        setTestResult({ success: false, text: outcome.error || "Connected, but the database list could not be loaded." });
+        return;
+      }
+      setTestResult({
+        success: true,
+        text: ephemeral ? "Connected (this session only - not saved)" : "Connected successfully!",
+      });
+      onClose();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setTestResult({ success: false, text: `Connection error: ${msg}` });
+    } finally {
+      setConnecting(false);
+    }
+  };
+
   const handleConnect = async () => {
     const cleanData = getCleanForm();
     if (cleanData.type !== "sqlite" && !cleanData.host) return;
     if (cleanData.type === "sqlite" && !cleanData.filePath && !cleanData.database) return;
 
-    setConnecting(true);
-    setTestResult(null);
-    try {
-      const res = await onTestConnection(cleanData);
-      if (res.success) {
-        setTestResult({ success: true, text: "Connected successfully!" });
-        onConnect(cleanData as ConnectionProfile);
-        setTimeout(() => {
-          onClose();
-        }, 300);
-      } else {
-        setTestResult({ success: false, text: `Connection failed: ${res.error || "Could not reach database"}` });
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setTestResult({ success: false, text: `Connection error: ${msg}` });
-      setConnecting(false);
-    } finally {
-      setConnecting(false);
+    // A saved profile with pending edits: let the user decide which values to use.
+    if (isFormDirty()) {
+      setPendingConnect(cleanData);
+      return;
     }
+
+    // A brand-new form has no saved profile behind it, so connect it as a
+    // session-only connection instead of failing silently.
+    await connectWith(cleanData, selectedId === "__NEW__");
   };
 
   const handleConnectDirectly = async (profile: ConnectionProfile) => {
@@ -279,7 +322,11 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
     try {
       const res = await onTestConnection(profile);
       if (res.success) {
-        onConnect(profile);
+        const outcome = await onConnect(profile);
+        if (outcome && !outcome.success) {
+          setTestResult({ success: false, text: outcome.error || "Connected, but the database list could not be loaded." });
+          return;
+        }
         onClose();
       } else {
         setTestResult({ success: false, text: `Connection failed: ${res.error || "Could not reach database"}` });
@@ -1037,6 +1084,62 @@ if (!isOpen) return null;
               </button>
               <button className="btn btn-secondary cancel-choice-btn" onClick={() => setDeletingGroup(null)}>
                 Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Unsaved-edits Connect Choice */}
+      {pendingConnect && (
+        <div className="submodal-overlay" onClick={() => setPendingConnect(null)}>
+          <div className="submodal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="submodal-header">
+              <AlertTriangle size={14} />
+              <span>Unsaved changes</span>
+            </div>
+            <div className="submodal-body">
+              <p className="submodal-desc">
+                This profile has edits that are not saved. Connecting with the saved values would
+                ignore them - which values should be used?
+              </p>
+            </div>
+            <div className="submodal-actions">
+              <button className="btn btn-secondary" onClick={() => setPendingConnect(null)}>
+                Cancel
+              </button>
+              <button
+                className="btn btn-secondary"
+                onClick={async () => {
+                  const data = pendingConnect;
+                  setPendingConnect(null);
+                  // Session-only: the edited values are used, nothing is written to disk.
+                  await connectWith({ ...data, id: undefined }, true);
+                }}
+              >
+                <Zap size={12} />
+                <span>Connect without saving</span>
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={async () => {
+                  const data = pendingConnect;
+                  setPendingConnect(null);
+                  setSaving(true);
+                  try {
+                    const saved = (await onSaveProfile(data as Partial<ConnectionProfile>)) as ConnectionProfile | undefined;
+                    if (saved && saved.id) setSelectedId(saved.id);
+                    await connectWith(saved && saved.id ? saved : (data as Partial<ConnectionProfile>), false);
+                  } catch (err: unknown) {
+                    const msg = err instanceof Error ? err.message : String(err);
+                    setTestResult({ success: false, text: `Save failed: ${msg}` });
+                  } finally {
+                    setSaving(false);
+                  }
+                }}
+              >
+                <CheckCircle2 size={12} />
+                <span>Save &amp; Connect</span>
               </button>
             </div>
           </div>

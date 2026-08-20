@@ -42,19 +42,18 @@ jobs:
           pnpm install --no-frozen-lockfile
           pnpm --prefix ui install --no-frozen-lockfile
 
+      # `pnpm build` is `tauri build`, which runs `pnpm build:ui` itself
+      # (beforeBuildCommand) and writes the installers under
+      # src-tauri/target/release/bundle.
       - name: Build Backend & Frontend
         run: pnpm build
-
-      - name: Build macOS Artifacts
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: pnpm dist:mac
 
       - name: Upload Release Binaries
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist-builds/*
+            src-tauri/target/release/bundle/dmg/*.dmg
+            src-tauri/target/release/bundle/macos/*.app.tar.gz
           draft: false
           prerelease: false
           generate_release_notes: true

@@ -10,11 +10,14 @@ import { DataGrid, PendingChanges, CommitResult } from "../components/DataGrid";
 import { SqlConsole } from "../components/SqlConsole";
 import { AdminPanel } from "../components/AdminPanel";
 import { SchemaDiagram } from "../components/SchemaDiagram";
+import { AlertCircle, X } from "lucide-react";
 import { ConnectionProfile, ColumnInfo, TableRowData, QueryExecutionResult, ColumnFilter } from "../types";
 import { apiClient } from "../utils/apiClient";
 import { auditLogger } from "../utils/auditLogger";
 
 const APP_VERSION = "1.0.0";
+const SESSION_ID_PREFIX = "session-";
+
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:5820/api";
 
 
@@ -40,6 +43,9 @@ export default function Home() {
   const [totalRows, setTotalRows] = useState(0);
   const [loadingData, setLoadingData] = useState(false);
   const [tableError, setTableError] = useState<string | null>(null);
+  // Connection-level failures (database/table listing). Rendered as a banner so
+  // a failed connection can never look like an empty database.
+  const [connectionError, setConnectionError] = useState<string | null>(null);
 
   // Pagination & Filtering
   const [page, setPage] = useState(0);
@@ -117,6 +123,9 @@ export default function Home() {
     try {
       if (activeProfile) {
         await apiClient.disconnectDatabase(activeProfile.id);
+        if (activeProfile.id.startsWith(SESSION_ID_PREFIX)) {
+          await apiClient.unregisterSessionProfile(activeProfile.id);
+        }
       } else {
         await apiClient.disconnectDatabase();
       }
@@ -138,27 +147,28 @@ export default function Home() {
     fetchProfiles();
   }, [fetchProfiles]);
 
+  // Loads the database list for a profile and returns it. Throws on failure so
+  // callers can report it instead of showing an empty list.
+  const loadDatabasesFor = useCallback(async (profile: ConnectionProfile) => {
+    const dbList = (await apiClient.getDatabases(profile.id)) as string[];
+    setDatabases(dbList);
+    if (dbList.length > 0) {
+      const defaultDb = dbList.includes(profile.database) ? profile.database : dbList[0];
+      setActiveDatabase(defaultDb);
+    }
+    setConnectionError(null);
+    return dbList;
+  }, []);
+
   const fetchDatabases = useCallback(async () => {
     if (!activeProfile) return;
     try {
-      const dbList: any = await apiClient.getDatabases(activeProfile.id);
-      setDatabases(dbList);
-      if (dbList.length > 0) {
-        const defaultDb = dbList.includes(activeProfile.database)
-          ? activeProfile.database
-          : dbList[0];
-        setActiveDatabase(defaultDb);
-      }
+      await loadDatabasesFor(activeProfile);
     } catch (err) {
-      console.error("Fetch databases error", err);
+      const msg = typeof err === "string" ? err : (err as Error)?.message || String(err);
+      setConnectionError(`Could not list databases: ${msg}`);
     }
-  }, [activeProfile]);
-
-  useEffect(() => {
-    if (activeProfile) {
-      fetchDatabases();
-    }
-  }, [activeProfile, fetchDatabases]);
+  }, [activeProfile, loadDatabasesFor]);
 
   const fetchTables = useCallback(async () => {
     if (!activeProfile || !activeDatabase) return;
@@ -178,7 +188,8 @@ export default function Home() {
         setActiveTable(null);
       }
     } catch (err) {
-      console.error("Fetch tables error", err);
+      const msg = typeof err === "string" ? err : (err as Error)?.message || String(err);
+      setConnectionError(`Could not list tables in ${activeDatabase}: ${msg}`);
     } finally {
       setLoadingTables(false);
     }
@@ -242,14 +253,38 @@ export default function Home() {
   }, [activeDatabase, activeTable, page, sortColumn, sortOrder, searchQuery, filters, fetchTableData]);
 
   const handleSaveProfile = async (profileData: Partial<ConnectionProfile>) => {
+    const previous = activeProfile;
+    let saved: ConnectionProfile;
     try {
-      const saved: any = await apiClient.saveProfile(profileData);
-      await fetchProfiles();
-      setActiveProfile(saved);
+      saved = (await apiClient.saveProfile(profileData)) as ConnectionProfile;
     } catch (err: any) {
       const msg = typeof err === "string" ? err : err?.message || String(err);
       throw new Error(msg || "Save profile failed");
     }
+
+    await fetchProfiles();
+    setActiveProfile(saved);
+
+    // Saving an unsaved connection promotes it to a real profile: release the
+    // session entry so its pooled connections are not left behind.
+    if (previous?.id?.startsWith(SESSION_ID_PREFIX) && previous.id !== saved.id) {
+      apiClient
+        .unregisterSessionProfile(previous.id)
+        .catch((err) => console.warn("Could not release the session connection", err));
+    }
+
+    // Switching to a different connection needs its own database list.
+    if (previous?.id !== saved.id) {
+      try {
+        await loadDatabasesFor(saved);
+      } catch (err) {
+        const msg = typeof err === "string" ? err : (err as Error)?.message || String(err);
+        setConnectionError(`Could not list databases: ${msg}`);
+      }
+    }
+
+    // The connection dialog uses this to track the profile it just saved.
+    return saved;
   };
 
   const handleSaveAllProfiles = async (newProfiles: ConnectionProfile[]) => {
@@ -262,9 +297,40 @@ export default function Home() {
     }
   };
 
-  const handleSwitchProfile = (profile: ConnectionProfile) => {
+  const handleSwitchProfile = async (
+    profile: ConnectionProfile,
+    opts?: { ephemeral?: boolean }
+  ): Promise<{ success: boolean; error?: string }> => {
+    let target = profile;
+
+    if (opts?.ephemeral) {
+      // Register the connection in the backend's in-memory table so every
+      // command can address it by id - without writing it to profiles.json.
+      try {
+        target = await apiClient.registerSessionProfile({ ...profile, id: undefined });
+      } catch (err) {
+        const msg = typeof err === "string" ? err : (err as Error)?.message || String(err);
+        return { success: false, error: `Could not start the connection: ${msg}` };
+      }
+    } else if (!profile.id) {
+      return {
+        success: false,
+        error: "This connection has not been saved yet, so it has no id. Save it first, or connect without saving.",
+      };
+    }
+
+    // Release a previous unsaved connection; it can never be returned to.
+    const previous = activeProfile;
+    if (previous?.id && previous.id.startsWith(SESSION_ID_PREFIX) && previous.id !== target.id) {
+      try {
+        await apiClient.unregisterSessionProfile(previous.id);
+      } catch (err) {
+        console.warn("Could not release the previous session connection", err);
+      }
+    }
+
     fetchSeqRef.current += 1;
-    setActiveProfile(profile);
+    setActiveProfile(target);
     setActiveDatabase("");
     setDatabases([]);
     setTables([]);
@@ -273,7 +339,22 @@ export default function Home() {
     setRows([]);
     setTotalRows(0);
     setPage(0);
+    setConnectionError(null);
+    setTableError(null);
+
+    // Load the database list here so the caller learns whether the connection
+    // is actually usable, instead of the modal closing on a green message.
+    try {
+      await loadDatabasesFor(target);
+    } catch (err) {
+      const msg = typeof err === "string" ? err : (err as Error)?.message || String(err);
+      const text = `Connected, but the database list could not be loaded: ${msg}`;
+      setConnectionError(text);
+      return { success: false, error: text };
+    }
+
     setIsConnModalOpen(false);
+    return { success: true };
   };
 
   const handleDeleteProfile = async (id: string) => {
@@ -332,7 +413,12 @@ export default function Home() {
       );
       const duration = Math.round(performance.now() - start);
       const rows = Array.isArray(data) ? data : data.rows || [];
-      const affected = data.affectedRows ?? data.rowCount ?? (Array.isArray(data) ? data.length : 0);
+      // The backend reports these separately: a query returns rows, a DML
+      // statement affects rows. Conflating them made every UPDATE read as
+      // "0 rows affected".
+      const rowsReturned: number = data.rowsReturned ?? rows.length;
+      const affected: number | null =
+        typeof data.affectedRows === "number" ? data.affectedRows : null;
 
       // Determine action type from SQL command
       const trimmed = sql.trim().toUpperCase();
@@ -351,10 +437,10 @@ export default function Home() {
         sql,
         status: "SUCCESS",
         executionTimeMs: duration,
-        affectedRows: affected,
+        affectedRows: affected ?? rowsReturned,
       });
 
-      return { rows, affectedRows: affected };
+      return { rows, rowsReturned, affectedRows: affected };
     } catch (err: any) {
       const duration = Math.round(performance.now() - start);
       const msg = typeof err === "string" ? err : err?.message || String(err);
@@ -516,6 +602,19 @@ export default function Home() {
           )}
 
           <main className="app-content">
+            {connectionError && (
+              <div className="connection-error-banner" role="alert">
+                <AlertCircle size={14} />
+                <span className="connection-error-text">{connectionError}</span>
+                <button
+                  className="connection-error-dismiss"
+                  onClick={() => setConnectionError(null)}
+                  title="Dismiss"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            )}
             {activeView === "explorer" ? (
               <DataGrid
                 activeProfile={activeProfile}
@@ -614,6 +713,14 @@ export default function Home() {
             <span className="footer-status">
               DB Engine: {activeProfile ? activeProfile.type.toUpperCase() : "Offline"}
             </span>
+            {activeProfile?.id?.startsWith(SESSION_ID_PREFIX) && (
+              <>
+                <span className="footer-dot">•</span>
+                <span className="footer-unsaved" title="This connection was not saved and disappears when the app closes">
+                  Unsaved connection
+                </span>
+              </>
+            )}
           </div>
           <div className="footer-right">
             <span className="footer-text">Native Tauri IPC</span>
@@ -643,6 +750,38 @@ export default function Home() {
           display: flex;
           flex-direction: column;
           overflow: hidden;
+        }
+
+        .connection-error-banner {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 8px 12px;
+          background: var(--bg-tertiary);
+          border-bottom: 1px solid var(--accent-red, #ef4444);
+          color: var(--accent-red, #ef4444);
+          font-size: 12px;
+          flex-shrink: 0;
+        }
+
+        .connection-error-text {
+          flex: 1;
+          line-height: 1.4;
+          word-break: break-word;
+        }
+
+        .connection-error-dismiss {
+          background: transparent;
+          border: none;
+          color: inherit;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          padding: 2px;
+        }
+
+        .footer-unsaved {
+          color: var(--accent-amber, #f59e0b);
         }
 
         .app-footer {

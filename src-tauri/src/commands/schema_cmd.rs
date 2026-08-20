@@ -1,7 +1,6 @@
 use tauri::{command, State};
 use crate::models::SupportedDB;
-use crate::db_core::{get_pool, execute_query, execute_command_raw, DbState};
-use crate::profiles;
+use crate::db_core::{escape_sql_literal, execute_command_raw, execute_query, get_pool, resolve_profile, DbState};
 
 // ==========================================
 // Local dialect helpers
@@ -19,13 +18,10 @@ fn split_schema_table(table: &str) -> (String, String) {
     }
 }
 
-/// Escape a value for use inside a single-quoted SQL string literal.
-fn sql_str(v: &str) -> String {
-    v.replace('\'', "''")
+fn sql_str_for(db_type: SupportedDB, v: &str) -> String {
+    escape_sql_literal(db_type, v)
 }
 
-/// Read a JSON field as bool, tolerating the int/string shapes different
-/// drivers hand back for boolean-ish columns.
 fn as_flag(obj: &serde_json::Map<String, serde_json::Value>, key: &str) -> bool {
     match obj.get(key) {
         Some(v) => v
@@ -158,8 +154,7 @@ pub async fn get_table_constraints(
     table: String,
     state: State<'_, DbState>,
 ) -> Result<serde_json::Value, String> {
-    let profiles = profiles::load_profiles()?;
-    let profile = profiles.iter().find(|p| p.id == id).ok_or("Profile not found")?;
+    let profile = &resolve_profile(&state, &id)?;
     let pool = get_pool(&state, profile, Some(&database)).await?;
 
     let (schema, tbl) = split_schema_table(&table);
@@ -178,8 +173,6 @@ pub async fn get_table_constraints(
         }
 
         SupportedDB::Postgres => {
-            // pg_get_indexdef(indexrelid, n, true) yields the n-th key column
-            // expression, which avoids casting the int2vector `indkey`.
             let idx_query = format!(
                 "
                 SELECT
@@ -192,15 +185,15 @@ pub async fn get_table_constraints(
                 JOIN pg_class i ON i.oid = ix.indexrelid
                 JOIN pg_class t ON t.oid = ix.indrelid
                 JOIN pg_namespace ns ON ns.oid = t.relnamespace
-                CROSS JOIN generate_series(1, ix.indnatts) AS s(n)
+                CROSS JOIN generate_series(1, ix.indnkeyatts) AS s(n)
                 WHERE t.relname = '{0}' AND ns.nspname = '{1}'
                 ORDER BY i.relname, s.n
                 ",
-                sql_str(&tbl),
-                sql_str(&schema)
+                sql_str_for(profile.r#type, &tbl),
+                sql_str_for(profile.r#type, &schema)
             );
 
-            for row in execute_query(&pool, &idx_query).await.unwrap_or_default() {
+            for row in execute_query(&pool, &idx_query).await.map_err(|e| format!("Could not read the indexes of this table: {}", e))? {
                 if let Some(obj) = row.as_object() {
                     let name = as_text(obj, "index_name");
                     let col = as_text(obj, "column_name");
@@ -248,11 +241,11 @@ pub async fn get_table_constraints(
                   AND rk.ord = k.ord
                 ORDER BY con.conname, k.ord
                 ",
-                sql_str(&tbl),
-                sql_str(&schema)
+                sql_str_for(profile.r#type, &tbl),
+                sql_str_for(profile.r#type, &schema)
             );
 
-            for row in execute_query(&pool, &fk_query).await.unwrap_or_default() {
+            for row in execute_query(&pool, &fk_query).await.map_err(|e| format!("Could not read the foreign keys of this table: {}", e))? {
                 if let Some(obj) = row.as_object() {
                     let name = as_text(obj, "fk_name");
                     if name.is_empty() {
@@ -282,7 +275,7 @@ pub async fn get_table_constraints(
         SupportedDB::Mariadb => {
             let idx_query = format!("SHOW INDEX FROM `{}`", tbl.replace('`', ""));
 
-            for row in execute_query(&pool, &idx_query).await.unwrap_or_default() {
+            for row in execute_query(&pool, &idx_query).await.map_err(|e| format!("Could not read the indexes of this table: {}", e))? {
                 if let Some(obj) = row.as_object() {
                     let name = as_text(obj, "Key_name");
                     let col = as_text(obj, "Column_name");
@@ -324,10 +317,10 @@ pub async fn get_table_constraints(
                   AND k.REFERENCED_TABLE_NAME IS NOT NULL
                 ORDER BY k.CONSTRAINT_NAME, k.ORDINAL_POSITION
                 ",
-                sql_str(&tbl)
+                sql_str_for(profile.r#type, &tbl)
             );
 
-            for row in execute_query(&pool, &fk_query).await.unwrap_or_default() {
+            for row in execute_query(&pool, &fk_query).await.map_err(|e| format!("Could not read the foreign keys of this table: {}", e))? {
                 if let Some(obj) = row.as_object() {
                     let name = as_text(obj, "fk_name");
                     if name.is_empty() {
@@ -386,8 +379,7 @@ pub async fn execute_ddl(
     statements: Vec<String>,
     state: State<'_, DbState>,
 ) -> Result<serde_json::Value, String> {
-    let profiles = profiles::load_profiles()?;
-    let profile = profiles.iter().find(|p| p.id == id).ok_or("Profile not found")?;
+    let profile = &resolve_profile(&state, &id)?;
     let pool = get_pool(&state, profile, Some(&database)).await?;
 
     let runnable: Vec<String> = statements

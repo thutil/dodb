@@ -13,14 +13,54 @@ pub enum DbPool {
 
 pub struct DbState {
     pub pools: Mutex<HashMap<String, DbPool>>,
+    /// Connections the user is using without saving them. They live only for
+    /// the lifetime of the app process and are never written to profiles.json.
+    pub session_profiles: Mutex<HashMap<String, ConnectionProfile>>,
 }
 
 impl Default for DbState {
     fn default() -> Self {
         Self {
             pools: Mutex::new(HashMap::new()),
+            session_profiles: Mutex::new(HashMap::new()),
         }
     }
+}
+
+/// Prefix that marks a connection as unsaved (session-only).
+pub const SESSION_ID_PREFIX: &str = "session-";
+
+/// Finds the connection a command should use: unsaved session connections
+/// first, then the profiles on disk. Every data command resolves its `id`
+/// through here, so an unsaved connection works exactly like a saved one.
+pub fn resolve_profile(state: &State<'_, DbState>, id: &str) -> Result<ConnectionProfile, String> {
+    resolve_profile_in(state.inner(), id)
+}
+
+/// The lookup itself, independent of Tauri's `State` wrapper so it can be tested.
+pub fn resolve_profile_in(state: &DbState, id: &str) -> Result<ConnectionProfile, String> {
+    if id.trim().is_empty() {
+        return Err("No connection was selected. Open the connection dialog and connect first.".to_string());
+    }
+    {
+        let sessions = state.session_profiles.lock().map_err(|e| e.to_string())?;
+        if let Some(p) = sessions.get(id) {
+            return Ok(p.clone());
+        }
+    }
+    crate::profiles::load_profiles()?
+        .into_iter()
+        .find(|p| p.id == id)
+        .ok_or_else(|| {
+            if id.starts_with(SESSION_ID_PREFIX) {
+                format!(
+                    "Connection '{}' is gone. Unsaved connections only live while the app is running - open the connection dialog and connect again.",
+                    id
+                )
+            } else {
+                format!("Connection '{}' not found. It may have been deleted - pick it again in the connection dialog.", id)
+            }
+        })
 }
 
 pub const CONNECTION_TIMEOUT_SECS: u64 = 180;
@@ -36,6 +76,11 @@ impl DbPool {
 }
 
 pub async fn close_profile_pools(state: &State<'_, DbState>, profile_id: Option<&str>) -> Result<(), String> {
+    close_profile_pools_in(state.inner(), profile_id).await
+}
+
+/// Same as `close_profile_pools`, without Tauri's `State` wrapper.
+pub async fn close_profile_pools_in(state: &DbState, profile_id: Option<&str>) -> Result<(), String> {
     let mut pools_to_close = Vec::new();
     {
         let mut pools = state.pools.lock().map_err(|e| e.to_string())?;
@@ -64,6 +109,16 @@ pub async fn close_profile_pools(state: &State<'_, DbState>, profile_id: Option<
 
 pub async fn get_pool(
     state: &State<'_, DbState>,
+    profile: &ConnectionProfile,
+    database_override: Option<&str>,
+) -> Result<DbPool, String> {
+    get_pool_in(state.inner(), profile, database_override).await
+}
+
+/// The pool lookup itself, independent of Tauri's `State` wrapper so the
+/// connect path can be exercised in tests.
+pub async fn get_pool_in(
+    state: &DbState,
     profile: &ConnectionProfile,
     database_override: Option<&str>,
 ) -> Result<DbPool, String> {
@@ -455,6 +510,13 @@ pub async fn execute_query(pool: &DbPool, query: &str) -> Result<Vec<serde_json:
     }
 }
 
+pub fn escape_sql_literal(db_type: SupportedDB, raw: &str) -> String {
+    match db_type {
+        SupportedDB::Mariadb => raw.replace('\\', "\\\\").replace('\'', "''"),
+        SupportedDB::Postgres | SupportedDB::Sqlite => raw.replace('\'', "''"),
+    }
+}
+
 pub async fn execute_command_raw(pool: &DbPool, command: &str) -> Result<u64, String> {
     match pool {
         DbPool::Postgres(p) => {
@@ -634,5 +696,97 @@ mod tests {
         let err = execute_transaction(&pool, &steps).await.unwrap_err();
         assert!(err.contains("SQL: UPDATE t SET nope"), "unexpected error: {err}");
         assert_eq!(name_of(&pool, 1).await.as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn unsaved_connections_resolve_from_memory() {
+        let state = DbState::default();
+        let profile = ConnectionProfile {
+            id: format!("{}abc", SESSION_ID_PREFIX),
+            name: "scratch".to_string(),
+            host: "127.0.0.1".to_string(),
+            ..Default::default()
+        };
+        state
+            .session_profiles
+            .lock()
+            .unwrap()
+            .insert(profile.id.clone(), profile.clone());
+
+        let found = resolve_profile_in(&state, &profile.id).unwrap();
+        assert_eq!(found.name, "scratch");
+        assert_eq!(found.host, "127.0.0.1");
+    }
+
+    #[test]
+    fn missing_connection_says_what_to_do() {
+        // Point the profile store at an empty directory so this test does not
+        // depend on (or read) the developer's real profiles.json.
+        std::env::set_var("DODB_DATA_DIR", std::env::temp_dir().join("dodb-test-empty"));
+        let state = DbState::default();
+        let err = resolve_profile_in(&state, "").unwrap_err();
+        assert!(err.contains("No connection was selected"), "{err}");
+
+        let err = resolve_profile_in(&state, &format!("{}gone", SESSION_ID_PREFIX)).unwrap_err();
+        assert!(err.contains("only live while the app is running"), "{err}");
+
+        let err = resolve_profile_in(&state, "definitely-not-a-real-profile-id").unwrap_err();
+        assert!(err.contains("not found"), "{err}");
+    }
+
+    /// End-to-end check of the "connect without saving" path: a profile that
+    /// exists only in memory must resolve, produce a working pool, and query.
+    #[tokio::test]
+    async fn unsaved_connection_can_actually_query() {
+        std::env::set_var("DODB_DATA_DIR", std::env::temp_dir().join("dodb-test-empty"));
+
+        let db_path = std::env::temp_dir().join("dodb-session-e2e.db");
+        let _ = std::fs::remove_file(&db_path);
+        let path_str = db_path.to_string_lossy().to_string();
+
+        // Seed the file the way an existing database would look.
+        {
+            let pool = SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect(&format!("sqlite://{}?mode=rwc", path_str))
+                .await
+                .expect("seed pool");
+            sqlx::query("CREATE TABLE widgets (id INTEGER PRIMARY KEY, name TEXT)")
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::query("INSERT INTO widgets (name) VALUES ('a')").execute(&pool).await.unwrap();
+            pool.close().await;
+        }
+
+        let state = DbState::default();
+        let profile = ConnectionProfile {
+            id: format!("{}e2e", SESSION_ID_PREFIX),
+            name: "unsaved".to_string(),
+            r#type: SupportedDB::Sqlite,
+            file_path: Some(path_str.clone()),
+            ..Default::default()
+        };
+        state
+            .session_profiles
+            .lock()
+            .unwrap()
+            .insert(profile.id.clone(), profile.clone());
+
+        // This is what every data command does: resolve by id, then get a pool.
+        let resolved = resolve_profile_in(&state, &profile.id).expect("resolves without being saved");
+        let pool = get_pool_in(&state, &resolved, None).await.expect("pool for unsaved connection");
+        let rows = execute_query(&pool, "SELECT name FROM sqlite_master WHERE type = 'table'")
+            .await
+            .expect("query runs");
+
+        let names: Vec<String> = rows
+            .iter()
+            .filter_map(|r| r.get("name").and_then(|v| v.as_str()).map(|s| s.to_string()))
+            .collect();
+        assert!(names.contains(&"widgets".to_string()), "got {names:?}");
+
+        close_profile_pools_in(&state, Some(&profile.id)).await.unwrap();
+        let _ = std::fs::remove_file(&db_path);
     }
 }

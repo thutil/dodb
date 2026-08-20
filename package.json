@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "productName": "dodb",
   "description": "dodb - Modern Multi-Platform Database Manager for Postgres, MySQL, MariaDB & SQLite",
-  "main": "electron/main.js",
   "author": {
     "name": "thutil",
     "email": "thutil@users.noreply.github.com"
@@ -13,76 +12,6 @@
     "ui:dev": "pnpm --filter dodb-ui dev",
     "dev": "tauri dev",
     "build": "tauri build"
-  },
-
-  "build": {
-    "appId": "com.thutil.dodb",
-    "productName": "dodb",
-    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
-    "directories": {
-      "output": "dist-builds"
-    },
-    "mac": {
-      "category": "public.app-category.developer-tools",
-      "icon": "assets/icon.png",
-      "identity": null,
-      "target": [
-        {
-          "target": "dmg",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        },
-        {
-          "target": "zip",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        }
-      ],
-      "hardenedRuntime": false
-    },
-    "dmg": {
-      "title": "dodb - Database Manager",
-      "icon": "assets/icon.png",
-      "contents": [
-        {
-          "x": 130,
-          "y": 180,
-          "type": "file"
-        },
-        {
-          "x": 410,
-          "y": 180,
-          "type": "link",
-          "path": "/Applications"
-        }
-      ],
-      "window": {
-        "width": 540,
-        "height": 360
-      }
-    },
-    "compression": "maximum",
-    "files": [
-      "dist/**/*",
-      "electron/**/*",
-      "ui/out/**/*",
-      "assets/**/*",
-      "package.json",
-      "!ui/node_modules/**/*",
-      "!ui/src/**/*",
-      "!ui/.next/**/*",
-      "!src/**/*",
-      "!data/**/*",
-      "!dist-builds/**/*"
-    ],
-    "asar": true,
-    "asarUnpack": [
-      "**/node_modules/better-sqlite3/**/*"
-    ]
   },
   "dependencies": {
     "uuid": "^11.1.0"

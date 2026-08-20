@@ -352,11 +352,23 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                 <Clock size={11} />
                 <span>{result.executionTimeMs} ms</span>
               </span>
-              {result.rows && (
+              {typeof result.affectedRows === "number" ? (
                 <span className="stat-item font-mono">
                   <FileCode size={11} />
-                  <span>{result.rows.length} rows</span>
+                  <span>
+                    {result.affectedRows} row{result.affectedRows === 1 ? "" : "s"} affected
+                  </span>
                 </span>
+              ) : (
+                result.rows && (
+                  <span className="stat-item font-mono">
+                    <FileCode size={11} />
+                    <span>
+                      {result.rowsReturned ?? result.rows.length} row
+                      {(result.rowsReturned ?? result.rows.length) === 1 ? "" : "s"} returned
+                    </span>
+                  </span>
+                )
               )}
               {activeTable && (
                 <span className="stat-item font-mono">

@@ -1,19 +1,17 @@
 use tauri::{command, State};
 use crate::models::SupportedDB;
-use crate::db_core::{get_pool, execute_query, DbState};
-use crate::profiles;
+use crate::db_core::{get_pool, execute_query, resolve_profile, DbState};
 
 #[command]
 pub async fn get_schema_diagram(id: String, database: String, state: State<'_, DbState>) -> Result<serde_json::Value, String> {
-    let profiles = profiles::load_profiles()?;
-    let profile = profiles.iter().find(|p| p.id == id).ok_or("Profile not found")?;
+    let profile = &resolve_profile(&state, &id)?;
     let pool = get_pool(&state, profile, Some(&database)).await?;
 
     match profile.r#type {
         SupportedDB::Postgres => {
             // 1. Get all public tables first to guarantee all tables are discovered
             let tbl_query = "SELECT tablename::text AS name FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;";
-            let tbl_rows = execute_query(&pool, tbl_query).await.unwrap_or_default();
+            let tbl_rows = execute_query(&pool, tbl_query).await.map_err(|e| format!("Could not read the table list: {}", e))?;
 
             let mut tables_map: std::collections::BTreeMap<String, Vec<serde_json::Value>> = std::collections::BTreeMap::new();
             for tr in tbl_rows {
@@ -47,7 +45,7 @@ pub async fn get_schema_diagram(id: String, database: String, state: State<'_, D
                 WHERE c.table_schema = 'public'
                 ORDER BY c.table_name, c.ordinal_position;
             ";
-            let col_rows = execute_query(&pool, col_query).await.unwrap_or_default();
+            let col_rows = execute_query(&pool, col_query).await.map_err(|e| format!("Could not read column metadata: {}", e))?;
 
             for r in col_rows {
                 if let Some(obj) = r.as_object() {
@@ -89,7 +87,7 @@ pub async fn get_schema_diagram(id: String, database: String, state: State<'_, D
                   AND ccu.table_schema = tc.table_schema
                 WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public';
             ";
-            let fk_rows = execute_query(&pool, fk_query).await.unwrap_or_default();
+            let fk_rows = execute_query(&pool, fk_query).await.map_err(|e| format!("Could not read foreign key metadata: {}", e))?;
 
             let mut relations = Vec::new();
             for r in fk_rows {
@@ -127,7 +125,7 @@ pub async fn get_schema_diagram(id: String, database: String, state: State<'_, D
                 WHERE TABLE_SCHEMA = DATABASE()
                 ORDER BY TABLE_NAME, ORDINAL_POSITION;
             ";
-            let col_rows = execute_query(&pool, col_query).await.unwrap_or_default();
+            let col_rows = execute_query(&pool, col_query).await.map_err(|e| format!("Could not read column metadata: {}", e))?;
 
             let fk_query = "
                 SELECT 
@@ -139,7 +137,7 @@ pub async fn get_schema_diagram(id: String, database: String, state: State<'_, D
                 WHERE TABLE_SCHEMA = DATABASE()
                   AND REFERENCED_TABLE_NAME IS NOT NULL;
             ";
-            let fk_rows = execute_query(&pool, fk_query).await.unwrap_or_default();
+            let fk_rows = execute_query(&pool, fk_query).await.map_err(|e| format!("Could not read foreign key metadata: {}", e))?;
 
             let mut tables_map: std::collections::BTreeMap<String, Vec<serde_json::Value>> = std::collections::BTreeMap::new();
             for r in col_rows {
@@ -194,7 +192,7 @@ pub async fn get_schema_diagram(id: String, database: String, state: State<'_, D
 
         SupportedDB::Sqlite => {
             let tbl_query = "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'";
-            let tbl_rows = execute_query(&pool, tbl_query).await.unwrap_or_default();
+            let tbl_rows = execute_query(&pool, tbl_query).await.map_err(|e| format!("Could not read the table list: {}", e))?;
 
             let mut tables = Vec::new();
             let mut relations = Vec::new();
@@ -208,7 +206,7 @@ pub async fn get_schema_diagram(id: String, database: String, state: State<'_, D
                 if tbl_name.is_empty() { continue; }
 
                 let col_query = format!("PRAGMA table_info(\"{}\")", tbl_name);
-                let col_rows = execute_query(&pool, &col_query).await.unwrap_or_default();
+                let col_rows = execute_query(&pool, &col_query).await.map_err(|e| format!("Could not read column metadata: {}", e))?;
                 let mut cols = Vec::new();
                 for cr in col_rows {
                     if let Some(cobj) = cr.as_object() {
@@ -230,7 +228,7 @@ pub async fn get_schema_diagram(id: String, database: String, state: State<'_, D
                 }));
 
                 let fk_query = format!("PRAGMA foreign_key_list(\"{}\")", tbl_name);
-                let fk_rows = execute_query(&pool, &fk_query).await.unwrap_or_default();
+                let fk_rows = execute_query(&pool, &fk_query).await.map_err(|e| format!("Could not read foreign key metadata: {}", e))?;
                 for fkr in fk_rows {
                     if let Some(fobj) = fkr.as_object() {
                         let to_tbl = fobj.get("table").and_then(|v| v.as_str()).unwrap_or("");

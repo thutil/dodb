@@ -31,7 +31,10 @@ export interface TableRowData {
 
 export interface QueryExecutionResult {
   rows?: Record<string, unknown>[];
-  affectedRows?: number;
+  /** Rows the statement handed back (SELECT and friends). */
+  rowsReturned?: number;
+  /** Rows the statement changed (INSERT/UPDATE/DELETE); null for queries. */
+  affectedRows?: number | null;
   insertId?: number | string;
   fields?: string[];
   executionTimeMs?: number;
