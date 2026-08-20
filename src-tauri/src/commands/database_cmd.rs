@@ -246,7 +246,10 @@ pub async fn get_columns(id: String, database: String, table: String, state: Sta
             format!("
                 SELECT 
                     c.column_name::text AS name, 
-                    c.data_type::text AS type,
+                    CASE 
+                        WHEN c.data_type = 'USER-DEFINED' THEN c.udt_name::text 
+                        ELSE c.data_type::text 
+                    END AS type,
                     (c.is_nullable = 'YES') AS nullable,
                     c.column_default::text AS default_value,
                     EXISTS (

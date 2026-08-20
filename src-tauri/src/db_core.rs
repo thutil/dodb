@@ -319,6 +319,15 @@ pub async fn test_connection_standalone(profile: &ConnectionProfile) -> Result<b
     }
 }
 
+pub fn decode_bytes_or_hex(bytes: &[u8]) -> String {
+    if let Ok(s) = std::str::from_utf8(bytes) {
+        if !s.chars().any(|c| c.is_control() && c != '\n' && c != '\r' && c != '\t') {
+            return s.to_string();
+        }
+    }
+    bytes.iter().map(|b| format!("{:02X}", b)).collect()
+}
+
 pub async fn execute_query(pool: &DbPool, query: &str) -> Result<Vec<serde_json::Value>, String> {
     match pool {
         DbPool::Postgres(p) => {
@@ -383,7 +392,7 @@ pub async fn execute_query(pool: &DbPool, query: &str) -> Result<Vec<serde_json:
                     } else if let Ok(v) = row.try_get::<Vec<i32>, _>(i) {
                         map.insert(column.name().to_string(), serde_json::json!(v));
                     } else if let Ok(v) = row.try_get::<Vec<u8>, _>(i) {
-                        let s = String::from_utf8_lossy(&v).into_owned();
+                        let s = decode_bytes_or_hex(&v);
                         map.insert(column.name().to_string(), serde_json::Value::String(s));
                     } else {
                         map.insert(column.name().to_string(), serde_json::Value::Null);
@@ -453,7 +462,7 @@ pub async fn execute_query(pool: &DbPool, query: &str) -> Result<Vec<serde_json:
                     } else if let Ok(v) = row.try_get::<serde_json::Value, _>(i) {
                         map.insert(column.name().to_string(), v);
                     } else if let Ok(v) = row.try_get::<Vec<u8>, _>(i) {
-                        let s = String::from_utf8_lossy(&v).into_owned();
+                        let s = decode_bytes_or_hex(&v);
                         map.insert(column.name().to_string(), serde_json::Value::String(s));
                     } else {
                         map.insert(column.name().to_string(), serde_json::Value::Null);
@@ -497,7 +506,7 @@ pub async fn execute_query(pool: &DbPool, query: &str) -> Result<Vec<serde_json:
                     } else if let Ok(v) = row.try_get::<serde_json::Value, _>(i) {
                         map.insert(column.name().to_string(), v);
                     } else if let Ok(v) = row.try_get::<Vec<u8>, _>(i) {
-                        let s = String::from_utf8_lossy(&v).into_owned();
+                        let s = decode_bytes_or_hex(&v);
                         map.insert(column.name().to_string(), serde_json::Value::String(s));
                     } else {
                         map.insert(column.name().to_string(), serde_json::Value::Null);
