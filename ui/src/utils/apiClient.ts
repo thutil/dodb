@@ -31,6 +31,9 @@ export const apiClient = {
   disconnectDatabase: async (id?: string) => {
     return await invoke("disconnect_database", { id });
   },
+  pingDatabase: async (id: string, database?: string): Promise<number> => {
+    return await invoke("ping_database", { id, database });
+  },
   // DB Operations
   getDatabases: async (id: string) => {
     return await invoke("get_databases", { id });

@@ -50,7 +50,7 @@ export const Header: React.FC<HeaderProps> = ({
   onDisconnect,
   onOpenAuditLogs,
   onOpenCommandPalette,
-  latencyMs = 12,
+  latencyMs,
   theme,
   onToggleTheme,
 }) => {
@@ -102,9 +102,12 @@ export const Header: React.FC<HeaderProps> = ({
         </button>
 
         {activeProfile && (
-          <div className="header-health-pill" title={`Server Status: Online (Ping: ${latencyMs ?? 12}ms)`}>
+          <div
+            className={`header-health-pill ${latencyMs == null ? "is-connecting" : latencyMs > 200 ? "is-slow" : latencyMs > 80 ? "is-medium" : "is-good"}`}
+            title={`Server Status: ${latencyMs != null ? `Online (${latencyMs}ms latency)` : "Connecting..."}`}
+          >
             <span className="health-dot" />
-            <span className="health-ping">{latencyMs ?? 12}ms</span>
+            <span className="health-ping">{latencyMs != null ? `${latencyMs}ms` : "..."}</span>
           </div>
         )}
       </div>
@@ -387,6 +390,19 @@ export const Header: React.FC<HeaderProps> = ({
           border-radius: 50%;
           background: var(--accent-green);
           box-shadow: 0 0 6px var(--accent-green);
+          transition: all 0.2s ease;
+        }
+        .header-health-pill.is-connecting .health-dot {
+          background: var(--text-muted);
+          box-shadow: none;
+        }
+        .header-health-pill.is-medium .health-dot {
+          background: var(--accent-amber, #f59e0b);
+          box-shadow: 0 0 6px var(--accent-amber, #f59e0b);
+        }
+        .header-health-pill.is-slow .health-dot {
+          background: var(--accent-rose, #ef4444);
+          box-shadow: 0 0 6px var(--accent-rose, #ef4444);
         }
         .health-ping {
           font-weight: 500;

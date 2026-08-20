@@ -68,6 +68,9 @@ export default function Home() {
   const [searchQuery, setSearchQuery] = useState("");
   const [filters, setFilters] = useState<ColumnFilter[]>([]);
 
+  // Real-time Database Ping Latency
+  const [latencyMs, setLatencyMs] = useState<number | null>(null);
+
   // Request sequence ref to prevent table data race condition
   const fetchSeqRef = React.useRef(0);
 
@@ -231,6 +234,16 @@ export default function Home() {
     }
   }, [activeDatabase, fetchTables]);
 
+  // Reset pagination, sorting, filters, search, and table error when switching table, database, or connection
+  useEffect(() => {
+    setPage(0);
+    setSortColumn(null);
+    setSortOrder("ASC");
+    setSearchQuery("");
+    setFilters([]);
+    setTableError(null);
+  }, [activeProfile?.id, activeDatabase, activeTable]);
+
   const fetchTableData = useCallback(async () => {
     if (!activeProfile || !activeDatabase || !activeTable) return;
     const currentReqSeq = ++fetchSeqRef.current;
@@ -245,6 +258,15 @@ export default function Home() {
       const colData: any = await apiClient.getColumns(reqProfileId, reqDatabase, reqTable);
       if (fetchSeqRef.current !== currentReqSeq) return;
 
+      const fetchedCols = colData.columns || [];
+      setColumns(fetchedCols);
+
+      // Validate sortColumn belongs to current table
+      const effectiveSortCol = sortColumn && fetchedCols.some((c: any) => c.name === sortColumn) ? sortColumn : null;
+      if (sortColumn && !effectiveSortCol) {
+        setSortColumn(null);
+      }
+
       // 2. Fetch paginated rows with sorting, search, and filtering
       const rowData: any = await apiClient.getRows(
         reqProfileId,
@@ -252,14 +274,13 @@ export default function Home() {
         reqTable,
         pageSize,
         page * pageSize,
-        sortColumn,
+        effectiveSortCol,
         sortOrder,
         searchQuery,
         filters
       );
       if (fetchSeqRef.current !== currentReqSeq) return;
 
-      setColumns(colData.columns || []);
       setRows(rowData.rows || []);
       setTotalRows(rowData.total || 0);
       setTableError(null);
@@ -281,6 +302,31 @@ export default function Home() {
       fetchTableData();
     }
   }, [activeDatabase, activeTable, page, sortColumn, sortOrder, searchQuery, filters, fetchTableData]);
+
+  // Real-time Database Ping Heartbeat (measures actual round-trip latency)
+  useEffect(() => {
+    if (!activeProfile) {
+      setLatencyMs(null);
+      return;
+    }
+
+    let isMounted = true;
+    const pingServer = async () => {
+      try {
+        const ms = await apiClient.pingDatabase(activeProfile.id, activeDatabase || undefined);
+        if (isMounted) setLatencyMs(ms);
+      } catch {
+        if (isMounted) setLatencyMs(null);
+      }
+    };
+
+    pingServer();
+    const interval = setInterval(pingServer, 4000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [activeProfile?.id, activeDatabase]);
 
   const handleSaveProfile = async (profileData: Partial<ConnectionProfile>) => {
     const previous = activeProfile;
@@ -689,6 +735,7 @@ export default function Home() {
           onDisconnect={handleDisconnect}
           onOpenAuditLogs={() => setIsAuditLogOpen(true)}
           onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+          latencyMs={latencyMs}
           theme={theme}
           onToggleTheme={toggleTheme}
         />

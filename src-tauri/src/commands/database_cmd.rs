@@ -454,8 +454,22 @@ pub async fn get_rows(
             match (r2, c2) {
                 (Ok(r), Ok(c)) => (r, c),
                 _ => {
-                    let original = first_rows.err().or_else(|| first_count.err());
-                    return Err(original.unwrap_or_else(|| "Failed to read table rows".to_string()));
+                    // If sort_column caused an error (e.g. stale column from previous table), retry without sorting
+                    if !order_sql.is_empty() {
+                        let no_sort_query = format!("SELECT * FROM {} {} LIMIT {} OFFSET {}", table_ident, where_sql, limit, offset);
+                        if let (Ok(r3), Ok(c3)) = tokio::join!(
+                            execute_query(&pool, &no_sort_query),
+                            execute_query(&pool, &count_query)
+                        ) {
+                            (r3, c3)
+                        } else {
+                            let original = first_rows.err().or_else(|| first_count.err());
+                            return Err(original.unwrap_or_else(|| "Failed to read table rows".to_string()));
+                        }
+                    } else {
+                        let original = first_rows.err().or_else(|| first_count.err());
+                        return Err(original.unwrap_or_else(|| "Failed to read table rows".to_string()));
+                    }
                 }
             }
         }
@@ -654,6 +668,19 @@ pub async fn commit_changes(id: String, database: String, table: String, changes
 pub async fn disconnect_database(id: Option<String>, state: State<'_, DbState>) -> Result<bool, String> {
     crate::db_core::close_profile_pools(&state, id.as_deref()).await?;
     Ok(true)
+}
+
+#[command]
+pub async fn ping_database(id: String, database: Option<String>, state: State<'_, DbState>) -> Result<u64, String> {
+    let profile = &resolve_profile(&state, &id)?;
+    let pool = get_pool(&state, profile, database.as_deref()).await?;
+    let start = std::time::Instant::now();
+    let query = match profile.r#type {
+        SupportedDB::Postgres | SupportedDB::Mariadb | SupportedDB::Sqlite => "SELECT 1",
+    };
+    execute_query(&pool, query).await?;
+    let duration_ms = start.elapsed().as_millis().max(1) as u64;
+    Ok(duration_ms)
 }
 
 

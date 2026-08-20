@@ -178,13 +178,13 @@ export const DataGrid: React.FC<DataGridProps> = ({
     pickerMode?: boolean;
     onPick?: (coords: { lng: number; lat: number; wkt: string }) => void;
   } | null>(null);
-  
+
   // Pending Transaction Edits keyed by Primary Key Value (or row key)
   const [editedCells, setEditedCells] = useState<{ [pkKey: string]: TableRowData }>({});
   const [newRows, setNewRows] = useState<TableRowData[]>([]);
   const [deletedRowKeys, setDeletedRowKeys] = useState<Set<string>>(new Set());
   const [confirmDeleteRow, setConfirmDeleteRow] = useState<{ pkKey: string; rowIdx: number; rowData: TableRowData } | null>(null);
-  
+
   // Close export dropdown and context menu on outside click
   useEffect(() => {
     if (!isExportMenuOpen && !contextMenu) return;
@@ -730,7 +730,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
       return { ...r, ...(editedCells[pkKey] || {}) };
     })
     .filter((r): r is TableRowData => r !== null);
-  
+
   const allJsonRows = [...activeMergedRows, ...newRows];
   const formattedJson = jsonFormat === "pretty"
     ? JSON.stringify(allJsonRows, null, 2)
@@ -1744,8 +1744,8 @@ export const DataGrid: React.FC<DataGridProps> = ({
                   selectedCell.val === null
                     ? "NULL"
                     : typeof selectedCell.val === "object"
-                    ? JSON.stringify(selectedCell.val, null, 2)
-                    : String(selectedCell.val)
+                      ? JSON.stringify(selectedCell.val, null, 2)
+                      : String(selectedCell.val)
                 }
               />
             </div>
@@ -1761,8 +1761,8 @@ export const DataGrid: React.FC<DataGridProps> = ({
                     selectedCell.val === null
                       ? "NULL"
                       : typeof selectedCell.val === "object"
-                      ? JSON.stringify(selectedCell.val, null, 2)
-                      : String(selectedCell.val);
+                        ? JSON.stringify(selectedCell.val, null, 2)
+                        : String(selectedCell.val);
                   handleCopyCell(text);
                 }}
               >
@@ -1867,7 +1867,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
             }}
           >
             <Eye size={13} />
-            <span>Inspect Details (ดูข้อมูลละเอียด)</span>
+            <span>Inspect Details</span>
           </button>
           <button
             className="context-menu-item"
@@ -1895,7 +1895,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
               }}
             >
               <Globe size={13} style={{ color: "var(--accent-blue)" }} />
-              <span>View on Map (ดูบนแผนที่ GIS)</span>
+              <span>View on Map</span>
             </button>
           )}
           <button
@@ -1912,7 +1912,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
             }}
           >
             <Plus size={13} />
-            <span>Duplicate Row (คัดลอกแถว)</span>
+            <span>Duplicate Row</span>
           </button>
           <div className="context-menu-separator" />
           <button
@@ -1953,7 +1953,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
             }}
           >
             {deletedRowKeys.has(contextMenu.pkKey) ? <RotateCcw size={13} /> : <Trash2 size={13} />}
-            <span>{deletedRowKeys.has(contextMenu.pkKey) ? "Restore Record (ยกเลิกการลบ)" : "Delete Record (ลบแถว)"}</span>
+            <span>{deletedRowKeys.has(contextMenu.pkKey) ? "Restore Record (ยกเลิกการลบ)" : "Delete Record"}</span>
           </button>
         </div>
       )}
