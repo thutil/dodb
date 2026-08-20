@@ -15,9 +15,10 @@ import {
   Node,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { GitFork, Network, Table2, Key, ArrowRight, Search, RefreshCw, Database } from "lucide-react";
+import { GitFork, Network, Table2, Key, ArrowRight, Search, RefreshCw, Database, Globe } from "lucide-react";
 import { ConnectionProfile } from "../types";
 import { apiClient } from "../utils/apiClient";
+import { isGeometryColumn } from "../utils/gisUtils";
 
 interface SchemaDiagramProps {
   activeProfile: ConnectionProfile | null;
@@ -69,6 +70,8 @@ const TableNode: React.FC<NodeProps> = ({ data }) => {
               (r) => r.fromTable === table.name && r.fromColumn === c.name
             );
 
+            const isGeom = isGeometryColumn(c.type, c.name);
+
             return (
               <div
                 key={c.name}
@@ -82,6 +85,10 @@ const TableNode: React.FC<NodeProps> = ({ data }) => {
                   ) : fkRelation ? (
                     <span title={`FK -> ${fkRelation.toTable}.${fkRelation.toColumn}`}>
                       <GitFork size={11} className="fk-icon" />
+                    </span>
+                  ) : isGeom ? (
+                    <span title="GIS Geometry Column">
+                      <Globe size={11} className="pk-icon" style={{ color: "var(--accent-blue)" }} />
                     </span>
                   ) : (
                     <span className="bullet-dot" />

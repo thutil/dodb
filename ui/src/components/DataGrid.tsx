@@ -30,8 +30,23 @@ import {
   Server,
   Database,
   Zap,
+  Globe,
+  MapPin,
+  Layers,
+  Compass,
+  Eye,
+  Crosshair,
 } from "lucide-react";
 import { ColumnInfo, TableRowData, ConnectionProfile, ColumnFilter, FilterOperator } from "../types";
+import {
+  isGeometryColumn,
+  isGisData,
+  formatGisSummary,
+  parseGisToGeoJson,
+  geoJsonToWkt,
+  GeoJsonGeometry,
+} from "../utils/gisUtils";
+import { GisMapViewer, GisFeatureRecord } from "./GisMapViewer";
 
 
 export interface PendingChanges {
@@ -124,8 +139,8 @@ export const DataGrid: React.FC<DataGridProps> = ({
 }) => {
   const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
 
-  // View Mode: Table vs JSON
-  const [viewMode, setViewMode] = useState<"table" | "json">("table");
+  // View Mode: Table vs JSON vs GIS Map
+  const [viewMode, setViewMode] = useState<"table" | "json" | "gis">("table");
   const [jsonFormat, setJsonFormat] = useState<"pretty" | "compact">("pretty");
   const [jsonWrap, setJsonWrap] = useState<boolean>(true);
   const [copied, setCopied] = useState(false);
@@ -137,6 +152,32 @@ export const DataGrid: React.FC<DataGridProps> = ({
   const [exportContent, setExportContent] = useState<string>("");
   const [exporting, setExporting] = useState(false);
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
+
+  // Row Right-Click Context Menu State
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    rowIdx: number;
+    row: TableRowData;
+    pkKey: string;
+  } | null>(null);
+
+  // Detailed Searchable Row Inspector State
+  const [inspectRowModal, setInspectRowModal] = useState<{
+    rowIdx: number;
+    row: TableRowData;
+    pkKey: string;
+  } | null>(null);
+  const [inspectSearchTerm, setInspectSearchTerm] = useState<string>("");
+
+  // GIS Map Viewer Modal State
+  const [gisModalData, setGisModalData] = useState<{
+    title: string;
+    subtitle?: string;
+    value: unknown;
+    pickerMode?: boolean;
+    onPick?: (coords: { lng: number; lat: number; wkt: string }) => void;
+  } | null>(null);
   
   // Pending Transaction Edits keyed by Primary Key Value (or row key)
   const [editedCells, setEditedCells] = useState<{ [pkKey: string]: TableRowData }>({});
@@ -144,13 +185,16 @@ export const DataGrid: React.FC<DataGridProps> = ({
   const [deletedRowKeys, setDeletedRowKeys] = useState<Set<string>>(new Set());
   const [confirmDeleteRow, setConfirmDeleteRow] = useState<{ pkKey: string; rowIdx: number; rowData: TableRowData } | null>(null);
   
-  // Close export dropdown on outside click
+  // Close export dropdown and context menu on outside click
   useEffect(() => {
-    if (!isExportMenuOpen) return;
-    const handleOutside = () => setIsExportMenuOpen(false);
+    if (!isExportMenuOpen && !contextMenu) return;
+    const handleOutside = () => {
+      setIsExportMenuOpen(false);
+      setContextMenu(null);
+    };
     window.addEventListener("click", handleOutside);
     return () => window.removeEventListener("click", handleOutside);
-  }, [isExportMenuOpen]);
+  }, [isExportMenuOpen, contextMenu]);
 
   // Active Inline Editing Cell
   const [editingCell, setEditingCell] = useState<{ pkKey: string; isNew: boolean; nIdx?: number; colName: string; originalVal: unknown } | null>(null);
@@ -160,6 +204,33 @@ export const DataGrid: React.FC<DataGridProps> = ({
     const t = colType.toLowerCase();
     return t.includes("date") || t.includes("time") || t.includes("timestamp");
   };
+
+  // Check if table contains spatial/geometry columns
+  const hasGisColumns = React.useMemo(() => {
+    return columns.some((c) => isGeometryColumn(c.type, c.name));
+  }, [columns]);
+
+  // Build GIS feature records for current page rows
+  const gisFeatures: GisFeatureRecord[] = React.useMemo(() => {
+    const geomCols = columns.filter((c) => isGeometryColumn(c.type, c.name));
+    if (geomCols.length === 0) return [];
+    const feats: GisFeatureRecord[] = [];
+    rows.forEach((row, idx) => {
+      for (const gc of geomCols) {
+        const val = row[gc.name];
+        const geom = parseGisToGeoJson(val);
+        if (geom) {
+          feats.push({
+            id: `${idx}_${gc.name}`,
+            geometry: geom,
+            properties: row as Record<string, unknown>,
+            label: `${tableName} #${page * pageSize + idx + 1} (${gc.name})`,
+          });
+        }
+      }
+    });
+    return feats;
+  }, [columns, rows, tableName, page, pageSize]);
 
   // Full Row Insert/Edit Modal State
   const [rowEditModal, setRowEditModal] = useState<{
@@ -183,13 +254,18 @@ export const DataGrid: React.FC<DataGridProps> = ({
     setRowEditModal(null);
     setConfirmDeleteRow(null);
     setCommitMsg(null);
+    setContextMenu(null);
+    setInspectRowModal(null);
   }, [tableName, activeDatabase, page, sortColumn, sortOrder, searchQuery, filtersKey]);
 
-  // Handle ESC key to dismiss sub-modals (Inspector, Row Modal, Delete Confirm, Inline Edit)
+  // Handle ESC key to dismiss sub-modals (Inspector, Row Modal, Delete Confirm, Inline Edit, GIS)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        if (confirmDeleteRow) setConfirmDeleteRow(null);
+        if (contextMenu) setContextMenu(null);
+        else if (gisModalData) setGisModalData(null);
+        else if (inspectRowModal) setInspectRowModal(null);
+        else if (confirmDeleteRow) setConfirmDeleteRow(null);
         else if (rowEditModal) setRowEditModal(null);
         else if (selectedCell) setSelectedCell(null);
         else if (editingCell) setEditingCell(null);
@@ -197,7 +273,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [confirmDeleteRow, rowEditModal, selectedCell, editingCell]);
+  }, [contextMenu, gisModalData, inspectRowModal, confirmDeleteRow, rowEditModal, selectedCell, editingCell]);
 
   if (!activeProfile) {
     return (
@@ -787,7 +863,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
           <h2 className="table-name-text">{tableName}</h2>
           <span className="count-pill">{totalRows.toLocaleString()} rows</span>
 
-          {/* View Mode Segmented Control (Table vs JSON) */}
+          {/* View Mode Segmented Control (Table vs JSON vs Map) */}
           <div className="view-mode-toggle">
             <button
               className={`view-toggle-btn ${viewMode === "table" ? "active" : ""}`}
@@ -805,6 +881,16 @@ export const DataGrid: React.FC<DataGridProps> = ({
               <Code2 size={12} />
               <span>JSON</span>
             </button>
+            {hasGisColumns && (
+              <button
+                className={`view-toggle-btn ${viewMode === "gis" ? "active" : ""}`}
+                onClick={() => setViewMode("gis")}
+                title="GIS Spatial Map View (MapLibre GL)"
+              >
+                <Globe size={12} />
+                <span>Map ({gisFeatures.length})</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -1093,6 +1179,15 @@ export const DataGrid: React.FC<DataGridProps> = ({
       <div className="grid-table-area">
         {loading ? (
           <div className="grid-state-msg">Loading records...</div>
+        ) : viewMode === "gis" ? (
+          <div className="gis-view-wrapper" style={{ height: "100%", width: "100%", position: "relative" }}>
+            <GisMapViewer
+              isInline
+              records={gisFeatures}
+              title={`${tableName} — GIS Spatial View`}
+              subtitle={`${gisFeatures.length} spatial features on page ${page + 1}`}
+            />
+          </div>
         ) : viewMode === "json" ? (
           <div className="json-view-wrapper">
             <Editor
@@ -1125,6 +1220,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                 <th className="action-col">Act</th>
                 {columns.map((col) => {
                   const isSorted = sortColumn === col.name;
+                  const isGeomCol = isGeometryColumn(col.type, col.name);
                   return (
                     <th
                       key={col.name}
@@ -1137,6 +1233,11 @@ export const DataGrid: React.FC<DataGridProps> = ({
                         {col.primaryKey && (
                           <span title="Primary Key">
                             <Key size={11} className="pk-icon" />
+                          </span>
+                        )}
+                        {isGeomCol && (
+                          <span title="GIS Spatial Column">
+                            <Globe size={11} className="pk-icon" style={{ color: "var(--accent-blue)" }} />
                           </span>
                         )}
                         <span className="col-title">{col.name}</span>
@@ -1244,7 +1345,20 @@ export const DataGrid: React.FC<DataGridProps> = ({
                   const isRowEdited = Object.keys(rowEdits).length > 0;
 
                   return (
-                    <tr key={pkKey} className={`${isDeleted ? "row-deleted" : ""} ${isRowEdited ? "row-edited" : ""}`}>
+                    <tr
+                      key={pkKey}
+                      className={`${isDeleted ? "row-deleted" : ""} ${isRowEdited ? "row-edited" : ""}`}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setContextMenu({
+                          x: e.clientX,
+                          y: e.clientY,
+                          rowIdx: idx,
+                          row,
+                          pkKey,
+                        });
+                      }}
+                    >
                       <td className="row-index">{page * pageSize + idx + 1}</td>
                       <td className="action-cell">
                         <div className="act-group">
@@ -1286,13 +1400,15 @@ export const DataGrid: React.FC<DataGridProps> = ({
                         const isNull = val === null || val === undefined;
                         const isEditing = !editingCell?.isNew && editingCell?.pkKey === pkKey && editingCell.colName === col.name;
                         const isDateCol = isDateTimeColumn(col.type);
+                        const isGeomCol = isGeometryColumn(col.type, col.name);
+                        const gisSummary = isGeomCol && !isNull ? formatGisSummary(val) : null;
 
                         return (
                           <td
                             key={col.name}
                             className={`cell-data ${isNull ? "cell-null" : ""} ${isEdited ? "cell-modified" : ""}`}
                             onDoubleClick={() => startEditing(pkKey, false, undefined, col.name, val)}
-                            title="Double-click to edit cell"
+                            title={gisSummary ? "Click badge to view on GIS map; double-click to edit" : "Double-click to edit cell"}
                           >
                             {isEditing ? (
                               <div className="input-with-picker inline-edit-wrap">
@@ -1311,6 +1427,22 @@ export const DataGrid: React.FC<DataGridProps> = ({
                               </div>
                             ) : isNull ? (
                               <span className="null-tag">NULL</span>
+                            ) : gisSummary ? (
+                              <span
+                                className="gis-badge-pill"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setGisModalData({
+                                    title: `${tableName} — ${col.name}`,
+                                    subtitle: `Record #${page * pageSize + idx + 1}`,
+                                    value: val,
+                                  });
+                                }}
+                                title="Click to view spatial shape on interactive map"
+                              >
+                                <Globe size={10} />
+                                <span>{gisSummary.label}</span>
+                              </span>
                             ) : typeof val === "object" ? (
                               JSON.stringify(val)
                             ) : (
@@ -1506,6 +1638,46 @@ export const DataGrid: React.FC<DataGridProps> = ({
                           <option value="true">true (1)</option>
                           <option value="false">false (0)</option>
                         </select>
+                      ) : isGeometryColumn(col.type, col.name) ? (
+                        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                          <input
+                            className="input form-input font-mono"
+                            placeholder="POINT (100.5018 13.7563) or GeoJSON"
+                            value={val === null || val === undefined ? "" : typeof val === "object" ? JSON.stringify(val) : String(val)}
+                            onChange={(e) =>
+                              setRowEditModal({
+                                ...rowEditModal,
+                                data: { ...rowEditModal.data, [col.name]: e.target.value },
+                              })
+                            }
+                            style={{ flex: 1 }}
+                          />
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => {
+                              setGisModalData({
+                                title: `Pick Coordinates on Map: ${col.name}`,
+                                subtitle: "Click on map to select Point coordinates",
+                                value: val,
+                                pickerMode: true,
+                                onPick: (coords) => {
+                                  setRowEditModal((prev) => {
+                                    if (!prev) return null;
+                                    return {
+                                      ...prev,
+                                      data: { ...prev.data, [col.name]: coords.wkt },
+                                    };
+                                  });
+                                },
+                              });
+                            }}
+                            title="Open interactive Map to pick coordinates"
+                          >
+                            <Globe size={12} />
+                            <span>Pick on Map</span>
+                          </button>
+                        </div>
                       ) : isLongText ? (
                         <textarea
                           rows={3}
@@ -1671,6 +1843,324 @@ export const DataGrid: React.FC<DataGridProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Row Right-Click Context Menu */}
+      {contextMenu && (
+        <div
+          className="row-context-menu"
+          style={{
+            top: typeof window !== "undefined" ? Math.min(contextMenu.y, window.innerHeight - 280) : contextMenu.y,
+            left: typeof window !== "undefined" ? Math.min(contextMenu.x, window.innerWidth - 220) : contextMenu.x,
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="context-menu-header">
+            Row #{page * pageSize + contextMenu.rowIdx + 1}
+          </div>
+          <button
+            className="context-menu-item"
+            onClick={() => {
+              setInspectRowModal({ rowIdx: contextMenu.rowIdx, row: contextMenu.row, pkKey: contextMenu.pkKey });
+              setInspectSearchTerm("");
+              setContextMenu(null);
+            }}
+          >
+            <Eye size={13} />
+            <span>Inspect Details (ดูข้อมูลละเอียด)</span>
+          </button>
+          <button
+            className="context-menu-item"
+            onClick={() => {
+              openRowModal(contextMenu.rowIdx, contextMenu.row, false);
+              setContextMenu(null);
+            }}
+          >
+            <Edit3 size={13} />
+            <span>Edit Record (แก้ไขข้อมูล)</span>
+          </button>
+          {columns.some((c) => isGeometryColumn(c.type, c.name) && isGisData(contextMenu.row[c.name])) && (
+            <button
+              className="context-menu-item"
+              onClick={() => {
+                const gCol = columns.find((c) => isGeometryColumn(c.type, c.name) && isGisData(contextMenu.row[c.name]));
+                if (gCol) {
+                  setGisModalData({
+                    title: `${tableName} — ${gCol.name}`,
+                    subtitle: `Record #${page * pageSize + contextMenu.rowIdx + 1}`,
+                    value: contextMenu.row[gCol.name],
+                  });
+                }
+                setContextMenu(null);
+              }}
+            >
+              <Globe size={13} style={{ color: "var(--accent-blue)" }} />
+              <span>View on Map (ดูบนแผนที่ GIS)</span>
+            </button>
+          )}
+          <button
+            className="context-menu-item"
+            onClick={() => {
+              const clone = { ...contextMenu.row };
+              columns.forEach((c) => {
+                if (c.autoIncrement || (c.primaryKey && c.type.toLowerCase().includes("int"))) {
+                  clone[c.name] = "__AUTO__";
+                }
+              });
+              setNewRows([...newRows, clone]);
+              setContextMenu(null);
+            }}
+          >
+            <Plus size={13} />
+            <span>Duplicate Row (คัดลอกแถว)</span>
+          </button>
+          <div className="context-menu-separator" />
+          <button
+            className="context-menu-item"
+            onClick={() => {
+              navigator.clipboard.writeText(JSON.stringify(contextMenu.row, null, 2));
+              setContextMenu(null);
+            }}
+          >
+            <Copy size={13} />
+            <span>Copy as JSON</span>
+          </button>
+          <button
+            className="context-menu-item"
+            onClick={() => {
+              const cols = Object.keys(contextMenu.row).filter((k) => contextMenu.row[k] !== undefined);
+              const colList = cols.map((c) => `"${c}"`).join(", ");
+              const valList = cols.map((c) => {
+                const v = contextMenu.row[c];
+                if (v === null) return "NULL";
+                if (typeof v === "number" || typeof v === "boolean") return String(v);
+                return `'${String(v).replace(/'/g, "''")}'`;
+              }).join(", ");
+              const sql = `INSERT INTO "${tableName}" (${colList}) VALUES (${valList});`;
+              navigator.clipboard.writeText(sql);
+              setContextMenu(null);
+            }}
+          >
+            <FileCode size={13} />
+            <span>Copy as SQL INSERT</span>
+          </button>
+          <div className="context-menu-separator" />
+          <button
+            className={`context-menu-item ${deletedRowKeys.has(contextMenu.pkKey) ? "" : "danger"}`}
+            onClick={() => {
+              toggleDeleteRow(contextMenu.pkKey);
+              setContextMenu(null);
+            }}
+          >
+            {deletedRowKeys.has(contextMenu.pkKey) ? <RotateCcw size={13} /> : <Trash2 size={13} />}
+            <span>{deletedRowKeys.has(contextMenu.pkKey) ? "Restore Record (ยกเลิกการลบ)" : "Delete Record (ลบแถว)"}</span>
+          </button>
+        </div>
+      )}
+
+      {/* Detailed Searchable Row Inspector Modal */}
+      {inspectRowModal && (
+        <div className="row-detail-overlay" onClick={() => setInspectRowModal(null)}>
+          <div className="row-detail-card" onClick={(e) => e.stopPropagation()}>
+            {/* Modal Header */}
+            <div className="row-detail-header">
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <div className="gis-icon-tag">
+                  <Eye size={15} />
+                </div>
+                <div>
+                  <div className="gis-title">Record Details #{page * pageSize + inspectRowModal.rowIdx + 1}</div>
+                  <div className="gis-subtitle">
+                    Table: {tableName} &bull; {columns.length} columns
+                  </div>
+                </div>
+              </div>
+
+              {/* Live Search inside Row Fields */}
+              <div className="row-detail-search-box">
+                <Search size={13} style={{ color: "var(--text-muted)" }} />
+                <input
+                  className="row-detail-search-input font-mono"
+                  placeholder="Search fields or values..."
+                  value={inspectSearchTerm}
+                  onChange={(e) => setInspectSearchTerm(e.target.value)}
+                  autoFocus
+                />
+                {inspectSearchTerm && (
+                  <button
+                    style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", padding: 0 }}
+                    onClick={() => setInspectSearchTerm("")}
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+
+              <button className="gis-close-btn" onClick={() => setInspectRowModal(null)} title="Close (Esc)">
+                <X size={15} />
+              </button>
+            </div>
+
+            {/* Modal Body - Field Cards */}
+            <div className="row-detail-body">
+              {columns
+                .filter((col) => {
+                  if (!inspectSearchTerm.trim()) return true;
+                  const term = inspectSearchTerm.toLowerCase();
+                  const val = inspectRowModal.row[col.name];
+                  const valStr = val === null || val === undefined ? "null" : typeof val === "object" ? JSON.stringify(val) : String(val);
+                  return col.name.toLowerCase().includes(term) || col.type.toLowerCase().includes(term) || valStr.toLowerCase().includes(term);
+                })
+                .map((col) => {
+                  const val = inspectRowModal.row[col.name];
+                  const isNull = val === null || val === undefined;
+                  const isGeom = isGeometryColumn(col.type, col.name);
+                  const gisSum = isGeom && !isNull ? formatGisSummary(val) : null;
+                  const valStr = isNull ? "NULL" : typeof val === "object" ? JSON.stringify(val, null, 2) : String(val);
+                  const isMatch = inspectSearchTerm.trim().length > 0;
+
+                  return (
+                    <div key={col.name} className={`row-detail-field-card ${isMatch ? "highlighted" : ""}`}>
+                      <div className="row-detail-field-header">
+                        <div className="row-detail-field-meta">
+                          {col.primaryKey && (
+                            <span className="field-pk-badge font-mono" title="Primary Key">
+                              <Key size={10} /> PK
+                            </span>
+                          )}
+                          {col.autoIncrement && (
+                            <span className="field-auto-badge font-mono" title="Auto Increment">
+                              <Zap size={10} /> AUTO
+                            </span>
+                          )}
+                          <span className="row-detail-field-name">{col.name}</span>
+                          <span className="row-detail-field-type font-mono">{col.type}</span>
+                          {isGeom && (
+                            <span className="gis-badge-pill" style={{ pointerEvents: "none" }}>
+                              <Globe size={9} /> GIS
+                            </span>
+                          )}
+                        </div>
+
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                          {isGeom && !isNull && (
+                            <button
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => {
+                                setGisModalData({
+                                  title: `${tableName} — ${col.name}`,
+                                  subtitle: `Record #${page * pageSize + inspectRowModal.rowIdx + 1}`,
+                                  value: val,
+                                });
+                              }}
+                              title="View on Map"
+                            >
+                              <Globe size={11} />
+                              <span>Map</span>
+                            </button>
+                          )}
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => {
+                              navigator.clipboard.writeText(valStr);
+                            }}
+                            title="Copy field value"
+                          >
+                            <Copy size={11} />
+                            <span>Copy</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className={`row-detail-field-val font-mono ${isNull ? "is-null" : ""}`}>
+                        {isGeom && gisSum ? (
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                            <span className="gis-badge-pill" style={{ margin: 0 }}>
+                              <Globe size={10} /> {gisSum.label}
+                            </span>
+                            <span style={{ color: "var(--text-sub)", fontSize: "11px" }}>{valStr}</span>
+                          </div>
+                        ) : (
+                          valStr
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+
+            {/* Modal Footer Actions */}
+            <div className="row-detail-footer">
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    navigator.clipboard.writeText(JSON.stringify(inspectRowModal.row, null, 2));
+                  }}
+                  title="Copy full row as JSON"
+                >
+                  <Copy size={12} />
+                  <span>Copy JSON</span>
+                </button>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    const cols = Object.keys(inspectRowModal.row).filter((k) => inspectRowModal.row[k] !== undefined);
+                    const colList = cols.map((c) => `"${c}"`).join(", ");
+                    const valList = cols.map((c) => {
+                      const v = inspectRowModal.row[c];
+                      if (v === null) return "NULL";
+                      if (typeof v === "number" || typeof v === "boolean") return String(v);
+                      return `'${String(v).replace(/'/g, "''")}'`;
+                    }).join(", ");
+                    const sql = `INSERT INTO "${tableName}" (${colList}) VALUES (${valList});`;
+                    navigator.clipboard.writeText(sql);
+                  }}
+                  title="Copy full row as SQL INSERT statement"
+                >
+                  <FileCode size={12} />
+                  <span>Copy SQL</span>
+                </button>
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <button
+                  className={`btn btn-sm ${deletedRowKeys.has(inspectRowModal.pkKey) ? "btn-secondary" : "btn-danger"}`}
+                  onClick={() => {
+                    toggleDeleteRow(inspectRowModal.pkKey);
+                  }}
+                >
+                  {deletedRowKeys.has(inspectRowModal.pkKey) ? <RotateCcw size={12} /> : <Trash2 size={12} />}
+                  <span>{deletedRowKeys.has(inspectRowModal.pkKey) ? "Restore Record" : "Delete Record"}</span>
+                </button>
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={() => {
+                    const rIdx = inspectRowModal.rowIdx;
+                    const rData = inspectRowModal.row;
+                    setInspectRowModal(null);
+                    openRowModal(rIdx, rData, false);
+                  }}
+                >
+                  <Edit3 size={12} />
+                  <span>Edit Record</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* GIS Spatial Map Viewer Modal */}
+      {gisModalData && (
+        <GisMapViewer
+          value={gisModalData.value}
+          title={gisModalData.title}
+          subtitle={gisModalData.subtitle}
+          pickerMode={gisModalData.pickerMode}
+          onPickCoordinates={gisModalData.onPick}
+          onClose={() => setGisModalData(null)}
+        />
       )}
 
       <style jsx>{`

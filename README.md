@@ -29,6 +29,7 @@ Instead of building another application filled with panels, dashboards, and abst
 * Explore
 * Query
 * Edit
+* Visualize (ER & GIS Maps)
 * Understand
 * Commit
 
@@ -40,96 +41,127 @@ Everything is designed around clarity, speed, and a native macOS experience.
 
 ## ✨ Features
 
-### Interactive Data Explorer
+### 📊 Interactive Data Explorer
+Explore and manage database records through a clean, high-performance table interface:
+* **Browse rows & columns** with smooth virtualization and adjustable page sizes
+* **Database-aware cell rendering** with specialized badges for DateTime, Booleans, JSON, Binary/BLOB, Enums, UUIDs, Auto-increment, and Spatial GIS geometries
+* **Inline Cell Editing** — Edit values directly inside cells with double-click without modal friction
+* **Transactional Commit Bar** — Changes are staged locally (Edit → Review → Commit) with full rollback and diff inspection before writing to the database
+* **Multi-column sorting & advanced filtering** with operators (`equals`, `contains`, `startsWith`, `endsWith`, `gt`, `gte`, `lt`, `lte`, `isNull`, `isNotNull`)
+* **Quick search** across rows and columns
+* **Export records** to CSV, JSON, and SQL `INSERT` statements
+* **Soft-delete & restoration** with staged deletion indicators
 
-Explore and manage database records through a familiar table interface.
+### 🖱️ Row Context Menu & Searchable Detailed Inspector
+Right-click on any table row to access instant contextual actions:
+* 🔍 **Detailed Record Inspector** — Full-screen searchable record modal with real-time field/value search, type badges, JSON viewers, and quick-copy buttons
+* ✏️ **Edit Record** — Comprehensive modal editor with auto-increment toggles and NULL switches
+* 🗺️ **View on Map** — Directly open spatial features on the interactive GIS map
+* 📑 **Duplicate Row** — 1-click clone row into the pending insert batch
+* 📋 **Copy as JSON & SQL** — Fast clipboard export of row data
+* 🗑️ **Delete / Restore Record** — Stage row deletion or restore marked rows
 
-* Browse rows and columns
-* Create records
-* Edit records
-* Delete records
-* Sort and filter data
-* Pagination
-* Database-aware cell rendering
+### 🗺️ GIS & Spatial Data Support (Powered by MapLibre GL)
+First-class support for spatial databases and geometry types:
+* **Multi-Engine Spatial Support** — PostGIS (`geometry`, `geography`), MySQL Spatial (`GEOMETRY`, `POINT`, `LINESTRING`, `POLYGON`, `MULTIPOINT`, `MULTIPOLYGON`), and SpatiaLite
+* **Universal Format Parser** — Automatically recognizes and decodes WKT (Well-Known Text), GeoJSON, and EWKB/WKB Hex binary formats
+* **Interactive Map Viewer (MapLibre GL)**:
+  * High-performance vector & raster map rendering
+  * Multiple basemap layers: Dark Matter, Positron Light, OpenStreetMap, and Satellite Imagery
+  * Single geometry inspection mode & table-wide multi-record layer view
+  * Auto-fit bounding box (`fitBounds`), zoom controls, and cursor coordinate HUD
+  * **Interactive Coordinate Picker** — Click on the map to pick coordinates when inserting or editing records
+  * **Export to GeoJSON** — Export spatial table layers directly into standard `.geojson` files
 
-### Inline Cell Editing
+### 💻 Multi-Tab SQL Console
+A powerful SQL workspace built for speed:
+* **Monaco-powered SQL Editor** with syntax highlighting, auto-complete, and query formatting
+* **Multi-tab workspace** to write and run multiple queries concurrently
+* **Execution diagnostics** — Real-time query execution timing, affected rows, and returned record counters
+* **Query history** and log tracking
+* **Export query results** to CSV, JSON, and SQL
 
-Edit values directly inside the data grid.
+### 🕸️ Visual Schema & ER Diagram
+Understand your database architecture visually:
+* **Interactive ER Diagram** powered by modern node-graph canvas (`@xyflow/react`)
+* **Automatic relationship discovery** — Visualizes foreign key connections and routing between tables
+* **Table cards** with column types, primary key badges, and spatial GIS indicators
+* **Canvas controls** — Zoom, pan, minimap, and search filter across diagram tables
 
-No unnecessary dialogs or multi-step forms when all you need to do is change a value.
+### 🛠️ Table Structure & Visual Designer
+Design and modify database tables with safety:
+* **Visual Table Designer** for creating new tables or altering existing schemas
+* **Column editor** with type suggestions (including GIS spatial types), nullability, defaults, primary keys, and auto-increment
+* **Foreign keys & index managers**
+* **DDL Preview & Verification** — Generates clean SQL DDL and prompts with confirmation before running destructive schema changes
 
-### Transactional Commit Bar
+### 🖥️ Database Administration & Monitoring (Admin Panel)
+Monitor and manage your database servers in real-time:
+* **Server Health & Metrics** — Database engine version, uptime, connection pool statistics
+* **Process & Connection Manager** — View active queries and terminate rogue connections (Kill Process)
+* **Storage Metrics** — Database size, table storage usage, and index sizes
+* **Configuration Variables** viewer
 
-Changes are clearly separated from the database until you decide to commit them.
+### 📜 Audit Log & Action Trail
+Track and inspect all operations performed through dodb:
+* Comprehensive audit logging for queries, mutations (`INSERT`/`UPDATE`/`DELETE`), DDL changes, and connection events
+* Filter by status (`SUCCESS`/`ERROR`), connection profile, action type, and date range
+* Execution duration and error stack trace inspection
 
-**Edit → Review → Commit**
+### ⌨️ Native macOS Ergonomics & Shortcuts
+* **Command Palette (`Cmd+K` / `Ctrl+K`)** for rapid navigation, switching tables, and running actions
+* **Theme customizer** — Seamless Dark Mode and Light Mode matching macOS system appearance
+* **GUI scale adjustments** for custom screen resolutions
+* **Encrypted connection credentials** stored safely using AES-256-GCM encryption
 
-This makes data editing more deliberate, transparent, and predictable.
+---
 
-### Multi-Database Support
+## 🗄 Supported Database Engines
 
-dodb currently supports:
-
-* PostgreSQL
-* MySQL
-* MariaDB
-* SQLite
-
-The database layer is designed to make adding additional engines possible as the project evolves.
-
-### Native macOS Experience
-
-dodb is built with macOS as the primary platform.
-
-The goal isn't to make a web application look like a Mac application.
-
-The goal is to build a database application that **feels at home on macOS**.
-
-From window behavior and keyboard interaction to layout, typography, and performance, dodb is designed with the platform in mind.
+| Engine | Version | Spatial / GIS Support |
+| :--- | :--- | :--- |
+| **PostgreSQL** | 10+ / 14 / 15 / 16 / 17 | ✅ PostGIS (`geometry`, `geography`, WKT, EWKB) |
+| **MySQL** | 5.7 / 8.0+ | ✅ MySQL Spatial (`GEOMETRY`, `POINT`, `POLYGON`, etc.) |
+| **MariaDB** | 10.3+ | ✅ MariaDB Spatial |
+| **SQLite** | 3.x | ✅ SpatiaLite & WKT / GeoJSON |
 
 ---
 
 ## 🏗 Architecture
 
-dodb was completely rewritten from its original Node.js/Electron architecture into a Rust-based native stack.
+dodb is built with a high-performance native stack:
 
 | Layer            | Technology            |
 | ---------------- | --------------------- |
 | Desktop Shell    | Tauri 2               |
 | Frontend         | Next.js 15 · React 19 |
-| Styling          | Tailwind CSS          |
+| Map Engine       | MapLibre GL           |
+| Diagram Engine   | React Flow (xyflow)   |
+| Editor           | Monaco Editor         |
 | Application Core | Rust · Tokio          |
 | Database Access  | SQLx                  |
 | Communication    | Tauri IPC             |
 | Platform         | macOS                 |
 
-### Why Rust?
+### Why Rust & Tauri?
 
 Database applications deal with network connections, concurrent queries, large datasets, and long-running operations.
 
 Rust provides dodb with a foundation that is:
-
-* Memory safe
-* Efficient
-* Concurrent
-* Predictable
-* Well suited for native applications
-
-The goal is not simply to make dodb fast.
-
-It is to give the application a solid foundation that can scale with the features we want to build next.
+* **Memory safe** and lightweight
+* **Efficient** with zero garbage-collection pauses
+* **Concurrent** using Tokio asynchronous runtime
+* **Predictable** for native desktop performance
 
 ---
 
-## 🔐 Privacy
+## 🔐 Privacy & Security
 
 Your database is your data.
 
-dodb is designed around direct connections from your Mac to your database.
-
-There is no requirement for a cloud account just to connect to a database, and dodb does not need to upload your database contents to a remote service in order to function.
-
-**Your databases stay yours.**
+* **Direct connections** — Direct socket connection from your Mac to your database.
+* **No cloud proxy** — dodb never sends your database credentials, schema, or records to external servers.
+* **Encrypted storage** — Connection passwords and sensitive profile metadata are encrypted locally using AES-256-GCM.
 
 ---
 
@@ -137,9 +169,8 @@ There is no requirement for a cloud account just to connect to a database, and d
 
 ### Requirements
 
-* macOS 11.0 or later
-* Apple Silicon or Intel
-* Rust toolchain
+* macOS 11.0 or later (Apple Silicon or Intel)
+* Rust toolchain (`cargo`, `rustc`)
 * Node.js 18 or later
 * pnpm 8 or later
 
@@ -162,15 +193,13 @@ pnpm install
 pnpm dev
 ```
 
-This starts the Tauri application with frontend hot reload and a development Rust build.
-
-> Development builds are intentionally unoptimized, so the application may feel slower than a production build.
+This starts the Tauri application with hot-reload frontend and dev Rust core.
 
 ---
 
 ## 📦 Production Build
 
-Build the optimized macOS application with:
+Build the optimized macOS application bundle:
 
 ```bash
 pnpm tauri build
@@ -182,135 +211,8 @@ Build artifacts are generated under:
 src-tauri/target/release/bundle/
 ```
 
-This includes:
-
 * `.app` — macOS application bundle
 * `.dmg` — macOS disk image
-
----
-
-## 📁 Project Structure
-
-```text
-dodb/
-├── src-tauri/
-│   ├── src/
-│   │   ├── db_core/
-│   │   ├── profiles/
-│   │   └── main.rs
-│   ├── Cargo.toml
-│   └── tauri.conf.json
-│
-├── ui/
-│   ├── src/
-│   └── package.json
-│
-├── package.json
-└── README.md
-```
-
-The project is separated into two primary layers:
-
-**UI**
-Handles presentation, interaction, and the user experience.
-
-**Rust Core**
-Handles database connections, queries, application logic, and native functionality.
-
-Communication between the two layers happens through Tauri's IPC layer rather than a local REST server.
-
----
-
-## 🛣 Roadmap
-
-dodb is actively evolving.
-
-Areas currently being explored include:
-
-* [ ] Advanced SQL editor
-* [ ] Query history
-* [ ] Multiple database connections
-* [ ] Improved schema browser
-* [ ] Relationship visualization
-* [ ] Import and export workflows
-* [ ] Database comparison
-* [ ] Migration tools
-* [ ] Additional database engines
-* [ ] Advanced keyboard workflows
-* [ ] Large dataset performance improvements
-
-The roadmap is intentionally flexible.
-
-New features should make dodb **more useful**, not simply **more complicated**.
-
----
-
-## 🤝 Contributing
-
-dodb is open source and contributions are welcome.
-
-You can contribute by:
-
-* Reporting bugs
-* Suggesting improvements
-* Improving the UI
-* Optimizing the Rust core
-* Adding database support
-* Improving documentation
-* Submitting pull requests
-
-For larger changes, opening an issue before starting implementation is encouraged so the direction can be discussed first.
-
----
-
-## 🧭 Design Principles
-
-dodb is built around a few principles.
-
-### Clarity over complexity
-
-A powerful database tool does not need a complicated interface.
-
-### Native over wrapped
-
-Desktop applications should feel like desktop applications.
-
-### Visible over hidden
-
-Users should understand what their database tool is doing.
-
-### Fast over flashy
-
-Performance is part of the experience.
-
-### Open over locked-in
-
-Your database belongs to you.
-
-### Useful over feature-heavy
-
-Every feature should solve a real problem.
-
----
-
-## The idea behind dodb
-
-The name started with a simple word:
-
-**ดู**
-
-In Thai, *ดู* means **to see, to look, or to watch**.
-
-And that's exactly what we want dodb to help you do.
-
-**See your data.**
-**See your schema.**
-**See your changes.**
-**See your database.**
-
-Then, when you're ready:
-
-**Change it.**
 
 ---
 
