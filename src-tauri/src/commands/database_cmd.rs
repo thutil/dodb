@@ -3,6 +3,77 @@ use crate::models::SupportedDB;
 use crate::db_core::{get_pool, execute_query, execute_command_raw, execute_transaction, DbState};
 use crate::profiles;
 
+// ==========================================
+// Dialect Helpers (Postgres / MariaDB / SQLite)
+// ==========================================
+
+fn quote_table_ident(db_type: SupportedDB, table: &str) -> String {
+    match db_type {
+        SupportedDB::Postgres => {
+            if table.contains('.') {
+                let parts: Vec<&str> = table.splitn(2, '.').collect();
+                format!("\"{}\".\"{}\"", parts[0].replace('"', ""), parts[1].replace('"', ""))
+            } else {
+                format!("\"{}\"", table.replace('"', ""))
+            }
+        },
+        SupportedDB::Mariadb => format!("`{}`", table.replace('`', "")),
+        SupportedDB::Sqlite => format!("\"{}\"", table.replace('"', "")),
+    }
+}
+
+fn quote_column_ident(db_type: SupportedDB, col: &str) -> String {
+    match db_type {
+        SupportedDB::Postgres | SupportedDB::Sqlite => format!("\"{}\"", col.replace('"', "")),
+        SupportedDB::Mariadb => format!("`{}`", col.replace('`', "")),
+    }
+}
+
+fn format_sql_value(db_type: SupportedDB, val: &serde_json::Value) -> String {
+    if val.is_null() {
+        "NULL".to_string()
+    } else if let Some(n) = val.as_number() {
+        n.to_string()
+    } else if let Some(b) = val.as_bool() {
+        match db_type {
+            SupportedDB::Sqlite => if b { "1".to_string() } else { "0".to_string() },
+            SupportedDB::Mariadb | SupportedDB::Postgres => if b { "TRUE".to_string() } else { "FALSE".to_string() },
+        }
+    } else if let Some(s) = val.as_str() {
+        format!("'{}'", s.replace('\'', "''"))
+    } else {
+        format!("'{}'", val.to_string().replace('\'', "''"))
+    }
+}
+
+fn build_filter_clause(db_type: SupportedDB, col: &str, op: &str, val: &str) -> Option<String> {
+    if col.is_empty() {
+        return None;
+    }
+    let col_ident = quote_column_ident(db_type, col);
+    let val_escaped = val.replace('\'', "''");
+
+    let clause = match op {
+        "equals" => format!("{} = '{}'", col_ident, val_escaped),
+        "contains" => format!("{} LIKE '%{}%'", col_ident, val_escaped),
+        "startsWith" => format!("{} LIKE '{}%'", col_ident, val_escaped),
+        "endsWith" => format!("{} LIKE '%{}'", col_ident, val_escaped),
+        "gt" => format!("{} > '{}'", col_ident, val_escaped),
+        "gte" => format!("{} >= '{}'", col_ident, val_escaped),
+        "lt" => format!("{} < '{}'", col_ident, val_escaped),
+        "lte" => format!("{} <= '{}'", col_ident, val_escaped),
+        "neq" => format!("{} != '{}'", col_ident, val_escaped),
+        "isNull" => format!("{} IS NULL", col_ident),
+        "isNotNull" => format!("{} IS NOT NULL", col_ident),
+        _ => return None,
+    };
+    Some(clause)
+}
+
+// ==========================================
+// Database Commands
+// ==========================================
+
 #[command]
 pub async fn get_databases(id: String, state: State<'_, DbState>) -> Result<Vec<String>, String> {
     let profiles = profiles::load_profiles()?;
@@ -103,7 +174,7 @@ pub async fn get_columns(id: String, database: String, table: String, state: Sta
                 ORDER BY c.ordinal_position
             ", schema_part, table_part)
         },
-        SupportedDB::Mariadb => format!("SHOW COLUMNS FROM `{}`", table.replace('`', "")),
+        SupportedDB::Mariadb => format!("SHOW FULL COLUMNS FROM `{}`", table.replace('`', "")),
         SupportedDB::Sqlite => format!("PRAGMA table_info(\"{}\")", table.replace('"', "")),
     };
     
@@ -115,62 +186,65 @@ pub async fn get_columns(id: String, database: String, table: String, state: Sta
         if let Some(obj) = row.as_object() {
             let mut col_info = serde_json::Map::new();
             
-            if profile.r#type == SupportedDB::Sqlite {
-                let name = obj.get("name").cloned().unwrap_or_default();
-                let col_type = obj.get("type").cloned().unwrap_or_default();
-                col_info.insert("name".to_string(), name);
-                col_info.insert("type".to_string(), col_type.clone());
-                
-                let notnull_val = obj.get("notnull").unwrap_or(&serde_json::Value::Null);
-                let is_not_null = notnull_val.as_i64().map(|v| v != 0).unwrap_or_else(|| notnull_val.as_str() == Some("1"));
-                col_info.insert("nullable".to_string(), serde_json::Value::Bool(!is_not_null));
-                
-                let pk_val = obj.get("pk").unwrap_or(&serde_json::Value::Null);
-                let is_pk = pk_val.as_i64().map(|v| v != 0).unwrap_or_else(|| pk_val.as_str() == Some("1"));
-                col_info.insert("primaryKey".to_string(), serde_json::Value::Bool(is_pk));
-                col_info.insert("default".to_string(), obj.get("dflt_value").cloned().unwrap_or(serde_json::Value::Null));
+            match profile.r#type {
+                SupportedDB::Sqlite => {
+                    let name = obj.get("name").cloned().unwrap_or_default();
+                    let col_type = obj.get("type").cloned().unwrap_or_default();
+                    col_info.insert("name".to_string(), name);
+                    col_info.insert("type".to_string(), col_type.clone());
+                    
+                    let notnull_val = obj.get("notnull").unwrap_or(&serde_json::Value::Null);
+                    let is_not_null = notnull_val.as_i64().map(|v| v != 0).unwrap_or_else(|| notnull_val.as_str() == Some("1"));
+                    col_info.insert("nullable".to_string(), serde_json::Value::Bool(!is_not_null));
+                    
+                    let pk_val = obj.get("pk").unwrap_or(&serde_json::Value::Null);
+                    let is_pk = pk_val.as_i64().map(|v| v != 0).unwrap_or_else(|| pk_val.as_str() == Some("1"));
+                    col_info.insert("primaryKey".to_string(), serde_json::Value::Bool(is_pk));
+                    col_info.insert("default".to_string(), obj.get("dflt_value").cloned().unwrap_or(serde_json::Value::Null));
 
-                let is_auto = is_pk && col_type.as_str().map(|t| t.to_lowercase().contains("int")).unwrap_or(false);
-                col_info.insert("autoIncrement".to_string(), serde_json::Value::Bool(is_auto));
-            } else if profile.r#type == SupportedDB::Mariadb {
-                col_info.insert("name".to_string(), obj.get("Field").cloned().unwrap_or_default());
-                col_info.insert("type".to_string(), obj.get("Type").cloned().unwrap_or_default());
-                
-                let is_nullable = obj.get("Null").and_then(|v| v.as_str()).unwrap_or("NO") == "YES";
-                col_info.insert("nullable".to_string(), serde_json::Value::Bool(is_nullable));
-                
-                let is_pk = obj.get("Key").and_then(|v| v.as_str()).unwrap_or("") == "PRI";
-                col_info.insert("primaryKey".to_string(), serde_json::Value::Bool(is_pk));
-                col_info.insert("default".to_string(), obj.get("Default").cloned().unwrap_or(serde_json::Value::Null));
+                    let is_auto = is_pk && col_type.as_str().map(|t| t.to_lowercase().contains("int")).unwrap_or(false);
+                    col_info.insert("autoIncrement".to_string(), serde_json::Value::Bool(is_auto));
+                },
+                SupportedDB::Mariadb => {
+                    col_info.insert("name".to_string(), obj.get("Field").cloned().unwrap_or_default());
+                    col_info.insert("type".to_string(), obj.get("Type").cloned().unwrap_or_default());
+                    
+                    let is_nullable = obj.get("Null").and_then(|v| v.as_str()).unwrap_or("NO") == "YES";
+                    col_info.insert("nullable".to_string(), serde_json::Value::Bool(is_nullable));
+                    
+                    let is_pk = obj.get("Key").and_then(|v| v.as_str()).unwrap_or("") == "PRI";
+                    col_info.insert("primaryKey".to_string(), serde_json::Value::Bool(is_pk));
+                    col_info.insert("default".to_string(), obj.get("Default").cloned().unwrap_or(serde_json::Value::Null));
 
-                let extra_val = obj.get("Extra").and_then(|v| v.as_str()).unwrap_or("");
-                let is_auto = extra_val.to_lowercase().contains("auto_increment");
-                col_info.insert("autoIncrement".to_string(), serde_json::Value::Bool(is_auto));
-                col_info.insert("extra".to_string(), serde_json::Value::String(extra_val.to_string()));
-            } else {
-                // Postgres
-                col_info.insert("name".to_string(), obj.get("name").cloned().unwrap_or_default());
-                col_info.insert("type".to_string(), obj.get("type").cloned().unwrap_or_default());
-                
-                let nullable_val = obj.get("nullable").unwrap_or(&serde_json::Value::Null);
-                let is_nullable = nullable_val.as_bool().unwrap_or_else(|| nullable_val.as_str() == Some("true") || nullable_val.as_str() == Some("1") || nullable_val.as_i64() == Some(1));
-                col_info.insert("nullable".to_string(), serde_json::Value::Bool(is_nullable));
-                
-                let pk_val = obj.get("primary_key").unwrap_or(&serde_json::Value::Null);
-                let is_pk = pk_val.as_bool().unwrap_or_else(|| pk_val.as_str() == Some("true") || pk_val.as_str() == Some("1") || pk_val.as_i64() == Some(1));
-                col_info.insert("primaryKey".to_string(), serde_json::Value::Bool(is_pk));
-                let def_val = obj.get("default_value").cloned().unwrap_or(serde_json::Value::Null);
-                col_info.insert("default".to_string(), def_val.clone());
+                    let extra_val = obj.get("Extra").and_then(|v| v.as_str()).unwrap_or("");
+                    let is_auto = extra_val.to_lowercase().contains("auto_increment");
+                    col_info.insert("autoIncrement".to_string(), serde_json::Value::Bool(is_auto));
+                    col_info.insert("extra".to_string(), serde_json::Value::String(extra_val.to_string()));
+                },
+                SupportedDB::Postgres => {
+                    col_info.insert("name".to_string(), obj.get("name").cloned().unwrap_or_default());
+                    col_info.insert("type".to_string(), obj.get("type").cloned().unwrap_or_default());
+                    
+                    let nullable_val = obj.get("nullable").unwrap_or(&serde_json::Value::Null);
+                    let is_nullable = nullable_val.as_bool().unwrap_or_else(|| nullable_val.as_str() == Some("true") || nullable_val.as_str() == Some("1") || nullable_val.as_i64() == Some(1));
+                    col_info.insert("nullable".to_string(), serde_json::Value::Bool(is_nullable));
+                    
+                    let pk_val = obj.get("primary_key").unwrap_or(&serde_json::Value::Null);
+                    let is_pk = pk_val.as_bool().unwrap_or_else(|| pk_val.as_str() == Some("true") || pk_val.as_str() == Some("1") || pk_val.as_i64() == Some(1));
+                    col_info.insert("primaryKey".to_string(), serde_json::Value::Bool(is_pk));
+                    let def_val = obj.get("default_value").cloned().unwrap_or(serde_json::Value::Null);
+                    col_info.insert("default".to_string(), def_val.clone());
 
-                let def_str = def_val.as_str().unwrap_or("");
-                let is_auto = def_str.contains("nextval") || def_str.contains("identity");
-                col_info.insert("autoIncrement".to_string(), serde_json::Value::Bool(is_auto));
+                    let def_str = def_val.as_str().unwrap_or("");
+                    let is_auto = def_str.contains("nextval") || def_str.contains("identity");
+                    col_info.insert("autoIncrement".to_string(), serde_json::Value::Bool(is_auto));
+                },
             }
             columns.push(serde_json::Value::Object(col_info));
         }
     }
     
-    // Fallback: If information_schema had no rows, discover headers dynamically
+    // Fallback: If information_schema / catalog returned empty, probe columns dynamically
     if columns.is_empty() {
         let fallback_query = match profile.r#type {
             SupportedDB::Postgres => {
@@ -221,23 +295,10 @@ pub async fn get_rows(
     let profiles = profiles::load_profiles()?;
     let profile = profiles.iter().find(|p| p.id == id).ok_or("Profile not found")?;
     
-    // Identifier quoting depends on SQL dialect
-    let table_ident = match profile.r#type {
-        SupportedDB::Postgres => {
-            if table.contains('.') {
-                let parts: Vec<&str> = table.splitn(2, '.').collect();
-                format!("\"{}\".\"{}\"", parts[0].replace('"', ""), parts[1].replace('"', ""))
-            } else {
-                format!("\"{}\"", table.replace('"', ""))
-            }
-        },
-        SupportedDB::Mariadb => format!("`{}`", table.replace('`', "")),
-        SupportedDB::Sqlite => format!("\"{}\"", table.replace('"', "")),
-    };
+    let table_ident = quote_table_ident(profile.r#type, &table);
     
-    // Build WHERE clause
+    // Build WHERE clause using dialect-specific column quoting and escaping
     let mut where_clauses = Vec::new();
-    
     if let Some(flts) = filters {
         for f in flts {
             if let Some(obj) = f.as_object() {
@@ -245,30 +306,9 @@ pub async fn get_rows(
                 let op = obj.get("operator").and_then(|v| v.as_str()).unwrap_or("");
                 let val = obj.get("value").and_then(|v| v.as_str()).unwrap_or("");
                 
-                if col.is_empty() { continue; }
-                
-                let col_ident = match profile.r#type {
-                    SupportedDB::Postgres | SupportedDB::Sqlite => format!("\"{}\"", col.replace('"', "")),
-                    SupportedDB::Mariadb => format!("`{}`", col.replace('`', "")),
-                };
-                
-                let val_escaped = val.replace('\'', "''");
-                
-                let clause = match op {
-                    "equals" => format!("{} = '{}'", col_ident, val_escaped),
-                    "contains" => format!("{} LIKE '%{}%'", col_ident, val_escaped),
-                    "startsWith" => format!("{} LIKE '{}%'", col_ident, val_escaped),
-                    "endsWith" => format!("{} LIKE '%{}'", col_ident, val_escaped),
-                    "gt" => format!("{} > '{}'", col_ident, val_escaped),
-                    "gte" => format!("{} >= '{}'", col_ident, val_escaped),
-                    "lt" => format!("{} < '{}'", col_ident, val_escaped),
-                    "lte" => format!("{} <= '{}'", col_ident, val_escaped),
-                    "neq" => format!("{} != '{}'", col_ident, val_escaped),
-                    "isNull" => format!("{} IS NULL", col_ident),
-                    "isNotNull" => format!("{} IS NOT NULL", col_ident),
-                    _ => continue,
-                };
-                where_clauses.push(clause);
+                if let Some(clause) = build_filter_clause(profile.r#type, col, op, val) {
+                    where_clauses.push(clause);
+                }
             }
         }
     }
@@ -284,10 +324,7 @@ pub async fn get_rows(
         if col.is_empty() {
             "".to_string()
         } else {
-            let col_ident = match profile.r#type {
-                SupportedDB::Postgres | SupportedDB::Sqlite => format!("\"{}\"", col.replace('"', "")),
-                SupportedDB::Mariadb => format!("`{}`", col.replace('`', "")),
-            };
+            let col_ident = quote_column_ident(profile.r#type, &col);
             let dir = sort_order.unwrap_or_else(|| "ASC".to_string()).to_uppercase();
             let dir = if dir == "DESC" { "DESC" } else { "ASC" };
             format!("ORDER BY {} {}", col_ident, dir)
@@ -297,11 +334,11 @@ pub async fn get_rows(
     };
     
     let query = format!("SELECT * FROM {} {} {} LIMIT {} OFFSET {}", table_ident, where_sql, order_sql, limit, offset);
-    let count_query = format!("SELECT COUNT(*)::bigint AS total FROM {} {}", table_ident, where_sql);
+    let count_query = format!("SELECT COUNT(*) AS total FROM {} {}", table_ident, where_sql);
     
     let pool = get_pool(&state, profile, Some(&database)).await?;
     
-    // Try querying with quoted identifier first; fallback to unquoted if identifier casing mismatch
+    // Try querying with quoted identifier first; fallback to unquoted if identifier casing mismatch occurs (e.g. Postgres lowercase tables)
     let (rows, count_rows) = match tokio::join!(
         execute_query(&pool, &query),
         execute_query(&pool, &count_query)
@@ -309,7 +346,7 @@ pub async fn get_rows(
         (Ok(r), Ok(c)) => (r, c),
         _ => {
             let unquoted_query = format!("SELECT * FROM {} {} {} LIMIT {} OFFSET {}", table, where_sql, order_sql, limit, offset);
-            let unquoted_count = format!("SELECT COUNT(*)::bigint AS total FROM {} {}", table, where_sql);
+            let unquoted_count = format!("SELECT COUNT(*) AS total FROM {} {}", table, where_sql);
             let (r2, c2) = tokio::join!(
                 execute_query(&pool, &unquoted_query),
                 execute_query(&pool, &unquoted_count)
@@ -336,7 +373,6 @@ pub async fn get_rows(
     Ok(serde_json::json!({ "rows": rows, "total": total }))
 }
 
-
 #[command]
 pub async fn execute_command(id: String, database: String, command: String, state: State<'_, DbState>) -> Result<serde_json::Value, String> {
     let profiles = profiles::load_profiles()?;
@@ -353,7 +389,7 @@ pub async fn execute_command(id: String, database: String, command: String, stat
                     Ok(serde_json::json!({ "rows": Vec::<serde_json::Value>::new(), "affectedRows": affected }))
                 }
                 Err(_) => {
-                    // Return the descriptive query error
+                    // Return the original query error
                     Err(err)
                 }
             }
@@ -366,14 +402,10 @@ pub async fn commit_changes(id: String, database: String, table: String, changes
     let profiles = profiles::load_profiles()?;
     let profile = profiles.iter().find(|p| p.id == id).ok_or("Profile not found")?;
     
-    let table_ident = match profile.r#type {
-        SupportedDB::Postgres | SupportedDB::Sqlite => format!("\"{}\"", table),
-        SupportedDB::Mariadb => format!("`{}`", table),
-    };
-    
+    let table_ident = quote_table_ident(profile.r#type, &table);
     let mut queries = Vec::new();
     
-    // Inserts
+    // 1. Inserts
     if let Some(inserts) = changes.get("inserts").and_then(|v| v.as_array()) {
         for row in inserts {
             if let Some(obj) = row.as_object() {
@@ -383,23 +415,8 @@ pub async fn commit_changes(id: String, database: String, table: String, changes
                 let mut vals = Vec::new();
                 
                 for (k, v) in obj {
-                    let col_ident = match profile.r#type {
-                        SupportedDB::Postgres | SupportedDB::Sqlite => format!("\"{}\"", k),
-                        SupportedDB::Mariadb => format!("`{}`", k),
-                    };
-                    cols.push(col_ident);
-                    
-                    if v.is_null() {
-                        vals.push("NULL".to_string());
-                    } else if let Some(n) = v.as_number() {
-                        vals.push(n.to_string());
-                    } else if let Some(b) = v.as_bool() {
-                        vals.push(if b { "true".to_string() } else { "false".to_string() });
-                    } else if let Some(s) = v.as_str() {
-                        vals.push(format!("'{}'", s.replace("'", "''")));
-                    } else {
-                        vals.push(format!("'{}'", v.to_string().replace("'", "''")));
-                    }
+                    cols.push(quote_column_ident(profile.r#type, k));
+                    vals.push(format_sql_value(profile.r#type, v));
                 }
                 
                 queries.push(format!("INSERT INTO {} ({}) VALUES ({})", table_ident, cols.join(", "), vals.join(", ")));
@@ -407,7 +424,7 @@ pub async fn commit_changes(id: String, database: String, table: String, changes
         }
     }
     
-    // Updates
+    // 2. Updates
     if let Some(updates) = changes.get("updates").and_then(|v| v.as_array()) {
         for row in updates {
             if let Some(obj) = row.as_object() {
@@ -416,38 +433,15 @@ pub async fn commit_changes(id: String, database: String, table: String, changes
                 
                 if pk_col.is_empty() || pk_val.is_null() { continue; }
                 
-                let pk_col_ident = match profile.r#type {
-                    SupportedDB::Postgres | SupportedDB::Sqlite => format!("\"{}\"", pk_col),
-                    SupportedDB::Mariadb => format!("`{}`", pk_col),
-                };
-                
-                let pk_val_str = if let Some(n) = pk_val.as_number() {
-                    n.to_string()
-                } else if let Some(s) = pk_val.as_str() {
-                    format!("'{}'", s.replace("'", "''"))
-                } else {
-                    format!("'{}'", pk_val.to_string().replace("'", "''"))
-                };
+                let pk_col_ident = quote_column_ident(profile.r#type, pk_col);
+                let pk_val_str = format_sql_value(profile.r#type, pk_val);
                 
                 if let Some(data) = obj.get("data").and_then(|v| v.as_object()) {
                     let mut sets = Vec::new();
                     for (k, v) in data {
-                        let col_ident = match profile.r#type {
-                            SupportedDB::Postgres | SupportedDB::Sqlite => format!("\"{}\"", k),
-                            SupportedDB::Mariadb => format!("`{}`", k),
-                        };
-                        
-                        if v.is_null() {
-                            sets.push(format!("{} = NULL", col_ident));
-                        } else if let Some(n) = v.as_number() {
-                            sets.push(format!("{} = {}", col_ident, n));
-                        } else if let Some(b) = v.as_bool() {
-                            sets.push(format!("{} = {}", col_ident, if b { "true" } else { "false" }));
-                        } else if let Some(s) = v.as_str() {
-                            sets.push(format!("{} = '{}'", col_ident, s.replace("'", "''")));
-                        } else {
-                            sets.push(format!("{} = '{}'", col_ident, v.to_string().replace("'", "''")));
-                        }
+                        let col_ident = quote_column_ident(profile.r#type, k);
+                        let val_str = format_sql_value(profile.r#type, v);
+                        sets.push(format!("{} = {}", col_ident, val_str));
                     }
                     
                     if !sets.is_empty() {
@@ -458,7 +452,7 @@ pub async fn commit_changes(id: String, database: String, table: String, changes
         }
     }
     
-    // Deletes
+    // 3. Deletes
     if let Some(deletes) = changes.get("deletes").and_then(|v| v.as_array()) {
         for row in deletes {
             if let Some(obj) = row.as_object() {
@@ -467,18 +461,8 @@ pub async fn commit_changes(id: String, database: String, table: String, changes
                 
                 if pk_col.is_empty() || pk_val.is_null() { continue; }
                 
-                let pk_col_ident = match profile.r#type {
-                    SupportedDB::Postgres | SupportedDB::Sqlite => format!("\"{}\"", pk_col),
-                    SupportedDB::Mariadb => format!("`{}`", pk_col),
-                };
-                
-                let pk_val_str = if let Some(n) = pk_val.as_number() {
-                    n.to_string()
-                } else if let Some(s) = pk_val.as_str() {
-                    format!("'{}'", s.replace("'", "''"))
-                } else {
-                    format!("'{}'", pk_val.to_string().replace("'", "''"))
-                };
+                let pk_col_ident = quote_column_ident(profile.r#type, pk_col);
+                let pk_val_str = format_sql_value(profile.r#type, pk_val);
                 
                 queries.push(format!("DELETE FROM {} WHERE {} = {}", table_ident, pk_col_ident, pk_val_str));
             }
@@ -496,4 +480,5 @@ pub async fn disconnect_database(id: Option<String>, state: State<'_, DbState>) 
     crate::db_core::close_profile_pools(&state, id.as_deref()).await?;
     Ok(true)
 }
+
 

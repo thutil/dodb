@@ -25,6 +25,8 @@ pub fn run() {
         get_rows,
         execute_command,
         commit_changes,
+        get_table_constraints,
+        execute_ddl,
         disconnect_database,
         // ER Diagram Discovery
         get_schema_diagram,
