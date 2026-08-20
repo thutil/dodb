@@ -1,6 +1,6 @@
 use tauri::{command, State};
 use crate::models::SupportedDB;
-use crate::db_core::{get_pool, execute_query, execute_command_raw, execute_transaction, DbState};
+use crate::db_core::{get_pool, execute_query, execute_command_raw, execute_transaction, DbState, TxStep};
 use crate::profiles;
 
 // ==========================================
@@ -17,7 +17,14 @@ fn quote_table_ident(db_type: SupportedDB, table: &str) -> String {
                 format!("\"{}\"", table.replace('"', ""))
             }
         },
-        SupportedDB::Mariadb => format!("`{}`", table.replace('`', "")),
+        SupportedDB::Mariadb => {
+            if table.contains('.') {
+                let parts: Vec<&str> = table.splitn(2, '.').collect();
+                format!("`{}`.`{}`", parts[0].replace('`', ""), parts[1].replace('`', ""))
+            } else {
+                format!("`{}`", table.replace('`', ""))
+            }
+        },
         SupportedDB::Sqlite => format!("\"{}\"", table.replace('"', "")),
     }
 }
@@ -40,9 +47,18 @@ fn format_sql_value(db_type: SupportedDB, val: &serde_json::Value) -> String {
             SupportedDB::Mariadb | SupportedDB::Postgres => if b { "TRUE".to_string() } else { "FALSE".to_string() },
         }
     } else if let Some(s) = val.as_str() {
-        format!("'{}'", s.replace('\'', "''"))
+        format!("'{}'", escape_sql_literal(db_type, s))
     } else {
-        format!("'{}'", val.to_string().replace('\'', "''"))
+        format!("'{}'", escape_sql_literal(db_type, &val.to_string()))
+    }
+}
+
+/// Escapes a string for use inside single quotes. MySQL/MariaDB treat backslash
+/// as an escape character by default, so it must be doubled there too.
+fn escape_sql_literal(db_type: SupportedDB, raw: &str) -> String {
+    match db_type {
+        SupportedDB::Mariadb => raw.replace('\\', "\\\\").replace('\'', "''"),
+        SupportedDB::Postgres | SupportedDB::Sqlite => raw.replace('\'', "''"),
     }
 }
 
@@ -144,11 +160,20 @@ pub async fn get_columns(id: String, database: String, table: String, state: Sta
     
     let query = match profile.r#type {
         SupportedDB::Postgres => {
-            let (schema_part, table_part) = if table.contains('.') {
+            let (schema_part, table_part, qualified) = if table.contains('.') {
                 let parts: Vec<&str> = table.splitn(2, '.').collect();
-                (parts[0].replace('\'', "''"), parts[1].replace('\'', "''"))
+                (parts[0].replace('\'', "''"), parts[1].replace('\'', "''"), true)
             } else {
-                ("public".to_string(), table.replace('\'', "''"))
+                ("public".to_string(), table.replace('\'', "''"), false)
+            };
+
+            // A qualified name must resolve inside its own schema only. Falling back to
+            // `public`/CURRENT_SCHEMA() there mixes in the columns of a same-named table
+            // from another schema, which corrupts primary-key detection in the grid.
+            let schema_filter = if qualified {
+                "(c.table_schema = '{0}' OR LOWER(c.table_schema) = LOWER('{0}'))"
+            } else {
+                "(c.table_schema = '{0}' OR LOWER(c.table_schema) = LOWER('{0}') OR c.table_schema = CURRENT_SCHEMA())"
             };
             
             format!("
@@ -169,10 +194,10 @@ pub async fn get_columns(id: String, database: String, table: String, state: Sta
                           AND kcu.column_name = c.column_name
                     ) AS primary_key
                 FROM information_schema.columns c
-                WHERE (c.table_schema = '{0}' OR LOWER(c.table_schema) = LOWER('{0}') OR c.table_schema = 'public' OR c.table_schema = CURRENT_SCHEMA())
+                WHERE {0}
                   AND (c.table_name = '{1}' OR LOWER(c.table_name) = LOWER('{1}'))
                 ORDER BY c.ordinal_position
-            ", schema_part, table_part)
+            ", schema_filter.replace("{0}", &schema_part), table_part)
         },
         SupportedDB::Mariadb => format!("SHOW FULL COLUMNS FROM `{}`", table.replace('`', "")),
         SupportedDB::Sqlite => format!("PRAGMA table_info(\"{}\")", table.replace('"', "")),
@@ -397,82 +422,149 @@ pub async fn execute_command(id: String, database: String, command: String, stat
     }
 }
 
-#[command]
-pub async fn commit_changes(id: String, database: String, table: String, changes: serde_json::Value, state: State<'_, DbState>) -> Result<serde_json::Value, String> {
-    let profiles = profiles::load_profiles()?;
-    let profile = profiles.iter().find(|p| p.id == id).ok_or("Profile not found")?;
-    
-    let table_ident = quote_table_ident(profile.r#type, &table);
-    let mut queries = Vec::new();
-    
+/// `COUNT(*)` expression that decodes as a signed 64-bit integer on every
+/// dialect (MySQL's COUNT is BIGINT UNSIGNED, which sqlx will not hand back as i64).
+fn count_star_expr(db_type: SupportedDB) -> &'static str {
+    match db_type {
+        SupportedDB::Postgres => "COUNT(*)::bigint",
+        SupportedDB::Mariadb => "CAST(COUNT(*) AS SIGNED)",
+        SupportedDB::Sqlite => "COUNT(*)",
+    }
+}
+
+/// Builds a `WHERE` clause from the original values of a row's key columns.
+/// NULL keys become `IS NULL` (a `= NULL` comparison never matches).
+fn build_row_where(db_type: SupportedDB, keys: &serde_json::Map<String, serde_json::Value>) -> Result<String, String> {
+    if keys.is_empty() {
+        return Err("Cannot identify the row to change: no key columns were provided.".to_string());
+    }
+    let clauses: Vec<String> = keys
+        .iter()
+        .map(|(col, val)| {
+            let col_ident = quote_column_ident(db_type, col);
+            if val.is_null() {
+                format!("{} IS NULL", col_ident)
+            } else {
+                format!("{} = {}", col_ident, format_sql_value(db_type, val))
+            }
+        })
+        .collect();
+    Ok(clauses.join(" AND "))
+}
+
+fn row_keys<'a>(obj: &'a serde_json::Map<String, serde_json::Value>) -> Result<&'a serde_json::Map<String, serde_json::Value>, String> {
+    obj.get("keys")
+        .and_then(|v| v.as_object())
+        .filter(|m| !m.is_empty())
+        .ok_or_else(|| "Cannot identify the row to change: the table has no primary key and no key values were sent.".to_string())
+}
+
+/// Turns the grid's pending changes into transaction steps.
+///
+/// Every update and delete is preceded by a `RequireOne` guard on the same
+/// `WHERE` clause, so a key that no longer matches exactly one row aborts the
+/// transaction instead of committing a statement that touches nothing.
+/// Returns `(steps, dml)` where `dml` is the statements only, in the same order
+/// as the affected-row counts reported back to the UI.
+fn build_commit_steps(
+    db_type: SupportedDB,
+    table: &str,
+    changes: &serde_json::Value,
+) -> Result<(Vec<TxStep>, Vec<String>), String> {
+    let table_ident = quote_table_ident(db_type, table);
+    let mut steps: Vec<TxStep> = Vec::new();
+    let mut dml: Vec<String> = Vec::new();
+
     // 1. Inserts
     if let Some(inserts) = changes.get("inserts").and_then(|v| v.as_array()) {
         for row in inserts {
             if let Some(obj) = row.as_object() {
                 if obj.is_empty() { continue; }
-                
+
                 let mut cols = Vec::new();
                 let mut vals = Vec::new();
-                
+
                 for (k, v) in obj {
-                    cols.push(quote_column_ident(profile.r#type, k));
-                    vals.push(format_sql_value(profile.r#type, v));
+                    cols.push(quote_column_ident(db_type, k));
+                    vals.push(format_sql_value(db_type, v));
                 }
-                
-                queries.push(format!("INSERT INTO {} ({}) VALUES ({})", table_ident, cols.join(", "), vals.join(", ")));
+
+                let sql = format!("INSERT INTO {} ({}) VALUES ({})", table_ident, cols.join(", "), vals.join(", "));
+                dml.push(sql.clone());
+                steps.push(TxStep::Exec(sql));
             }
         }
     }
-    
+
     // 2. Updates
     if let Some(updates) = changes.get("updates").and_then(|v| v.as_array()) {
         for row in updates {
-            if let Some(obj) = row.as_object() {
-                let pk_col = obj.get("pkColumn").and_then(|v| v.as_str()).unwrap_or("");
-                let pk_val = obj.get("pkValue").unwrap_or(&serde_json::Value::Null);
-                
-                if pk_col.is_empty() || pk_val.is_null() { continue; }
-                
-                let pk_col_ident = quote_column_ident(profile.r#type, pk_col);
-                let pk_val_str = format_sql_value(profile.r#type, pk_val);
-                
-                if let Some(data) = obj.get("data").and_then(|v| v.as_object()) {
-                    let mut sets = Vec::new();
-                    for (k, v) in data {
-                        let col_ident = quote_column_ident(profile.r#type, k);
-                        let val_str = format_sql_value(profile.r#type, v);
-                        sets.push(format!("{} = {}", col_ident, val_str));
-                    }
-                    
-                    if !sets.is_empty() {
-                        queries.push(format!("UPDATE {} SET {} WHERE {} = {}", table_ident, sets.join(", "), pk_col_ident, pk_val_str));
-                    }
-                }
-            }
+            let obj = row.as_object().ok_or("Malformed update payload")?;
+            let keys = row_keys(obj)?;
+            let where_sql = build_row_where(db_type, keys)?;
+
+            let data = obj
+                .get("data")
+                .and_then(|v| v.as_object())
+                .filter(|m| !m.is_empty())
+                .ok_or("Update contains no changed columns")?;
+
+            let sets: Vec<String> = data
+                .iter()
+                .map(|(k, v)| format!("{} = {}", quote_column_ident(db_type, k), format_sql_value(db_type, v)))
+                .collect();
+
+            steps.push(TxStep::RequireOne {
+                sql: format!("SELECT {} FROM {} WHERE {}", count_star_expr(db_type), table_ident, where_sql),
+                label: format!("UPDATE on {}", table),
+            });
+            let sql = format!("UPDATE {} SET {} WHERE {}", table_ident, sets.join(", "), where_sql);
+            dml.push(sql.clone());
+            steps.push(TxStep::Exec(sql));
         }
     }
-    
+
     // 3. Deletes
     if let Some(deletes) = changes.get("deletes").and_then(|v| v.as_array()) {
         for row in deletes {
-            if let Some(obj) = row.as_object() {
-                let pk_col = obj.get("pkColumn").and_then(|v| v.as_str()).unwrap_or("");
-                let pk_val = obj.get("pkValue").unwrap_or(&serde_json::Value::Null);
-                
-                if pk_col.is_empty() || pk_val.is_null() { continue; }
-                
-                let pk_col_ident = quote_column_ident(profile.r#type, pk_col);
-                let pk_val_str = format_sql_value(profile.r#type, pk_val);
-                
-                queries.push(format!("DELETE FROM {} WHERE {} = {}", table_ident, pk_col_ident, pk_val_str));
-            }
+            let obj = row.as_object().ok_or("Malformed delete payload")?;
+            let keys = row_keys(obj)?;
+            let where_sql = build_row_where(db_type, keys)?;
+
+            steps.push(TxStep::RequireOne {
+                sql: format!("SELECT {} FROM {} WHERE {}", count_star_expr(db_type), table_ident, where_sql),
+                label: format!("DELETE on {}", table),
+            });
+            let sql = format!("DELETE FROM {} WHERE {}", table_ident, where_sql);
+            dml.push(sql.clone());
+            steps.push(TxStep::Exec(sql));
         }
     }
-    
+
+    if dml.is_empty() {
+        return Err("Nothing to commit: no statements were generated from the pending changes.".to_string());
+    }
+
+    Ok((steps, dml))
+}
+
+#[command]
+pub async fn commit_changes(id: String, database: String, table: String, changes: serde_json::Value, state: State<'_, DbState>) -> Result<serde_json::Value, String> {
+    let profiles = profiles::load_profiles()?;
+    let profile = profiles.iter().find(|p| p.id == id).ok_or("Profile not found")?;
+
+    let (steps, queries) = build_commit_steps(profile.r#type, &table, &changes)?;
+
     let pool = get_pool(&state, profile, Some(&database)).await?;
-    execute_transaction(&pool, &queries).await?;
-    
-    Ok(serde_json::json!({ "success": true, "queries": queries }))
+    let affected = execute_transaction(&pool, &steps).await?;
+    let total_affected: u64 = affected.iter().sum();
+
+    Ok(serde_json::json!({
+        "success": true,
+        "queries": queries,
+        "affected": affected,
+        "totalAffected": total_affected
+    }))
 }
 
 #[command]
@@ -482,3 +574,97 @@ pub async fn disconnect_database(id: Option<String>, state: State<'_, DbState>) 
 }
 
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn keys(pairs: &[(&str, serde_json::Value)]) -> serde_json::Map<String, serde_json::Value> {
+        pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
+    }
+
+    #[test]
+    fn where_clause_uses_all_key_columns() {
+        let k = keys(&[("id", serde_json::json!(7)), ("tenant", serde_json::json!("acme"))]);
+        let sql = build_row_where(SupportedDB::Postgres, &k).unwrap();
+        assert!(sql.contains("\"id\" = 7"), "{sql}");
+        assert!(sql.contains("\"tenant\" = 'acme'"), "{sql}");
+        assert!(sql.contains(" AND "), "{sql}");
+    }
+
+    #[test]
+    fn null_key_uses_is_null_not_equals() {
+        let k = keys(&[("note", serde_json::Value::Null)]);
+        assert_eq!(build_row_where(SupportedDB::Mariadb, &k).unwrap(), "`note` IS NULL");
+    }
+
+    #[test]
+    fn empty_keys_are_refused() {
+        assert!(build_row_where(SupportedDB::Sqlite, &keys(&[])).is_err());
+    }
+
+    #[test]
+    fn mariadb_escapes_backslash_as_well_as_quote() {
+        assert_eq!(escape_sql_literal(SupportedDB::Mariadb, r"a\b'c"), r"a\\b''c");
+        assert_eq!(escape_sql_literal(SupportedDB::Postgres, r"a\b'c"), r"a\b''c");
+    }
+
+    #[test]
+    fn dotted_names_are_quoted_per_part() {
+        assert_eq!(quote_table_ident(SupportedDB::Postgres, "sales.orders"), "\"sales\".\"orders\"");
+        assert_eq!(quote_table_ident(SupportedDB::Mariadb, "shop.orders"), "`shop`.`orders`");
+    }
+
+    fn dml_of(db: SupportedDB, table: &str, changes: serde_json::Value) -> Vec<String> {
+        build_commit_steps(db, table, &changes).unwrap().1
+    }
+
+    #[test]
+    fn update_is_addressed_by_original_key_values_and_guarded() {
+        let changes = serde_json::json!({
+            "updates": [{ "keys": { "id": 7 }, "data": { "name": "new" } }]
+        });
+        let (steps, dml) = build_commit_steps(SupportedDB::Postgres, "users", &changes).unwrap();
+        assert_eq!(dml, vec![r#"UPDATE "users" SET "name" = 'new' WHERE "id" = 7"#]);
+        assert_eq!(steps.len(), 2, "each update must be preceded by a guard");
+        match &steps[0] {
+            TxStep::RequireOne { sql, label } => {
+                assert_eq!(sql, r#"SELECT COUNT(*)::bigint FROM "users" WHERE "id" = 7"#);
+                assert_eq!(label, "UPDATE on users");
+            }
+            _ => panic!("expected a guard first"),
+        }
+    }
+
+    #[test]
+    fn composite_keys_constrain_every_column() {
+        let changes = serde_json::json!({
+            "updates": [{ "keys": { "order_id": 1, "line_no": 2 }, "data": { "qty": 5 } }]
+        });
+        let sql = dml_of(SupportedDB::Mariadb, "order_lines", changes).remove(0);
+        assert!(sql.contains("`line_no` = 2"), "{sql}");
+        assert!(sql.contains("`order_id` = 1"), "{sql}");
+        assert!(sql.contains("SET `qty` = 5"), "{sql}");
+    }
+
+    #[test]
+    fn update_without_keys_is_an_error_not_a_silent_skip() {
+        let changes = serde_json::json!({ "updates": [{ "data": { "name": "x" } }] });
+        let err = build_commit_steps(SupportedDB::Postgres, "users", &changes).unwrap_err();
+        assert!(err.contains("Cannot identify the row"), "{err}");
+    }
+
+    #[test]
+    fn empty_payload_is_an_error_not_an_empty_transaction() {
+        let changes = serde_json::json!({ "inserts": [], "updates": [], "deletes": [] });
+        assert!(build_commit_steps(SupportedDB::Sqlite, "t", &changes).is_err());
+    }
+
+    #[test]
+    fn delete_is_guarded_too() {
+        let changes = serde_json::json!({ "deletes": [{ "keys": { "id": 3 } }] });
+        let (steps, dml) = build_commit_steps(SupportedDB::Sqlite, "t", &changes).unwrap();
+        assert_eq!(dml, vec![r#"DELETE FROM "t" WHERE "id" = 3"#]);
+        assert!(matches!(steps[0], TxStep::RequireOne { .. }));
+    }
+}

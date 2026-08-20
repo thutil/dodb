@@ -472,38 +472,167 @@ pub async fn execute_command_raw(pool: &DbPool, command: &str) -> Result<u64, St
     }
 }
 
-pub async fn execute_transaction(pool: &DbPool, queries: &[String]) -> Result<(), String> {
+/// One step inside a write transaction.
+///
+/// `Exec` runs a statement and records how many rows it touched.
+/// `RequireOne` runs a `SELECT COUNT(*)`-style guard and aborts the whole
+/// transaction unless it matches exactly one row. The guard exists because
+/// `rows_affected()` alone cannot tell "no such row" from "row already had
+/// this value" on MySQL/MariaDB (which report *changed* rows, not matched).
+#[derive(Debug)]
+pub enum TxStep {
+    Exec(String),
+    RequireOne { sql: String, label: String },
+}
+
+macro_rules! run_tx {
+    ($pool:expr, $steps:expr) => {{
+        let mut tx = $pool.begin().await.map_err(|e| e.to_string())?;
+        let mut affected: Vec<u64> = Vec::new();
+        for step in $steps {
+            match step {
+                TxStep::Exec(sql) => match sqlx::query(sql).execute(&mut *tx).await {
+                    Ok(res) => affected.push(res.rows_affected()),
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return Err(format!("{}\nSQL: {}", e, sql));
+                    }
+                },
+                TxStep::RequireOne { sql, label } => {
+                    let row = match sqlx::query(sql).fetch_one(&mut *tx).await {
+                        Ok(r) => r,
+                        Err(e) => {
+                            let _ = tx.rollback().await;
+                            return Err(format!("{}\nSQL: {}", e, sql));
+                        }
+                    };
+                    let count = row
+                        .try_get::<i64, _>(0)
+                        .or_else(|_| row.try_get::<i32, _>(0).map(|v| v as i64))
+                        .or_else(|_| {
+                            row.try_get::<String, _>(0)
+                                .map(|v| v.parse::<i64>().unwrap_or(-1))
+                        });
+                    let count = match count {
+                        Ok(c) => c,
+                        Err(e) => {
+                            let _ = tx.rollback().await;
+                            return Err(format!("Could not verify target row: {}\nSQL: {}", e, sql));
+                        }
+                    };
+                    if count != 1 {
+                        let _ = tx.rollback().await;
+                        return Err(if count == 0 {
+                            format!(
+                                "{} matched 0 rows - the row no longer exists or the key columns are wrong. Transaction rolled back, nothing was written.\nSQL: {}",
+                                label, sql
+                            )
+                        } else {
+                            format!(
+                                "{} matched {} rows - the key is not unique, so this would overwrite other rows. Transaction rolled back, nothing was written.\nSQL: {}",
+                                label, count, sql
+                            )
+                        });
+                    }
+                }
+            }
+        }
+        tx.commit().await.map_err(|e| e.to_string())?;
+        Ok(affected)
+    }};
+}
+
+/// Runs `steps` in a single transaction and returns the rows affected by each
+/// `TxStep::Exec`, in order. Any error (including a failed guard) rolls back.
+pub async fn execute_transaction(pool: &DbPool, steps: &[TxStep]) -> Result<Vec<u64>, String> {
     match pool {
-        DbPool::Postgres(p) => {
-            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
-            for query in queries {
-                if let Err(e) = sqlx::query(query).execute(&mut *tx).await {
-                    let _ = tx.rollback().await;
-                    return Err(e.to_string());
-                }
-            }
-            tx.commit().await.map_err(|e| e.to_string())?;
-        }
-        DbPool::MySql(p) => {
-            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
-            for query in queries {
-                if let Err(e) = sqlx::query(query).execute(&mut *tx).await {
-                    let _ = tx.rollback().await;
-                    return Err(e.to_string());
-                }
-            }
-            tx.commit().await.map_err(|e| e.to_string())?;
-        }
-        DbPool::Sqlite(p) => {
-            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
-            for query in queries {
-                if let Err(e) = sqlx::query(query).execute(&mut *tx).await {
-                    let _ = tx.rollback().await;
-                    return Err(e.to_string());
-                }
-            }
-            tx.commit().await.map_err(|e| e.to_string())?;
-        }
+        DbPool::Postgres(p) => run_tx!(p, steps),
+        DbPool::MySql(p) => run_tx!(p, steps),
+        DbPool::Sqlite(p) => run_tx!(p, steps),
     }
-    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    async fn sqlite_pool() -> DbPool {
+        // One connection so the in-memory database is shared across the test.
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("in-memory sqlite");
+        sqlx::query("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT, tag TEXT)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO t (id, name, tag) VALUES (1, 'a', 'x'), (2, 'b', 'x')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        DbPool::Sqlite(pool)
+    }
+
+    async fn name_of(pool: &DbPool, id: i64) -> Option<String> {
+        let DbPool::Sqlite(p) = pool else { unreachable!() };
+        sqlx::query_scalar::<_, Option<String>>("SELECT name FROM t WHERE id = ?")
+            .bind(id)
+            .fetch_optional(p)
+            .await
+            .unwrap()
+            .flatten()
+    }
+
+    #[tokio::test]
+    async fn guarded_update_applies_and_reports_affected_rows() {
+        let pool = sqlite_pool().await;
+        let steps = vec![
+            TxStep::RequireOne { sql: "SELECT COUNT(*) FROM t WHERE id = 1".into(), label: "UPDATE on t".into() },
+            TxStep::Exec("UPDATE t SET name = 'updated' WHERE id = 1".into()),
+        ];
+        let affected = execute_transaction(&pool, &steps).await.unwrap();
+        assert_eq!(affected, vec![1]);
+        assert_eq!(name_of(&pool, 1).await.as_deref(), Some("updated"));
+    }
+
+    #[tokio::test]
+    async fn zero_match_guard_rolls_back_the_whole_transaction() {
+        let pool = sqlite_pool().await;
+        let steps = vec![
+            TxStep::Exec("UPDATE t SET name = 'first' WHERE id = 1".into()),
+            TxStep::RequireOne { sql: "SELECT COUNT(*) FROM t WHERE id = 999".into(), label: "UPDATE on t".into() },
+            TxStep::Exec("UPDATE t SET name = 'never' WHERE id = 999".into()),
+        ];
+        let err = execute_transaction(&pool, &steps).await.unwrap_err();
+        assert!(err.contains("matched 0 rows"), "unexpected error: {err}");
+        // The earlier statement in the same transaction must be undone.
+        assert_eq!(name_of(&pool, 1).await.as_deref(), Some("a"));
+    }
+
+    #[tokio::test]
+    async fn non_unique_key_is_rejected_before_writing() {
+        let pool = sqlite_pool().await;
+        let steps = vec![
+            TxStep::RequireOne { sql: "SELECT COUNT(*) FROM t WHERE tag = 'x'".into(), label: "UPDATE on t".into() },
+            TxStep::Exec("UPDATE t SET name = 'clobbered' WHERE tag = 'x'".into()),
+        ];
+        let err = execute_transaction(&pool, &steps).await.unwrap_err();
+        assert!(err.contains("matched 2 rows"), "unexpected error: {err}");
+        assert_eq!(name_of(&pool, 1).await.as_deref(), Some("a"));
+        assert_eq!(name_of(&pool, 2).await.as_deref(), Some("b"));
+    }
+
+    #[tokio::test]
+    async fn failing_statement_reports_the_sql_and_rolls_back() {
+        let pool = sqlite_pool().await;
+        let steps = vec![
+            TxStep::Exec("UPDATE t SET name = 'first' WHERE id = 1".into()),
+            TxStep::Exec("UPDATE t SET nope = 1 WHERE id = 1".into()),
+        ];
+        let err = execute_transaction(&pool, &steps).await.unwrap_err();
+        assert!(err.contains("SQL: UPDATE t SET nope"), "unexpected error: {err}");
+        assert_eq!(name_of(&pool, 1).await.as_deref(), Some("a"));
+    }
 }

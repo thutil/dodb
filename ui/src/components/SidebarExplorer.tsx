@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { Database, Table2, RefreshCw, Search, HardDrive, X, Layers, Terminal, Copy, Check } from "lucide-react";
+import { Database, Table2, RefreshCw, Search, HardDrive, X, Layers, Terminal, Copy, Check, Plus, Pencil, Trash2, Eraser } from "lucide-react";
+import { DBType } from "../types";
+import { quoteTableIdent } from "../utils/ddlBuilder";
 
 interface SidebarExplorerProps {
   databases: string[];
@@ -11,10 +13,19 @@ interface SidebarExplorerProps {
   onSelectTable: (table: string) => void;
   onViewStructure?: (table: string) => void;
   onOpenInSql?: (sql: string) => void;
+  onCreateTable?: () => void;
+  onEditStructure?: (table: string) => void;
+  onTruncateTable?: (table: string) => void;
+  onDropTable?: (table: string) => void;
   onRefresh: () => void;
   loading: boolean;
   dbType?: string;
 }
+
+/** Right-click target: a specific table, or empty space in the tables list. */
+type MenuTarget =
+  | { kind: "table"; x: number; y: number; table: string }
+  | { kind: "blank"; x: number; y: number };
 
 export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
   databases,
@@ -25,24 +36,36 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
   onSelectTable,
   onViewStructure,
   onOpenInSql,
+  onCreateTable,
+  onEditStructure,
+  onTruncateTable,
+  onDropTable,
   onRefresh,
   loading,
   dbType,
 }) => {
   const [mounted, setMounted] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; table: string } | null>(null);
+  const [contextMenu, setContextMenu] = useState<MenuTarget | null>(null);
   const [copiedItem, setCopiedItem] = useState(false);
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  const quoteIdent = (name: string) => {
-    if (dbType === "mariadb" || dbType === "mysql") {
-      return `\`${name}\``;
-    }
-    return `"${name}"`;
+  // Structure editing is unavailable on SQLite (its ALTER TABLE cannot express it).
+  const isSqlite = dbType === "sqlite";
+  const dialect: DBType = dbType === "mariadb" || dbType === "mysql" ? "mariadb" : isSqlite ? "sqlite" : "postgres";
+  const quoteIdent = (name: string) => quoteTableIdent(name, dialect);
+
+  const openMenu = (e: React.MouseEvent, target: { kind: "table"; table: string } | { kind: "blank" }) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({
+      ...target,
+      x: Math.min(e.clientX, window.innerWidth - 210),
+      y: Math.min(e.clientY, window.innerHeight - 300),
+    } as MenuTarget);
   };
 
   const filteredTables = tables.filter((table) =>
@@ -133,13 +156,28 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
       </div>
 
       {/* Tables list */}
-      <div className="sidebar-group tables-group">
+      <div
+        className="sidebar-group tables-group"
+        onContextMenu={(e) => openMenu(e, { kind: "blank" })}
+      >
         <div className="group-header">
           <div className="group-label">
             <Database size={12} />
             <span>Tables</span>
           </div>
-          <span className="table-count-badge">{filteredTables.length}</span>
+          <div className="group-header-right">
+            <span className="table-count-badge">{filteredTables.length}</span>
+            {onCreateTable && (
+              <button
+                className="icon-action-btn"
+                onClick={onCreateTable}
+                title="Create Table"
+                disabled={!activeDatabase}
+              >
+                <Plus size={12} />
+              </button>
+            )}
+          </div>
         </div>
 
         {loading ? (
@@ -160,15 +198,7 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
                   key={table}
                   className={`tree-item ${isActive ? "active" : ""}`}
                   onClick={() => onSelectTable(table)}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setContextMenu({
-                      x: Math.min(e.clientX, window.innerWidth - 200),
-                      y: Math.min(e.clientY, window.innerHeight - 200),
-                      table,
-                    });
-                  }}
+                  onContextMenu={(e) => openMenu(e, { kind: "table", table })}
                   title={`${table} (Right-click for options)`}
                 >
                   <Table2 size={14} className={`tree-icon ${isActive ? "active-icon" : ""}`} />
@@ -192,67 +222,146 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
           }}
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="context-menu-header">
-            <Table2 size={12} className="menu-header-icon" />
-            <span className="menu-header-name font-mono">{contextMenu.table}</span>
-          </div>
+          {contextMenu.kind === "blank" ? (
+            <>
+              <div className="context-menu-header">
+                <Database size={12} className="menu-header-icon" />
+                <span className="menu-header-name font-mono">{activeDatabase || "No database"}</span>
+              </div>
 
-          <div className="context-menu-divider" />
+              <div className="context-menu-divider" />
 
-          {onViewStructure && (
-            <button
-              className="context-menu-item highlight"
-              onClick={() => {
-                onViewStructure(contextMenu.table);
-                setContextMenu(null);
-              }}
-            >
-              <Layers size={13} />
-              <span>View Structure</span>
-            </button>
+              {onCreateTable && (
+                <button
+                  className="context-menu-item highlight"
+                  disabled={!activeDatabase}
+                  onClick={() => {
+                    onCreateTable();
+                    setContextMenu(null);
+                  }}
+                >
+                  <Plus size={13} />
+                  <span>Create Table</span>
+                </button>
+              )}
+
+              <button
+                className="context-menu-item"
+                onClick={() => {
+                  onRefresh();
+                  setContextMenu(null);
+                }}
+              >
+                <RefreshCw size={13} />
+                <span>Refresh Tables</span>
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="context-menu-header">
+                <Table2 size={12} className="menu-header-icon" />
+                <span className="menu-header-name font-mono">{contextMenu.table}</span>
+              </div>
+
+              <div className="context-menu-divider" />
+
+              {onViewStructure && (
+                <button
+                  className="context-menu-item highlight"
+                  onClick={() => {
+                    onViewStructure(contextMenu.table);
+                    setContextMenu(null);
+                  }}
+                >
+                  <Layers size={13} />
+                  <span>View Structure</span>
+                </button>
+              )}
+
+              {onEditStructure && !isSqlite && (
+                <button
+                  className="context-menu-item"
+                  onClick={() => {
+                    onEditStructure(contextMenu.table);
+                    setContextMenu(null);
+                  }}
+                >
+                  <Pencil size={13} />
+                  <span>Edit Structure</span>
+                </button>
+              )}
+
+              <button
+                className="context-menu-item"
+                onClick={() => {
+                  onSelectTable(contextMenu.table);
+                  setContextMenu(null);
+                }}
+              >
+                <Database size={13} />
+                <span>Open in Data Explorer</span>
+              </button>
+
+              {onOpenInSql && (
+                <button
+                  className="context-menu-item"
+                  onClick={() => {
+                    onOpenInSql(`SELECT * FROM ${quoteIdent(contextMenu.table)} LIMIT 100;`);
+                    setContextMenu(null);
+                  }}
+                >
+                  <Terminal size={13} />
+                  <span>Select Top 100 Rows</span>
+                </button>
+              )}
+
+              <div className="context-menu-divider" />
+
+              <button
+                className="context-menu-item"
+                onClick={() => handleCopyName(contextMenu.table)}
+              >
+                {copiedItem ? <Check size={13} className="copy-check" /> : <Copy size={13} />}
+                <span>{copiedItem ? "Copied Name!" : "Copy Table Name"}</span>
+              </button>
+
+              <button
+                className="context-menu-item"
+                onClick={() => handleCopySelect(contextMenu.table)}
+              >
+                <Copy size={13} />
+                <span>Copy SELECT Query</span>
+              </button>
+
+              {(onTruncateTable || onDropTable) && <div className="context-menu-divider" />}
+
+              {onTruncateTable && !isSqlite && (
+                <button
+                  className="context-menu-item danger"
+                  onClick={() => {
+                    onTruncateTable(contextMenu.table);
+                    setContextMenu(null);
+                  }}
+                >
+                  <Eraser size={13} />
+                  <span>Truncate Table</span>
+                </button>
+              )}
+
+              {onDropTable && (
+                <button
+                  className="context-menu-item danger"
+                  onClick={() => {
+                    onDropTable(contextMenu.table);
+                    setContextMenu(null);
+                  }}
+                >
+                  <Trash2 size={13} />
+                  <span>Drop Table</span>
+                </button>
+              )}
+            </>
           )}
-
-          <button
-            className="context-menu-item"
-            onClick={() => {
-              onSelectTable(contextMenu.table);
-              setContextMenu(null);
-            }}
-          >
-            <Database size={13} />
-            <span>Open in Data Explorer</span>
-          </button>
-
-          {onOpenInSql && (
-            <button
-              className="context-menu-item"
-              onClick={() => {
-                onOpenInSql(`SELECT * FROM ${quoteIdent(contextMenu.table)} LIMIT 100;`);
-                setContextMenu(null);
-              }}
-            >
-              <Terminal size={13} />
-              <span>Select Top 100 Rows</span>
-            </button>
-          )}
-
-          <div className="context-menu-divider" />
-
-          <button
-            className="context-menu-item"
-            onClick={() => handleCopyName(contextMenu.table)}
-          >
-            {copiedItem ? <Check size={13} className="copy-check" /> : <Copy size={13} />}
-            <span>{copiedItem ? "Copied Name!" : "Copy Table Name"}</span>
-          </button>
-
-          <button
-            className="context-menu-item"
-            onClick={() => handleCopySelect(contextMenu.table)}
-          >
-            <Copy size={13} />
-            <span>Copy SELECT Query</span>
-          </button>
         </div>,
         document.body
       )}
@@ -296,6 +405,12 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
           color: var(--text-muted);
         }
 
+        .group-header-right {
+          display: flex;
+          align-items: center;
+          gap: 3px;
+        }
+
         .table-count-badge {
           font-size: 10px;
           font-weight: 600;
@@ -317,9 +432,13 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
           align-items: center;
           transition: all 0.12s ease;
         }
-        .icon-action-btn:hover {
+        .icon-action-btn:hover:not(:disabled) {
           color: var(--text-main);
           background: var(--bg-hover);
+        }
+        .icon-action-btn:disabled {
+          opacity: 0.35;
+          cursor: not-allowed;
         }
         .spin {
           animation: spin 0.9s linear infinite;
@@ -375,6 +494,7 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
         }
 
         .tables-group {
+          min-height: 0;
           flex: 1;
           overflow: hidden;
           display: flex;
@@ -525,6 +645,22 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
         :global(.context-menu-item.highlight:hover) {
           background: var(--accent-blue);
           color: #ffffff;
+        }
+
+        :global(.context-menu-item.danger) {
+          color: var(--accent-red);
+        }
+        :global(.context-menu-item.danger:hover) {
+          background: var(--accent-red);
+          color: #ffffff;
+        }
+        :global(.context-menu-item:disabled) {
+          opacity: 0.4;
+          cursor: not-allowed;
+        }
+        :global(.context-menu-item:disabled:hover) {
+          background: transparent;
+          color: var(--text-muted);
         }
 
         :global(.copy-check) {

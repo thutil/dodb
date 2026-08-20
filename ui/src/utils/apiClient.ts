@@ -56,12 +56,20 @@ export const apiClient = {
       filters
     });
   },
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  commitChanges: async (id: string, database: string, table: string, changes: any) => {
-    return await invoke("commit_changes", { id, database, table, changes });
+  commitChanges: async (id: string, database: string, table: string, changes: unknown) => {
+    return await invoke<{ success: boolean; queries: string[]; affected: number[]; totalAffected: number }>(
+      "commit_changes",
+      { id, database, table, changes }
+    );
   },
   executeCommand: async (id: string, database: string, command: string) => {
     return await invoke("execute_command", { id, database, command });
+  },
+  getTableConstraints: async (id: string, database: string, table: string) => {
+    return await invoke("get_table_constraints", { id, database, table });
+  },
+  executeDdl: async (id: string, database: string, statements: string[]) => {
+    return await invoke("execute_ddl", { id, database, statements });
   },
   getSchemaDiagram: async (id: string, database: string) => {
     return await invoke("get_schema_diagram", { id, database });

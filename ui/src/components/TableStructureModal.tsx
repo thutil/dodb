@@ -494,7 +494,7 @@ export const TableStructureModal: React.FC<TableStructureModalProps> = ({
           background: var(--bg-hover);
         }
         .structure-table tr.pk-row td {
-          background: rgba(245, 158, 11, 0.04);
+          background: var(--bg-card);
         }
 
         .row-num {
@@ -508,36 +508,37 @@ export const TableStructureModal: React.FC<TableStructureModalProps> = ({
           gap: 6px;
         }
         .pk-badge {
-          color: #f59e0b;
+          color: var(--text-muted);
           display: inline-flex;
         }
         .pk-name-text {
           font-weight: 600;
-          color: #f59e0b;
+          color: var(--text-main);
         }
 
         .type-badge {
-          font-size: 11px;
+          font-size: 10.5px;
           background: var(--bg-tertiary);
-          padding: 2px 6px;
-          border-radius: 4px;
+          padding: 1.5px 5px;
+          border-radius: 3px;
           border: 1px solid var(--border-light);
-          color: #60a5fa;
+          color: var(--text-sub);
         }
 
         .badge-nullable {
-          font-size: 9.5px;
-          font-weight: 700;
-          padding: 1px 5px;
+          font-size: 9px;
+          font-weight: 600;
+          padding: 1px 4px;
           border-radius: 3px;
+          border: 1px solid var(--border-light);
         }
         .badge-nullable.yes {
           color: var(--text-muted);
           background: var(--bg-tertiary);
         }
         .badge-nullable.no {
-          color: #f87171;
-          background: rgba(239, 68, 68, 0.15);
+          color: var(--text-sub);
+          background: var(--bg-tertiary);
         }
 
         .default-pill {

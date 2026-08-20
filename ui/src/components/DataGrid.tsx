@@ -36,9 +36,42 @@ import { ColumnInfo, TableRowData, ConnectionProfile, ColumnFilter, FilterOperat
 
 export interface PendingChanges {
   inserts: TableRowData[];
-  updates: Array<{ pkColumn: string; pkValue: unknown; data: TableRowData }>;
-  deletes: Array<{ pkColumn: string; pkValue: unknown }>;
+  // Rows are addressed by the original values of their key columns (composite
+  // keys included), so the WHERE clause can never be a guess.
+  updates: Array<{ keys: TableRowData; data: TableRowData }>;
+  deletes: Array<{ keys: TableRowData }>;
 }
+
+export interface CommitResult {
+  success: boolean;
+  error?: string;
+  queries?: string[];
+  totalAffected?: number;
+}
+
+// Values typed into the grid arrive as strings. Convert the ones whose column is
+// clearly numeric or boolean so the generated SQL carries a properly typed literal
+// instead of relying on the server's implicit cast. Anything wider than a safe
+// integer stays a string so no precision is lost.
+const coerceCellValue = (col: ColumnInfo | undefined, raw: unknown): unknown => {
+  if (!col || typeof raw !== "string" || raw === "" || raw === "__AUTO__") return raw;
+  const type = col.type.toLowerCase();
+  const trimmed = raw.trim();
+  if (/(int|serial)/.test(type) && /^-?\d+$/.test(trimmed)) {
+    const n = Number(trimmed);
+    return Number.isSafeInteger(n) ? n : trimmed;
+  }
+  if (/(double|real|float)/.test(type)) {
+    const n = Number(trimmed);
+    return Number.isFinite(n) ? n : raw;
+  }
+  if (/bool/.test(type)) {
+    const v = trimmed.toLowerCase();
+    if (["true", "t", "1", "yes"].includes(v)) return true;
+    if (["false", "f", "0", "no"].includes(v)) return false;
+  }
+  return raw;
+};
 
 interface DataGridProps {
   activeProfile: ConnectionProfile | null;
@@ -52,9 +85,7 @@ interface DataGridProps {
   pageSize: number;
   onPageChange: (newPage: number) => void;
   onRefresh: () => void;
-  onCommitChanges: (changes: PendingChanges) => Promise<{ success: boolean; error?: string }>;
-  onUpdateRows?: React.Dispatch<React.SetStateAction<TableRowData[]>>;
-  onUpdateTotalRows?: React.Dispatch<React.SetStateAction<number>>;
+  onCommitChanges: (changes: PendingChanges) => Promise<CommitResult>;
   sortColumn?: string | null;
   sortOrder?: "ASC" | "DESC";
   onSortChange?: (column: string | null, order: "ASC" | "DESC") => void;
@@ -79,8 +110,6 @@ export const DataGrid: React.FC<DataGridProps> = ({
   onPageChange,
   onRefresh,
   onCommitChanges,
-  onUpdateRows,
-  onUpdateTotalRows,
   sortColumn,
   sortOrder = "ASC",
   onSortChange,
@@ -137,7 +166,9 @@ export const DataGrid: React.FC<DataGridProps> = ({
   const [submitting, setSubmitting] = useState(false);
   const [commitMsg, setCommitMsg] = useState<{ success: boolean; text: string } | null>(null);
 
-  // Reset local pending changes when table or page changes
+  // Reset local pending changes whenever the underlying row set is swapped out:
+  // pending keys computed against the old rows must never reach the database.
+  const filtersKey = JSON.stringify(filters);
   useEffect(() => {
     setEditedCells({});
     setNewRows([]);
@@ -146,7 +177,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
     setEditingCell(null);
     setRowEditModal(null);
     setCommitMsg(null);
-  }, [tableName, activeDatabase, page]);
+  }, [tableName, activeDatabase, page, sortColumn, sortOrder, searchQuery, filtersKey]);
 
   // Global Escape key listener
   useEffect(() => {
@@ -194,16 +225,31 @@ export const DataGrid: React.FC<DataGridProps> = ({
     );
   }
 
-  // Find Primary Key Column
-  const pkColObj = columns.find((c) => c.primaryKey) || columns[0];
-  const pkColName = pkColObj ? pkColObj.name : "id";
+  // Columns that identify a row: the real primary key when the table has one
+  // (composite included), otherwise every column - the backend then refuses any
+  // statement that would match zero or more than one row.
+  const pkColumnNames = columns.filter((c) => c.primaryKey).map((c) => c.name);
+  // Types that cannot be compared with a plain `=` literal are left out of the
+  // no-primary-key fallback; the one-row guard still keeps the match honest.
+  const isComparableType = (type: string) =>
+    !/(json|bytea|blob|xml|geometry|geography|point|\[\])/.test((type || "").toLowerCase());
+  const keyColumnNames =
+    pkColumnNames.length > 0 ? pkColumnNames : columns.filter((c) => isComparableType(c.type)).map((c) => c.name);
+  const pkColName = pkColumnNames[0] || (columns[0] ? columns[0].name : "id");
 
-  const getPkKey = (row: TableRowData, fallbackIdx: number): string => {
-    const val = row[pkColName];
-    if (val !== undefined && val !== null) {
-      return String(val);
-    }
-    return `row_${fallbackIdx}`;
+  // Original database values of the key columns - what the WHERE clause is built from.
+  const getRowKeys = (row: TableRowData): TableRowData => {
+    const keys: TableRowData = {};
+    keyColumnNames.forEach((name) => {
+      keys[name] = row[name] === undefined ? null : row[name];
+    });
+    return keys;
+  };
+
+  // Client-side identity for pending edits only; never sent to the database.
+  const getRowKey = (row: TableRowData, fallbackIdx: number): string => {
+    if (keyColumnNames.length === 0) return `row_${fallbackIdx}`;
+    return JSON.stringify(keyColumnNames.map((name) => (row[name] === undefined ? null : row[name])));
   };
 
   // Calculate pending changes count
@@ -223,10 +269,13 @@ export const DataGrid: React.FC<DataGridProps> = ({
     if (!editingCell) return;
     const { pkKey, isNew, nIdx, colName } = editingCell;
     
+    const col = columns.find((c) => c.name === colName);
+    const value = coerceCellValue(col, editValue);
+
     if (isNew && nIdx !== undefined) {
       setNewRows((prev) => {
         const updated = [...prev];
-        updated[nIdx] = { ...updated[nIdx], [colName]: editValue };
+        updated[nIdx] = { ...updated[nIdx], [colName]: value };
         return updated;
       });
     } else {
@@ -234,7 +283,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
         ...prev,
         [pkKey]: {
           ...(prev[pkKey] || {}),
-          [colName]: editValue,
+          [colName]: value,
         },
       }));
     }
@@ -243,7 +292,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
 
   // Open Full Row Edit Modal
   const openRowModal = (rowIdx: number, row: TableRowData, isNew?: boolean) => {
-    const pkKey = isNew ? `new_${rowIdx}` : getPkKey(row, rowIdx);
+    const pkKey = isNew ? `new_${rowIdx}` : getRowKey(row, rowIdx);
     const currentEdits = isNew ? {} : (editedCells[pkKey] || {});
     const merged = { ...row, ...currentEdits };
     setRowEditModal({ pkKey, rowIdx, isNew, data: merged });
@@ -264,7 +313,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
       const originalRow = rows[rowIdx] || {};
       const changesObj: TableRowData = {};
       columns.forEach((col) => {
-        const newVal = data[col.name];
+        const newVal = coerceCellValue(col, data[col.name]);
         const oldVal = originalRow[col.name];
         if (newVal !== oldVal) {
           changesObj[col.name] = newVal;
@@ -370,24 +419,41 @@ export const DataGrid: React.FC<DataGridProps> = ({
       return cleanRow;
     }).filter((r) => Object.keys(r).length > 0 || columns.some((c) => c.autoIncrement || c.primaryKey));
 
-    // Prepare updates
-    const updatesToSubmit: Array<{ pkColumn: string; pkValue: unknown; data: TableRowData }> = [];
-    Object.keys(editedCells).forEach((pkKey) => {
-      updatesToSubmit.push({
-        pkColumn: pkColName,
-        pkValue: pkKey.startsWith("row_") ? pkKey.replace("row_", "") : pkKey,
-        data: editedCells[pkKey],
-      });
+    // Key values of every row currently loaded. Updates and deletes are addressed
+    // by these original values - never by a row index or a stringified key.
+    const keysByRowKey = new Map<string, TableRowData>();
+    rows.forEach((row, idx) => keysByRowKey.set(getRowKey(row, idx), getRowKeys(row)));
+
+    const updatesToSubmit: Array<{ keys: TableRowData; data: TableRowData }> = [];
+    const deletesToSubmit: Array<{ keys: TableRowData }> = [];
+    let stalePending = 0;
+
+    Object.keys(editedCells).forEach((rowKey) => {
+      const keys = keysByRowKey.get(rowKey);
+      if (!keys) {
+        stalePending += 1;
+        return;
+      }
+      updatesToSubmit.push({ keys, data: editedCells[rowKey] });
     });
 
-    // Prepare deletes
-    const deletesToSubmit: Array<{ pkColumn: string; pkValue: unknown }> = [];
-    deletedRowKeys.forEach((pkKey) => {
-      deletesToSubmit.push({
-        pkColumn: pkColName,
-        pkValue: pkKey.startsWith("row_") ? pkKey.replace("row_", "") : pkKey,
-      });
+    deletedRowKeys.forEach((rowKey) => {
+      const keys = keysByRowKey.get(rowKey);
+      if (!keys) {
+        stalePending += 1;
+        return;
+      }
+      deletesToSubmit.push({ keys });
     });
+
+    if (stalePending > 0) {
+      setCommitMsg({
+        success: false,
+        text: `${stalePending} pending change(s) no longer match any loaded row. Refresh the table and edit again - nothing was committed.`,
+      });
+      setSubmitting(false);
+      return;
+    }
 
     try {
       const res = await onCommitChanges({
@@ -397,54 +463,23 @@ export const DataGrid: React.FC<DataGridProps> = ({
       });
 
       if (res.success) {
-        setCommitMsg({ success: true, text: "Transaction committed to database successfully" });
-
-        // In-place local row update without reloading entire dataset
-        if (onUpdateRows) {
-          onUpdateRows((prevRows) => {
-            let updated = [...prevRows];
-
-            // 1. Apply cell updates in place
-            if (Object.keys(editedCells).length > 0) {
-              updated = updated.map((row, idx) => {
-                const key = getPkKey(row, idx);
-                if (editedCells[key]) {
-                  return { ...row, ...editedCells[key] };
-                }
-                return row;
-              });
-            }
-
-            // 2. Remove deleted rows in place
-            if (deletedRowKeys.size > 0) {
-              updated = updated.filter((row, idx) => {
-                const key = getPkKey(row, idx);
-                return !deletedRowKeys.has(key);
-              });
-            }
-
-            // 3. Prepend new inserted rows
-            if (insertsToSubmit.length > 0) {
-              updated = [...insertsToSubmit, ...updated];
-            }
-
-            return updated;
-          });
-        } else {
-          onRefresh();
-        }
-
-        // Update total rows count in place
-        if (onUpdateTotalRows) {
-          const delta = insertsToSubmit.length - deletesToSubmit.length;
-          if (delta !== 0) {
-            onUpdateTotalRows((prev) => Math.max(0, prev + delta));
-          }
-        }
+        const parts: string[] = [];
+        if (insertsToSubmit.length > 0) parts.push(`${insertsToSubmit.length} inserted`);
+        if (updatesToSubmit.length > 0) parts.push(`${updatesToSubmit.length} updated`);
+        if (deletesToSubmit.length > 0) parts.push(`${deletesToSubmit.length} deleted`);
+        const affected = typeof res.totalAffected === "number" ? res.totalAffected : null;
+        setCommitMsg({
+          success: true,
+          text: `Committed: ${parts.join(", ")}${affected === null ? "" : ` (${affected} row${affected === 1 ? "" : "s"} affected in database)`}`,
+        });
 
         setEditedCells({});
         setNewRows([]);
         setDeletedRowKeys(new Set());
+
+        // Always re-read from the database. Patching rows locally used to hide a
+        // commit that matched nothing until the user hit refresh themselves.
+        onRefresh();
       } else {
         setCommitMsg({ success: false, text: res.error || "Commit failed, transaction rolled back" });
       }
@@ -459,7 +494,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
   // Active merged data for JSON view
   const activeMergedRows = rows
     .map((r, idx) => {
-      const pkKey = getPkKey(r, idx);
+      const pkKey = getRowKey(r, idx);
       if (deletedRowKeys.has(pkKey)) return null;
       return { ...r, ...(editedCells[pkKey] || {}) };
     })
@@ -1011,7 +1046,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                 </tr>
               ) : (
                 rows.map((row, idx) => {
-                  const pkKey = getPkKey(row, idx);
+                  const pkKey = getRowKey(row, idx);
                   const isDeleted = deletedRowKeys.has(pkKey);
                   const rowEdits = editedCells[pkKey] || {};
                   const isRowEdited = Object.keys(rowEdits).length > 0;

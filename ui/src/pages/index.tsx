@@ -6,7 +6,7 @@ import { SidebarExplorer } from "../components/SidebarExplorer";
 import { ConnectionModal } from "../components/ConnectionModal";
 import { AuditLogDrawer } from "../components/AuditLogDrawer";
 import { TableStructureModal } from "../components/TableStructureModal";
-import { DataGrid, PendingChanges } from "../components/DataGrid";
+import { DataGrid, PendingChanges, CommitResult } from "../components/DataGrid";
 import { SqlConsole } from "../components/SqlConsole";
 import { AdminPanel } from "../components/AdminPanel";
 import { SchemaDiagram } from "../components/SchemaDiagram";
@@ -374,7 +374,7 @@ export default function Home() {
   };
 
   // Handle Commit Changes (Atomic Database Transaction)
-  const handleCommitChanges = async (changes: PendingChanges): Promise<{ success: boolean; error?: string }> => {
+  const handleCommitChanges = async (changes: PendingChanges): Promise<CommitResult> => {
     if (!activeProfile || !activeTable) {
       return { success: false, error: "Missing active database connection or table" };
     }
@@ -386,13 +386,17 @@ export default function Home() {
     const totalChanges = numInserts + numUpdates + numDeletes;
 
     try {
-      await apiClient.commitChanges(
+      // The backend reports the SQL it ran and the rows the database actually
+      // touched - both are logged so a no-op commit can never look successful.
+      const res = await apiClient.commitChanges(
         activeProfile.id,
         activeDatabase || activeProfile.database,
         activeTable,
         changes
       );
       const duration = Math.round(performance.now() - start);
+      const queries = res?.queries ?? [];
+      const totalAffected = typeof res?.totalAffected === "number" ? res.totalAffected : undefined;
 
       auditLogger.addLog({
         profileId: activeProfile.id,
@@ -400,13 +404,15 @@ export default function Home() {
         dbType: activeProfile.type,
         database: activeDatabase || activeProfile.database,
         actionType: "COMMIT",
-        sql: `Table ${activeTable}: +${numInserts} inserts, ~${numUpdates} updates, -${numDeletes} deletes`,
+        sql: queries.length > 0
+          ? queries.join(";\n")
+          : `Table ${activeTable}: +${numInserts} inserts, ~${numUpdates} updates, -${numDeletes} deletes`,
         status: "SUCCESS",
         executionTimeMs: duration,
-        affectedRows: totalChanges,
+        affectedRows: totalAffected ?? totalChanges,
       });
 
-      return { success: true };
+      return { success: true, queries, totalAffected };
     } catch (err: any) {
       const duration = Math.round(performance.now() - start);
       const msg = typeof err === "string" ? err : err?.message || String(err);
@@ -524,8 +530,6 @@ export default function Home() {
                 onPageChange={setPage}
                 onRefresh={fetchTableData}
                 onCommitChanges={handleCommitChanges}
-                onUpdateRows={setRows}
-                onUpdateTotalRows={setTotalRows}
                 sortColumn={sortColumn}
                 sortOrder={sortOrder}
                 onSortChange={(col, order) => {
