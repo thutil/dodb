@@ -40,6 +40,8 @@ import {
   CheckSquare,
   Square,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   Database,
   Globe,
@@ -817,10 +819,11 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
   const [joins, setJoins] = useState<VisualJoinInfo[]>([]);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
 
-  // Filters & Sorting & Limit
+  // Filters & Sorting & Limit & Pagination
   const [filters, setFilters] = useState<VisualFilterCondition[]>([]);
   const [sorts, setSorts] = useState<VisualSortCondition[]>([]);
   const [limit, setLimit] = useState<number>(50);
+  const [page, setPage] = useState<number>(0);
 
   // Bottom drawer state (resizable up to 85% of window)
   const [bottomTab, setBottomTab] = useState<"results" | "sql" | "filters" | "sort">("results");
@@ -857,6 +860,7 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
     setJoins([]);
     setFilters([]);
     setSorts([]);
+    setPage(0);
     setQueryResult(null);
     setSelectedEdgeId(null);
     setTableSchemas({});
@@ -1400,9 +1404,10 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
       filters,
       sorts,
       limit,
+      offset: page > 0 ? page * limit : undefined,
       dbType: dialect,
     });
-  }, [nodes, joins, filters, sorts, limit, activeProfile?.type]);
+  }, [nodes, joins, filters, sorts, limit, page, activeProfile?.type]);
 
   // Bidirectional SQL State
   const [sqlText, setSqlText] = useState<string>(initialSql || "");
@@ -1604,8 +1609,27 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
   }, [sqlText, tableSchemas, generatedSql, handleSyncSqlToCanvas]);
 
   // Execute Query
-  const handleRunQuery = async () => {
-    const queryToRun = sqlText.trim() ? sqlText : generatedSql;
+  const handleRunQuery = async (customPage?: number) => {
+    const activePg = customPage !== undefined ? customPage : page;
+    const tableNodes = nodes.filter((n) => n.type === "visualTable");
+    const tableSelections: VisualTableSelection[] = tableNodes.map((n) => {
+      const d = n.data as any;
+      return {
+        tableName: d.tableName,
+        selectedColumns: Array.from(d.selectedColumns || []),
+      };
+    });
+    const dialect: DBType = activeProfile?.type || "mariadb";
+    const queryToRun = buildVisualSql({
+      tables: tableSelections,
+      joins,
+      filters,
+      sorts,
+      limit,
+      offset: activePg > 0 ? activePg * limit : undefined,
+      dbType: dialect,
+    });
+
     if (!queryToRun || queryToRun.startsWith("--")) return;
 
     setIsExecuting(true);
@@ -1956,7 +1980,7 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
           <button
             type="button"
             className="btn btn-primary btn-sm run-query-main-btn"
-            onClick={handleRunQuery}
+            onClick={() => handleRunQuery()}
             disabled={isExecuting || canvasTableNames.length === 0}
             title="Execute Query (Run)"
           >
@@ -2419,6 +2443,55 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
                         </span>
                       </div>
                       <div className="results-meta-right">
+                        <div className="results-pagination-bar font-mono">
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-xs"
+                            disabled={page === 0 || isExecuting}
+                            onClick={() => {
+                              const prevPg = Math.max(0, page - 1);
+                              setPage(prevPg);
+                              handleRunQuery(prevPg);
+                            }}
+                            title="Previous page"
+                          >
+                            <ChevronLeft size={11} />
+                            <span>Prev</span>
+                          </button>
+                          <span className="pagination-page-tag">
+                            Page <strong>{page + 1}</strong>
+                          </span>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-xs"
+                            disabled={!queryResult?.rows || queryResult.rows.length < limit || isExecuting}
+                            onClick={() => {
+                              const nextPg = page + 1;
+                              setPage(nextPg);
+                              handleRunQuery(nextPg);
+                            }}
+                            title="Next page"
+                          >
+                            <span>Next</span>
+                            <ChevronRight size={11} />
+                          </button>
+                          <select
+                            className="pagination-limit-select font-mono"
+                            value={limit}
+                            onChange={(e) => {
+                              const newLim = parseInt(e.target.value, 10);
+                              setLimit(newLim);
+                              setPage(0);
+                            }}
+                            title="Rows per page"
+                          >
+                            <option value={25}>25 / page</option>
+                            <option value={50}>50 / page</option>
+                            <option value={100}>100 / page</option>
+                            <option value={200}>200 / page</option>
+                          </select>
+                        </div>
+
                         {commitMessage && (
                           <span className={`commit-msg font-mono ${commitMessage.success ? "is-success" : "is-error"}`}>
                             {commitMessage.text}
@@ -3577,6 +3650,8 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
           padding: 10px 14px;
           display: flex;
           flex-direction: column;
+        }
+
         .sql-tab-content {
           padding: 8px 12px;
           display: flex;
@@ -3774,6 +3849,18 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
         .results-tab-content {
           padding: 0;
           overflow: hidden;
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          min-height: 0;
+        }
+
+        .results-table-container {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          min-height: 0;
+          overflow: hidden;
         }
 
         .results-meta-bar {
@@ -3785,6 +3872,7 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
           border-bottom: 1px solid var(--border-light);
           background: var(--bg-tertiary);
           color: var(--text-sub);
+          flex-shrink: 0;
         }
 
         .results-meta-left {
@@ -3797,6 +3885,30 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
           display: flex;
           align-items: center;
           gap: 10px;
+        }
+
+        .results-pagination-bar {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+        }
+
+        .pagination-page-tag {
+          font-size: 10.5px;
+          color: var(--text-sub);
+          padding: 0 4px;
+          white-space: nowrap;
+        }
+
+        .pagination-limit-select {
+          background: var(--bg-card);
+          border: 1px solid var(--border-light);
+          color: var(--text-main);
+          font-size: 10px;
+          padding: 1px 4px;
+          border-radius: var(--radius-xs);
+          outline: none;
+          cursor: pointer;
         }
 
         .results-hint-tag {
@@ -3831,6 +3943,8 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
         .results-table-wrapper {
           flex: 1;
           overflow: auto;
+          min-height: 0;
+          width: 100%;
         }
 
         .results-table {

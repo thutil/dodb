@@ -19,6 +19,7 @@ export interface BuildVisualSqlParams {
   filters: VisualFilterCondition[];
   sorts: VisualSortCondition[];
   limit?: number;
+  offset?: number;
   dbType?: DBType;
 }
 
@@ -40,6 +41,7 @@ export function buildVisualSql({
   filters,
   sorts,
   limit = 50,
+  offset = 0,
   dbType = "mariadb",
 }: BuildVisualSqlParams): string {
   if (!tables || tables.length === 0) {
@@ -193,10 +195,13 @@ export function buildVisualSql({
     orderByClause = "\nORDER BY " + sortItems.join(", ");
   }
 
-  // 5. LIMIT clause
+  // 5. LIMIT and OFFSET clause
   let limitClause = "";
   if (limit && limit > 0) {
     limitClause = `\nLIMIT ${limit}`;
+    if (offset && offset > 0) {
+      limitClause += ` OFFSET ${offset}`;
+    }
   }
 
   return `SELECT\n  ${selectClause}\nFROM\n  ${fromClause}${whereClause}${orderByClause}${limitClause};`;
@@ -438,6 +443,7 @@ export interface ParsedVisualSql {
   filters: VisualFilterCondition[];
   sorts: VisualSortCondition[];
   limit: number;
+  offset: number;
 }
 
 function cleanIdentifier(s: string): string {
@@ -504,10 +510,14 @@ export function parseSqlToVisual(
   }
 
   let limitVal = 50;
+  let offsetVal = 0;
   if (limitIndex !== -1) {
-    const limitMatch = fromAndBeyond.slice(limitIndex).match(/\bLIMIT\s+(\d+)/i);
+    const limitMatch = fromAndBeyond.slice(limitIndex).match(/\bLIMIT\s+(\d+)(?:\s+OFFSET\s+(\d+))?/i);
     if (limitMatch) {
       limitVal = parseInt(limitMatch[1], 10);
+      if (limitMatch[2]) {
+        offsetVal = parseInt(limitMatch[2], 10);
+      }
     }
   }
 
@@ -765,5 +775,6 @@ export function parseSqlToVisual(
     filters,
     sorts,
     limit: limitVal,
+    offset: offsetVal,
   };
 }
