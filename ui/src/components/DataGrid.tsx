@@ -1400,7 +1400,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                         const isNull = val === null || val === undefined;
                         const isEditing = !editingCell?.isNew && editingCell?.pkKey === pkKey && editingCell.colName === col.name;
                         const isDateCol = isDateTimeColumn(col.type);
-                        const isGeomCol = isGeometryColumn(col.type, col.name);
+                        const isGeomCol = isGeometryColumn(col.type, col.name) || (!isNull && isGisData(val));
                         const gisSummary = isGeomCol && !isNull ? formatGisSummary(val) : null;
 
                         return (
@@ -2014,7 +2014,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                 .map((col) => {
                   const val = inspectRowModal.row[col.name];
                   const isNull = val === null || val === undefined;
-                  const isGeom = isGeometryColumn(col.type, col.name);
+                  const isGeom = isGeometryColumn(col.type, col.name) || (!isNull && isGisData(val));
                   const gisSum = isGeom && !isNull ? formatGisSummary(val) : null;
                   const valStr = isNull ? "NULL" : typeof val === "object" ? JSON.stringify(val, null, 2) : String(val);
                   const isMatch = inspectSearchTerm.trim().length > 0;

@@ -302,6 +302,53 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
     });
   };
 
+// Helper to quote table name or schema.table correctly for SQL
+const quoteTableIdentifier = (tbl: string): string => {
+  if (!tbl) return '"table_name"';
+  const parts = tbl.split(".");
+  return parts
+    .map((p) => {
+      const clean = p.replace(/^["`\[]+|["`\]]+$/g, "").trim();
+      return `"${clean}"`;
+    })
+    .join(".");
+};
+
+// Helper to extract table name from a SQL query string
+const extractTableFromSql = (querySql: string): string | null => {
+  if (!querySql) return null;
+  const clean = querySql
+    .replace(/--.*$/gm, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .trim();
+
+  // Match SELECT ... FROM [schema.]table
+  const fromMatch = clean.match(/\bFROM\s+(?:ONLY\s+)?([`"\[]?([a-zA-Z0-9_]+)[`"\]]?(?:\.[`"\[]?([a-zA-Z0-9_]+)[`"\]]?)?)/i);
+  if (fromMatch) {
+    return fromMatch[1].trim();
+  }
+
+  // Match UPDATE [schema.]table
+  const updateMatch = clean.match(/\bUPDATE\s+(?:ONLY\s+)?([`"\[]?([a-zA-Z0-9_]+)[`"\]]?(?:\.[`"\[]?([a-zA-Z0-9_]+)[`"\]]?)?)/i);
+  if (updateMatch) {
+    return updateMatch[1].trim();
+  }
+
+  // Match INSERT INTO [schema.]table
+  const insertMatch = clean.match(/\bINSERT\s+INTO\s+([`"\[]?([a-zA-Z0-9_]+)[`"\]]?(?:\.[`"\[]?([a-zA-Z0-9_]+)[`"\]]?)?)/i);
+  if (insertMatch) {
+    return insertMatch[1].trim();
+  }
+
+  // Match DELETE FROM [schema.]table
+  const deleteMatch = clean.match(/\bDELETE\s+FROM\s+(?:ONLY\s+)?([`"\[]?([a-zA-Z0-9_]+)[`"\]]?(?:\.[`"\[]?([a-zA-Z0-9_]+)[`"\]]?)?)/i);
+  if (deleteMatch) {
+    return deleteMatch[1].trim();
+  }
+
+  return null;
+};
+
   // Discard / Rollback changes
   const handleRollback = () => {
     setEditedCells({});
@@ -312,32 +359,72 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
 
   // Infer target table name
   const getTargetTable = useCallback((): string | null => {
-    if (activeTable) return activeTable;
+    // 1. Check SQL that generated the currently viewed result tab
+    const currentTabSql = statementResults[activeResultTab]?.sql;
+    if (currentTabSql) {
+      const extracted = extractTableFromSql(currentTabSql);
+      if (extracted) return extracted;
+    }
+
+    // 2. Check editor code or current SQL
     const currentCode = editorRef.current ? editorRef.current.getValue() : sql;
-    const match = currentCode.match(/FROM\s+["`]?([a-zA-Z0-9_]+)["`]?/i);
-    return match ? match[1] : null;
-  }, [activeTable, sql]);
+    const extracted = extractTableFromSql(currentCode);
+    if (extracted) return extracted;
+
+    // 3. Fallback to activeTable
+    if (activeTable) return activeTable;
+
+    return null;
+  }, [statementResults, activeResultTab, sql, activeTable]);
 
   // Generate UPDATE and DELETE SQL statements
   const generateChangesSql = useCallback((): string[] => {
     if (!result?.rows) return [];
-    const tbl = getTargetTable() || "table_name";
+    const rawTbl = getTargetTable() || "table_name";
+    const tbl = quoteTableIdentifier(rawTbl);
     const statements: string[] = [];
+
+    const getKeyCols = (orig: Record<string, unknown>): string[] => {
+      const rowKeys = Object.keys(orig);
+      // 1. Check if column metadata has PKs that actually exist in this row
+      const pkCols = columns.filter((c) => c.primaryKey && orig[c.name] !== undefined).map((c) => c.name);
+      if (pkCols.length > 0) return pkCols;
+
+      // 2. Check common PK column naming patterns in the row itself (id, pk, uuid, poi_id, etc.)
+      const idCol = rowKeys.find((k) => /^(id|pk|uuid|_id)$/i.test(k) || /(^.*_id$)/i.test(k));
+      if (idCol && orig[idCol] !== undefined && orig[idCol] !== null) {
+        return [idCol];
+      }
+
+      // 3. Fallback to scalar non-geometry, non-blob, non-null columns (up to 3)
+      const candidateCols = rowKeys.filter((k) => {
+        const v = orig[k];
+        if (v === null || v === undefined) return false;
+        if (typeof v === "object") return false;
+        if (isGeometryColumn("", k) || isGisData(v)) return false;
+        if (typeof v === "string" && v.length > 255) return false;
+        return true;
+      });
+      if (candidateCols.length > 0) {
+        return candidateCols.slice(0, Math.min(3, candidateCols.length));
+      }
+
+      return rowKeys.slice(0, 1);
+    };
 
     // 1. Deletes
     deletedRowIndices.forEach((rIdx) => {
       const orig = result.rows![rIdx];
       if (!orig) return;
       const whereParts: string[] = [];
-      const pkCols = columns.filter((c) => c.primaryKey).map((c) => c.name);
-      const keyCols = pkCols.length > 0 ? pkCols : (orig["id"] !== undefined ? ["id"] : Object.keys(orig).slice(0, 3));
+      const keyCols = getKeyCols(orig);
       keyCols.forEach((col) => {
         const v = orig[col];
         if (v === null || v === undefined) whereParts.push(`"${col}" IS NULL`);
         else if (typeof v === "number" || typeof v === "boolean") whereParts.push(`"${col}" = ${v}`);
         else whereParts.push(`"${col}" = '${String(v).replace(/'/g, "''")}'`);
       });
-      statements.push(`DELETE FROM "${tbl}" WHERE ${whereParts.join(" AND ")};`);
+      statements.push(`DELETE FROM ${tbl} WHERE ${whereParts.join(" AND ")};`);
     });
 
     // 2. Updates
@@ -353,14 +440,13 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
         const v = edits[col];
         if (v === null || v === undefined) setParts.push(`"${col}" = NULL`);
         else if (typeof v === "number" || typeof v === "boolean") setParts.push(`"${col}" = ${v}`);
-        else wherePartsPushVal(setParts, col, v);
+        else setParts.push(`"${col}" = '${String(v).replace(/'/g, "''")}'`);
       });
 
       if (setParts.length === 0) return;
 
       const whereParts: string[] = [];
-      const pkCols = columns.filter((c) => c.primaryKey).map((c) => c.name);
-      const keyCols = pkCols.length > 0 ? pkCols : (orig["id"] !== undefined ? ["id"] : Object.keys(orig).slice(0, 3));
+      const keyCols = getKeyCols(orig);
       keyCols.forEach((col) => {
         const v = orig[col];
         if (v === null || v === undefined) whereParts.push(`"${col}" IS NULL`);
@@ -368,17 +454,11 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
         else whereParts.push(`"${col}" = '${String(v).replace(/'/g, "''")}'`);
       });
 
-      statements.push(`UPDATE "${tbl}" SET ${setParts.join(", ")} WHERE ${whereParts.join(" AND ")};`);
+      statements.push(`UPDATE ${tbl} SET ${setParts.join(", ")} WHERE ${whereParts.join(" AND ")};`);
     });
 
     return statements;
   }, [result?.rows, getTargetTable, deletedRowIndices, columns, editedCells]);
-
-  function wherePartsPushVal(arr: string[], col: string, v: unknown) {
-    if (v === null || v === undefined) arr.push(`"${col}" = NULL`);
-    else if (typeof v === "number" || typeof v === "boolean") arr.push(`"${col}" = ${v}`);
-    else arr.push(`"${col}" = '${String(v).replace(/'/g, "''")}'`);
-  }
 
   // Copy SQL changes
   const handleCopyChangesSql = () => {
@@ -1035,10 +1115,10 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                   </span>
                 )
               )}
-              {activeTable && (
-                <span className="stat-item font-mono">
+              {getTargetTable() && (
+                <span className="stat-item font-mono" title={`Table: ${getTargetTable()}`}>
                   <Layers size={11} />
-                  <span>{activeTable}</span>
+                  <span>{getTargetTable()?.replace(/["`\[\]]/g, "")}</span>
                 </span>
               )}
             </div>
@@ -1391,7 +1471,8 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
           <button
             className="context-menu-item"
             onClick={() => {
-              const tbl = getTargetTable() || "table_name";
+              const rawTbl = getTargetTable() || "table_name";
+              const tbl = quoteTableIdentifier(rawTbl);
               const cols = Object.keys(contextMenu.row).filter((k) => contextMenu.row[k] !== undefined);
               const colList = cols.map((c) => `"${c}"`).join(", ");
               const valList = cols.map((c) => {
@@ -1400,7 +1481,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                 if (typeof v === "number" || typeof v === "boolean") return String(v);
                 return `'${String(v).replace(/'/g, "''")}'`;
               }).join(", ");
-              const sql = `INSERT INTO "${tbl}" (${colList}) VALUES (${valList});`;
+              const sql = `INSERT INTO ${tbl} (${colList}) VALUES (${valList});`;
               navigator.clipboard.writeText(sql);
               setContextMenu(null);
             }}
@@ -1553,7 +1634,8 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                 <button
                   className="btn btn-secondary btn-sm"
                   onClick={() => {
-                    const tbl = getTargetTable() || "table_name";
+                    const rawTbl = getTargetTable() || "table_name";
+                    const tbl = quoteTableIdentifier(rawTbl);
                     const cols = Object.keys(inspectRowModal.row).filter((k) => inspectRowModal.row[k] !== undefined);
                     const colList = cols.map((c) => `"${c}"`).join(", ");
                     const valList = cols.map((c) => {
@@ -1562,7 +1644,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                       if (typeof v === "number" || typeof v === "boolean") return String(v);
                       return `'${String(v).replace(/'/g, "''")}'`;
                     }).join(", ");
-                    const sql = `INSERT INTO "${tbl}" (${colList}) VALUES (${valList});`;
+                    const sql = `INSERT INTO ${tbl} (${colList}) VALUES (${valList});`;
                     navigator.clipboard.writeText(sql);
                   }}
                   title="Copy full row as SQL INSERT statement"
