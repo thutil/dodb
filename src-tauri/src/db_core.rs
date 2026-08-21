@@ -1,5 +1,5 @@
 use crate::models::{ConnectionProfile, SupportedDB};
-use sqlx::{Row, Column, ValueRef};
+use sqlx::{Row, Column, TypeInfo, ValueRef};
 use std::collections::HashMap;
 use std::sync::Mutex;
 use tauri::State;
@@ -328,6 +328,20 @@ pub fn decode_bytes_or_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{:02X}", b)).collect()
 }
 
+/// Whether a column should be presented as a JSON boolean.
+///
+/// sqlx declares `bool` compatible with *every* integer width on MySQL
+/// (TINYINT..BIGINT and BIT) and with SQLite's INTEGER affinity, so a plain
+/// `try_get::<bool>()` first in the decode chain silently claims ordinary
+/// integer columns and renders them as `true`/`false` - an auto-increment
+/// `BIGINT(20)` id or a `COUNT(*)` would come back as `true`. Only a column
+/// the driver actually names a boolean is decoded as one: MySQL `TINYINT(1)`
+/// (reported as `BOOLEAN`) and a SQLite column declared `BOOLEAN`/`BOOL`.
+/// Everything else - `BIT`, `YEAR`, all integer widths - stays numeric.
+fn is_boolean_column<C: Column>(column: &C) -> bool {
+    column.type_info().name().eq_ignore_ascii_case("BOOLEAN")
+}
+
 pub async fn execute_query(pool: &DbPool, query: &str) -> Result<Vec<serde_json::Value>, String> {
     match pool {
         DbPool::Postgres(p) => {
@@ -420,10 +434,18 @@ pub async fn execute_query(pool: &DbPool, query: &str) -> Result<Vec<serde_json:
                         }
                     }
 
+                    // Booleans are decoded only for columns the driver calls a
+                    // boolean; see `is_boolean_column`. A failure here still
+                    // falls through to the generic chain below.
+                    if is_boolean_column(column) {
+                        if let Ok(v) = row.try_get::<bool, _>(i) {
+                            map.insert(column.name().to_string(), serde_json::Value::Bool(v));
+                            continue;
+                        }
+                    }
+
                     if let Ok(v) = row.try_get::<String, _>(i) {
                         map.insert(column.name().to_string(), serde_json::Value::String(v));
-                    } else if let Ok(v) = row.try_get::<bool, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::Bool(v));
                     } else if let Ok(v) = row.try_get::<i64, _>(i) {
                         map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
                     } else if let Ok(v) = row.try_get::<u64, _>(i) {
@@ -497,10 +519,18 @@ pub async fn execute_query(pool: &DbPool, query: &str) -> Result<Vec<serde_json:
                         }
                     }
 
+                    // Booleans are decoded only for columns the driver calls a
+                    // boolean; see `is_boolean_column`. A failure here still
+                    // falls through to the generic chain below.
+                    if is_boolean_column(column) {
+                        if let Ok(v) = row.try_get::<bool, _>(i) {
+                            map.insert(column.name().to_string(), serde_json::Value::Bool(v));
+                            continue;
+                        }
+                    }
+
                     if let Ok(v) = row.try_get::<String, _>(i) {
                         map.insert(column.name().to_string(), serde_json::Value::String(v));
-                    } else if let Ok(v) = row.try_get::<bool, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::Bool(v));
                     } else if let Ok(v) = row.try_get::<i64, _>(i) {
                         map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
                     } else if let Ok(v) = row.try_get::<i32, _>(i) {
@@ -675,6 +705,68 @@ mod tests {
             .flatten()
     }
 
+    /// Guards the decode order in `execute_query`: sqlx treats `bool` as
+    /// compatible with every integer type, so without `is_boolean_column` an
+    /// integer primary key (MySQL `BIGINT(20) AUTO_INCREMENT`, SQLite
+    /// `INTEGER PRIMARY KEY`) came back as `true` instead of its value.
+    #[tokio::test]
+    async fn integer_columns_decode_as_numbers_not_booleans() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("in-memory sqlite");
+        sqlx::query(
+            "CREATE TABLE nums (id INTEGER PRIMARY KEY AUTOINCREMENT, big BIGINT, small TINYINT, zero INT)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO nums (big, small, zero) VALUES (9007199254740993, 7, 0)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let pool = DbPool::Sqlite(pool);
+        let rows = execute_query(&pool, "SELECT id, big, small, zero FROM nums").await.unwrap();
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+        assert_eq!(row["id"], serde_json::json!(1));
+        assert_eq!(row["big"], serde_json::json!(9007199254740993i64));
+        assert_eq!(row["small"], serde_json::json!(7));
+        assert_eq!(row["zero"], serde_json::json!(0));
+
+        // Aggregates are integers too - `COUNT(*)` used to render as `true`.
+        let rows = execute_query(&pool, "SELECT COUNT(*) AS c FROM nums").await.unwrap();
+        assert_eq!(rows[0]["c"], serde_json::json!(1));
+    }
+
+    /// The other half of the same rule: a column the driver really does call a
+    /// boolean must still arrive as a JSON boolean.
+    #[tokio::test]
+    async fn declared_boolean_columns_still_decode_as_booleans() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("in-memory sqlite");
+        sqlx::query("CREATE TABLE flags (on_flag BOOLEAN, off_flag BOOL, n INTEGER)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO flags (on_flag, off_flag, n) VALUES (1, 0, 5)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let rows = execute_query(&DbPool::Sqlite(pool), "SELECT on_flag, off_flag, n FROM flags")
+            .await
+            .unwrap();
+        assert_eq!(rows[0]["on_flag"], serde_json::json!(true));
+        assert_eq!(rows[0]["off_flag"], serde_json::json!(false));
+        assert_eq!(rows[0]["n"], serde_json::json!(5));
+    }
+
     #[tokio::test]
     async fn guarded_update_applies_and_reports_affected_rows() {
         let pool = sqlite_pool().await;
@@ -818,3 +910,4 @@ mod tests {
         let _ = std::fs::remove_file(&db_path);
     }
 }
+
