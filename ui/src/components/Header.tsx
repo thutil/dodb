@@ -467,7 +467,7 @@ export const Header: React.FC<HeaderProps> = ({
         )}
       </div>
 
-      {/* Right: Navigation tabs, Active connection chip & responsive action buttons */}
+      {/* Right: Navigation tabs & action buttons */}
       <div className="header-right">
         <nav className="nav-tabs">
           <button
@@ -475,125 +475,52 @@ export const Header: React.FC<HeaderProps> = ({
             onClick={() => onChangeView("explorer")}
             title="Data Explorer (Table & JSON View)"
           >
-            <Database size={13} className="tab-icon" />
-            <span className="tab-label-full">Data Explorer</span>
-            <span className="tab-label-short">Explorer</span>
+            <Database size={12} className="tab-icon" />
+            <span className="tab-label">Explorer</span>
           </button>
           <button
             className={`tab-btn ${activeView === "sql" ? "active" : ""}`}
             onClick={() => onChangeView("sql")}
             title="SQL Query Console"
           >
-            <Terminal size={13} className="tab-icon" />
-            <span className="tab-label-full">SQL Console</span>
-            <span className="tab-label-short">SQL</span>
+            <Terminal size={12} className="tab-icon" />
+            <span className="tab-label">SQL</span>
           </button>
           <button
             className={`tab-btn ${activeView === "diagram" ? "active" : ""}`}
             onClick={() => onChangeView("diagram")}
             title="Entity-Relationship Diagram"
           >
-            <GitFork size={13} className="tab-icon" />
-            <span className="tab-label-full">ER Diagram</span>
-            <span className="tab-label-short">ERD</span>
+            <GitFork size={12} className="tab-icon" />
+            <span className="tab-label">ERD</span>
           </button>
           <button
             className={`tab-btn ${activeView === "admin" ? "active" : ""}`}
             onClick={() => onChangeView("admin")}
             title="Database Administration"
           >
-            <Shield size={13} className="tab-icon" />
-            <span className="tab-label-full">Database Admin</span>
-            <span className="tab-label-short">Admin</span>
+            <Shield size={12} className="tab-icon" />
+            <span className="tab-label">Admin</span>
           </button>
         </nav>
-
-        <div className="header-divider" />
-        {activeProfile ? (
-          <div className="active-conn-chip">
-            <span className="status-indicator online" />
-
-            {profiles && profiles.length > 1 ? (
-              <div className="profile-select-wrap">
-                <select
-                  className="profile-switcher-select"
-                  value={activeProfile.id}
-                  onChange={(e) => {
-                    const found = profiles.find((p) => p.id === e.target.value);
-                    if (found && onSelectProfile) onSelectProfile(found);
-                  }}
-                  title="Switch Connection Profile"
-                >
-                  {profiles.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown size={10} className="profile-select-chevron" />
-              </div>
-            ) : (
-              <span className="profile-title" title={activeProfile.name}>
-                {activeProfile.name}
-              </span>
-            )}
-
-            <span className={`db-type-badge ${activeProfile.type}`}>
-              {activeProfile.type.toUpperCase()}
-            </span>
-
-            {databases.length > 0 && (
-              <div className="db-select-wrap">
-                <select
-                  className="database-select"
-                  value={activeDatabase}
-                  onChange={(e) => onSelectDatabase(e.target.value)}
-                  title="Switch Active Database"
-                >
-                  {databases.map((db) => (
-                    <option key={db} value={db}>
-                      {db}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown size={10} className="db-select-chevron" />
-              </div>
-            )}
-
-            {onDisconnect && (
-              <button
-                className="chip-disconnect-btn"
-                onClick={onDisconnect}
-                title="Disconnect from database"
-              >
-                <LogOut size={11} />
-              </button>
-            )}
-          </div>
-        ) : (
-          <div className="active-conn-chip offline clickable" onClick={onOpenConnections} title="Click to Connect">
-            <span className="status-indicator offline" />
-            <span>Not Connected</span>
-          </div>
-        )}
 
         <div className="header-divider" />
 
         <div className="action-buttons-group">
           {onOpenAuditLogs && (
             <button className="btn btn-secondary header-btn" onClick={onOpenAuditLogs} title="View Audit Logs & History">
-              <FileText size={13} />
-              <span className="btn-text-responsive">Audit Log</span>
+              <FileText size={12} />
+              <span className="btn-text-responsive">Logs</span>
             </button>
           )}
 
           <button className="btn btn-secondary header-btn conn-btn" onClick={onOpenConnections} title="Manage Database Connections">
-            <Server size={13} />
+            <Server size={12} />
             <span className="btn-text-responsive">Connections</span>
           </button>
 
           <button className="btn btn-secondary header-icon-btn" onClick={onToggleTheme} title={`Switch to ${theme === "dark" ? "Light" : "Dark"} Mode`}>
-            {theme === "dark" ? <Sun size={13} className="theme-icon sun" /> : <Moon size={13} className="theme-icon moon" />}
+            {theme === "dark" ? <Sun size={12} className="theme-icon sun" /> : <Moon size={12} className="theme-icon moon" />}
           </button>
         </div>
       </div>
@@ -608,32 +535,38 @@ export const Header: React.FC<HeaderProps> = ({
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 0 12px 0 12px;
-          gap: 12px;
+          padding: 0 10px;
+          gap: 8px;
           -webkit-app-region: drag;
           user-select: none;
           flex-shrink: 0;
           z-index: 100;
+          width: 100%;
+          box-sizing: border-box;
+          overflow: visible;
         }
 
         .header-left {
           display: flex;
           align-items: center;
-          gap: 10px;
-          flex-shrink: 0;
+          gap: 8px;
+          min-width: 0;
+          flex-shrink: 1;
           -webkit-app-region: no-drag;
+          overflow: visible;
         }
 
         .brand {
           display: flex;
           align-items: center;
-          gap: 7px;
+          gap: 6px;
           color: var(--text-main);
           -webkit-app-region: no-drag;
           cursor: default;
           padding: 2px 4px;
           border-radius: 6px;
           transition: background 0.15s ease;
+          flex-shrink: 0;
         }
         .brand.clickable {
           cursor: pointer;
@@ -642,22 +575,23 @@ export const Header: React.FC<HeaderProps> = ({
           background: var(--bg-hover);
         }
         .brand-mascot-img {
-          width: 22px;
-          height: 22px;
-          border-radius: 5px;
+          width: 20px;
+          height: 20px;
+          border-radius: 4px;
           object-fit: cover;
-          box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+          box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+          flex-shrink: 0;
         }
         .brand-title {
-          font-weight: 600;
-          font-size: 13px;
+          font-weight: 700;
+          font-size: 12px;
           letter-spacing: -0.2px;
         }
 
         .header-breadcrumb {
           display: flex;
           align-items: center;
-          gap: 4px;
+          gap: 3px;
           font-size: 11px;
           color: var(--text-muted);
           background: var(--bg-tertiary);
@@ -666,11 +600,14 @@ export const Header: React.FC<HeaderProps> = ({
           border: 1px solid var(--border-light);
           white-space: nowrap;
           position: relative;
+          min-width: 0;
+          flex-shrink: 1;
         }
         .bc-divider {
           color: var(--border-medium);
           margin: 0 1px;
           font-size: 11px;
+          flex-shrink: 0;
         }
         .bc-arrow {
           color: var(--text-muted);
@@ -681,14 +618,15 @@ export const Header: React.FC<HeaderProps> = ({
           position: relative;
           display: inline-flex;
           align-items: center;
+          min-width: 0;
         }
         .bc-item {
           display: inline-flex;
           align-items: center;
-          gap: 4px;
+          gap: 3px;
           font-size: 11px;
           font-weight: 500;
-          padding: 2px 6px;
+          padding: 2px 5px;
           border-radius: 4px;
           border: 1px solid transparent;
           background: transparent;
@@ -699,6 +637,8 @@ export const Header: React.FC<HeaderProps> = ({
           font-family: inherit;
           text-decoration: none;
           line-height: 1.2;
+          min-width: 0;
+          max-width: 130px;
         }
         .bc-item:hover, .bc-item.is-open {
           background: var(--bg-hover);
@@ -725,7 +665,7 @@ export const Header: React.FC<HeaderProps> = ({
           opacity: 0.8;
         }
         .bc-label {
-          max-width: 140px;
+          max-width: 100px;
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
@@ -745,7 +685,7 @@ export const Header: React.FC<HeaderProps> = ({
           top: calc(100% + 6px);
           left: 0;
           min-width: 220px;
-          max-width: 290px;
+          max-width: 280px;
           background: var(--bg-card);
           backdrop-filter: blur(20px);
           -webkit-backdrop-filter: blur(20px);
@@ -869,8 +809,8 @@ export const Header: React.FC<HeaderProps> = ({
           display: flex;
           align-items: center;
           gap: 8px;
-          padding: 6px 8px;
-          font-size: 11.5px;
+          padding: 5px 8px;
+          font-size: 11px;
           color: var(--text-sub);
           background: transparent;
           border: none;
@@ -918,6 +858,17 @@ export const Header: React.FC<HeaderProps> = ({
           color: var(--accent-blue);
           flex-shrink: 0;
         }
+        .db-type-badge {
+          font-size: 8px;
+          font-family: var(--font-mono);
+          font-weight: 600;
+          padding: 1px 4px;
+          border-radius: 3px;
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-light);
+          color: var(--text-sub);
+          letter-spacing: 0.2px;
+        }
         .db-type-badge.small {
           font-size: 7.5px;
           padding: 0 3px;
@@ -939,29 +890,28 @@ export const Header: React.FC<HeaderProps> = ({
           display: flex;
           align-items: center;
           justify-content: center;
-          gap: 8px;
-          flex: 1;
-          max-width: 440px;
+          gap: 6px;
+          flex: 0 1 280px;
+          min-width: 80px;
+          max-width: 300px;
           -webkit-app-region: no-drag;
-          margin: 0 8px;
         }
         .header-quick-search {
           flex: 1;
           display: flex;
           align-items: center;
-          gap: 8px;
+          gap: 6px;
           background: var(--bg-tertiary);
           border: 1px solid var(--border-light);
           border-radius: var(--radius-sm);
-          padding: 4px 10px;
-          height: 28px;
+          padding: 3px 8px;
+          height: 26px;
           color: var(--text-muted);
           font-family: var(--font-sans);
           cursor: pointer;
           transition: all 0.12s ease;
           user-select: none;
-          min-width: 140px;
-          max-width: 360px;
+          min-width: 60px;
         }
         .header-quick-search:hover {
           background: var(--bg-hover);
@@ -973,7 +923,7 @@ export const Header: React.FC<HeaderProps> = ({
           flex-shrink: 0;
         }
         .search-text {
-          font-size: 11.5px;
+          font-size: 11px;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
@@ -982,13 +932,13 @@ export const Header: React.FC<HeaderProps> = ({
         }
         .search-shortcut {
           font-family: var(--font-mono);
-          font-size: 9.5px;
+          font-size: 9px;
           font-weight: 600;
           background: var(--bg-card);
           border: 1px solid var(--border-light);
           color: var(--text-sub);
-          padding: 1px 5px;
-          border-radius: 4px;
+          padding: 1px 4px;
+          border-radius: 3px;
           box-shadow: var(--shadow-sm);
           flex-shrink: 0;
         }
@@ -996,23 +946,23 @@ export const Header: React.FC<HeaderProps> = ({
         .header-health-pill {
           display: flex;
           align-items: center;
-          gap: 5px;
-          padding: 3px 8px;
-          height: 26px;
+          gap: 4px;
+          padding: 2px 6px;
+          height: 24px;
           background: var(--bg-tertiary);
           border: 1px solid var(--border-light);
           border-radius: var(--radius-sm);
-          font-size: 10px;
+          font-size: 9.5px;
           color: var(--text-muted);
           font-family: var(--font-mono);
           flex-shrink: 0;
         }
         .health-dot {
-          width: 6px;
-          height: 6px;
+          width: 5px;
+          height: 5px;
           border-radius: 50%;
           background: var(--accent-green);
-          box-shadow: 0 0 6px var(--accent-green);
+          box-shadow: 0 0 5px var(--accent-green);
           transition: all 0.2s ease;
         }
         .header-health-pill.is-connecting .health-dot {
@@ -1021,47 +971,23 @@ export const Header: React.FC<HeaderProps> = ({
         }
         .header-health-pill.is-medium .health-dot {
           background: var(--accent-amber, #f59e0b);
-          box-shadow: 0 0 6px var(--accent-amber, #f59e0b);
+          box-shadow: 0 0 5px var(--accent-amber, #f59e0b);
         }
         .header-health-pill.is-slow .health-dot {
           background: var(--accent-rose, #ef4444);
-          box-shadow: 0 0 6px var(--accent-rose, #ef4444);
+          box-shadow: 0 0 5px var(--accent-rose, #ef4444);
         }
         .health-ping {
           font-weight: 500;
           color: var(--text-sub);
         }
 
-        .brand {
+        .header-right {
           display: flex;
           align-items: center;
-          gap: 7px;
-          color: var(--text-main);
+          gap: 6px;
           -webkit-app-region: no-drag;
-          cursor: default;
-        }
-        .brand-mascot-img {
-          width: 22px;
-          height: 22px;
-          border-radius: 5px;
-          object-fit: cover;
-          box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
-        }
-        .brand-title {
-          font-weight: 600;
-          font-size: 13px;
-          letter-spacing: -0.2px;
-        }
-        .brand-badge {
-          font-size: 9px;
-          font-weight: 600;
-          padding: 1px 5px;
-          border-radius: 4px;
-          background: var(--bg-tertiary);
-          border: 1px solid var(--border-light);
-          color: var(--text-muted);
-          text-transform: uppercase;
-          letter-spacing: 0.3px;
+          flex-shrink: 0;
         }
 
         .nav-tabs {
@@ -1077,8 +1003,8 @@ export const Header: React.FC<HeaderProps> = ({
           display: flex;
           align-items: center;
           justify-content: center;
-          gap: 5px;
-          padding: 3px 10px;
+          gap: 4px;
+          padding: 2px 8px;
           font-size: 11px;
           font-weight: 500;
           border: 1px solid transparent;
@@ -1110,219 +1036,70 @@ export const Header: React.FC<HeaderProps> = ({
           opacity: 1;
         }
 
-        .tab-label-short {
-          display: none;
-        }
-
-        .header-right {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          -webkit-app-region: no-drag;
-          flex-shrink: 0;
-        }
-
-        .active-conn-chip {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          background: var(--bg-card);
-          border: 1px solid var(--border-light);
-          padding: 0 8px;
-          height: 26px;
-          border-radius: var(--radius-sm);
-          font-size: 11px;
-        }
-        .active-conn-chip.offline {
-          color: var(--text-muted);
-        }
-        .active-conn-chip.clickable {
-          cursor: pointer;
-          transition: all 0.12s ease;
-        }
-        .active-conn-chip.clickable:hover {
-          border-color: var(--border-medium);
-          background: var(--bg-hover);
-        }
-        .chip-disconnect-btn {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          background: transparent;
-          border: none;
-          color: var(--text-muted);
-          cursor: pointer;
-          padding: 3px;
-          border-radius: 4px;
-          margin-left: 2px;
-          transition: all 0.12s ease;
-        }
-        .chip-disconnect-btn:hover {
-          background: rgba(239, 68, 68, 0.12);
-          color: #ef4444;
-        }
-        .status-indicator {
-          width: 6px;
-          height: 6px;
-          border-radius: 50%;
-          flex-shrink: 0;
-        }
-        .status-indicator.online {
-          background: var(--accent-green);
-        }
-        .status-indicator.offline {
-          background: var(--text-muted);
-        }
-
-        .profile-title {
-          font-weight: 500;
-          color: var(--text-main);
-          max-width: 110px;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-
-        .profile-select-wrap {
-          position: relative;
-          display: flex;
-          align-items: center;
-        }
-
-        .profile-switcher-select {
-          background: transparent;
-          border: none;
-          color: var(--text-main);
-          font-size: 11px;
-          font-weight: 500;
-          padding: 0 16px 0 0;
-          outline: none;
-          appearance: none;
-          -webkit-appearance: none;
-          cursor: pointer;
-          max-width: 120px;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-        .profile-switcher-select:hover {
-          color: var(--text-main);
-        }
-
-        :global(.profile-select-chevron) {
-          position: absolute;
-          right: 2px;
-          color: var(--text-muted);
-          pointer-events: none;
-        }
-
-        .db-type-badge {
-          font-size: 8.5px;
-          font-family: var(--font-mono);
-          font-weight: 600;
-          padding: 1px 4px;
-          border-radius: 3px;
-          background: var(--bg-tertiary);
-          border: 1px solid var(--border-light);
-          color: var(--text-sub);
-          letter-spacing: 0.2px;
-        }
-
-        .db-select-wrap {
-          position: relative;
-          display: flex;
-          align-items: center;
-        }
-
-        .database-select {
-          background: var(--bg-tertiary);
-          border: 1px solid var(--border-light);
-          color: var(--text-main);
-          font-size: 10.5px;
-          border-radius: 4px;
-          padding: 2px 18px 2px 5px;
-          outline: none;
-          appearance: none;
-          -webkit-appearance: none;
-          cursor: pointer;
-          height: 20px;
-          font-family: var(--font-mono);
-          max-width: 100px;
-        }
-        .database-select:focus {
-          border-color: var(--border-focus);
-        }
-        .db-select-chevron {
-          position: absolute;
-          right: 4px;
-          pointer-events: none;
-          color: var(--text-muted);
-        }
-
         .header-divider {
           width: 1px;
-          height: 18px;
+          height: 16px;
           background: var(--border-light);
-          margin: 0 2px;
+          margin: 0 1px;
         }
 
         .action-buttons-group {
           display: flex;
           align-items: center;
-          gap: 5px;
+          gap: 4px;
         }
 
         .header-btn {
-          height: 28px;
-          padding: 0 9px;
+          height: 26px;
+          padding: 0 8px;
           font-size: 11px;
-          border-radius: 6px;
+          border-radius: 5px;
+          gap: 4px;
+          display: inline-flex;
+          align-items: center;
         }
 
         .header-icon-btn {
-          height: 28px;
-          width: 28px;
+          height: 26px;
+          width: 26px;
           padding: 0;
           display: flex;
           align-items: center;
           justify-content: center;
-          border-radius: 6px;
+          border-radius: 5px;
         }
 
         .theme-icon.sun { color: #f59e0b; }
         .theme-icon.moon { color: #818cf8; }
 
-        /* Responsive Media Queries for Small Screens */
-        @media (max-width: 1280px) {
-          .header-breadcrumb .bc-host { display: none; }
+        /* Responsive Breakpoints */
+        @media (max-width: 1080px) {
+          .header-breadcrumb .bc-segment-wrap:first-of-type {
+            display: none;
+          }
+          .header-breadcrumb .bc-arrow:first-of-type {
+            display: none;
+          }
         }
 
-        @media (max-width: 1100px) {
-          .header-breadcrumb { display: none; }
-          .tab-label-full { display: none; }
-          .tab-label-short { display: inline; }
-          .profile-title { max-width: 80px; }
-          .database-select { max-width: 80px; }
+        @media (max-width: 900px) {
           .btn-text-responsive { display: none; }
-          .header-btn { padding: 0 7px; width: 28px; }
-        }
-
-        @media (max-width: 850px) {
-          .tab-label-short { display: none; }
-          .tab-btn { padding: 4px 6px; }
-          .brand-title, .brand-badge { display: none; }
-          .profile-title { display: none; }
-          .db-type-badge { display: none; }
-          .header-health-pill { display: none; }
-          .header-center { max-width: 180px; }
+          .header-btn { padding: 0 6px; }
           .search-text { display: none; }
-          .app-header { padding: 0 8px 0 8px; gap: 8px; }
+          .search-shortcut { display: none; }
+          .header-center { flex: 0 0 auto; min-width: 0; }
         }
 
-        @media (max-width: 680px) {
+        @media (max-width: 720px) {
+          .tab-label { display: none; }
+          .tab-btn { padding: 2px 6px; }
+          .brand-title { display: none; }
+          .header-health-pill { display: none; }
+        }
+
+        @media (max-width: 580px) {
           .header-center { display: none; }
-          .active-conn-chip { padding: 0 4px; }
-          .header-divider { display: none; }
+          .header-breadcrumb { max-width: 160px; }
         }
       `}</style>
     </header>
