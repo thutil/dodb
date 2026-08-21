@@ -35,7 +35,7 @@ export function isGeometryColumn(colType?: string, colName?: string): boolean {
   const n = (colName || "").toLowerCase();
 
   const isTypeMatch = /(geometry|geography|geom|point|linestring|polygon|multipoint|multilinestring|multipolygon|geometrycollection|spatial)/.test(t);
-  const isNameMatch = /(^geom$|^geometry$|^shape$|^the_geom$|^location$|^coordinates$|^lat_lng$|^wkt$|^geojson$)/.test(n);
+  const isNameMatch = /(^geom$|^geometry$|^shape$|^the_geom$|^location$|^coordinates$|^lat_lng$|^wkt$|^geojson$|.*geom.*|.*spatial.*|.*polygon.*|.*coord.*)/.test(n);
 
   return isTypeMatch || isNameMatch;
 }
@@ -69,13 +69,9 @@ export function isGisData(val: unknown): boolean {
       return true;
     }
 
-    // Check WKB / EWKB Hex string (starts with 00/01 and typical type bytes)
+    // Check WKB / EWKB Hex string (starts with 00/01 and typical type bytes, or 16+ hex characters)
     if (/^[0-9a-fA-F]{16,}$/.test(s)) {
-      const first4 = s.slice(0, 4);
-      if (first4 === "0101" || first4 === "0102" || first4 === "0103" || first4 === "0104" || first4 === "0105" || first4 === "0106" || first4 === "0107" ||
-          first4 === "0000" || first4 === "0020" || first4 === "0120") {
-        return true;
-      }
+      return true;
     }
   }
 
@@ -192,73 +188,160 @@ function parseWktBody(type: string, body: string, srid?: number): GeoJsonGeometr
  */
 export function parseWkbHex(hex: string): GeoJsonGeometry | null {
   try {
-    const raw = hex.trim();
-    if (!/^[0-9a-fA-F]+$/.test(raw) || raw.length < 18) return null;
+    let raw = hex.trim();
+    if (!/^[0-9a-fA-F]+$/.test(raw) || raw.length < 10) return null;
+
+    // Some databases (e.g. MySQL) prefix 4-byte SRID before standard WKB
+    let sridPrefix: number | undefined;
+    if (raw.length >= 18 && (raw.startsWith("0000") || raw.startsWith("E610") || raw.startsWith("e610"))) {
+      const firstByte = parseInt(raw.slice(8, 10), 16);
+      if (firstByte === 0 || firstByte === 1) {
+        const sridBytes = raw.slice(0, 8).match(/.{1,2}/g)!.map((b) => parseInt(b, 16));
+        const view = new DataView(new Uint8Array(sridBytes).buffer);
+        sridPrefix = view.getUint32(0, true);
+        if (sridPrefix > 1000000) {
+          sridPrefix = view.getUint32(0, false);
+        }
+        raw = raw.slice(8);
+      }
+    }
 
     const buffer = new Uint8Array(raw.match(/.{1,2}/g)!.map((byte) => parseInt(byte, 16)));
     const view = new DataView(buffer.buffer);
 
     let offset = 0;
-    const isLittleEndian = view.getUint8(offset) === 1;
-    offset += 1;
+    let globalSrid = sridPrefix;
 
-    let typeCode = view.getUint32(offset, isLittleEndian);
-    offset += 4;
+    function readGeometry(): GeoJsonGeometry | null {
+      if (offset >= buffer.length) return null;
+      const isLittleEndian = view.getUint8(offset) === 1;
+      offset += 1;
 
-    const hasSrid = (typeCode & 0x20000000) !== 0;
-    let srid: number | undefined;
-    if (hasSrid) {
-      srid = view.getUint32(offset, isLittleEndian);
+      let typeCode = view.getUint32(offset, isLittleEndian);
       offset += 4;
-    }
 
-    const baseType = typeCode & 0xff;
-
-    if (baseType === 1) {
-      // Point: 2 doubles (X, Y)
-      const x = view.getFloat64(offset, isLittleEndian);
-      offset += 8;
-      const y = view.getFloat64(offset, isLittleEndian);
-      return { type: "Point", coordinates: [x, y], srid };
-    }
-
-    if (baseType === 2) {
-      // LineString: numPoints (uint32) + points
-      const numPoints = view.getUint32(offset, isLittleEndian);
-      offset += 4;
-      const points: number[][] = [];
-      for (let i = 0; i < numPoints && offset + 16 <= buffer.length; i++) {
-        const x = view.getFloat64(offset, isLittleEndian);
-        offset += 8;
-        const y = view.getFloat64(offset, isLittleEndian);
-        offset += 8;
-        points.push([x, y]);
+      const hasSrid = (typeCode & 0x20000000) !== 0;
+      let srid = globalSrid;
+      if (hasSrid) {
+        srid = view.getUint32(offset, isLittleEndian);
+        globalSrid = srid;
+        offset += 4;
       }
-      return { type: "LineString", coordinates: points, srid };
-    }
 
-    if (baseType === 3) {
-      // Polygon: numRings (uint32) + rings
-      const numRings = view.getUint32(offset, isLittleEndian);
-      offset += 4;
-      const rings: number[][][] = [];
-      for (let r = 0; r < numRings; r++) {
+      // Check dimensions (Z/M flags)
+      const hasZ = (typeCode & 0x80000000) !== 0 || (typeCode >= 1000 && typeCode < 2000) || (typeCode >= 3000 && typeCode < 4000);
+      const hasM = (typeCode & 0x40000000) !== 0 || (typeCode >= 2000 && typeCode < 3000) || (typeCode >= 3000 && typeCode < 4000);
+      const coordDim = 2 + (hasZ ? 1 : 0) + (hasM ? 1 : 0);
+
+      // Base geometry type
+      let baseType = typeCode & 0xffff;
+      if (baseType >= 1000 && baseType < 4000) {
+        baseType = baseType % 1000;
+      }
+      baseType = baseType & 0xff;
+
+      function readPointCoords(): [number, number] {
+        const x = view.getFloat64(offset, isLittleEndian);
+        const y = view.getFloat64(offset + 8, isLittleEndian);
+        offset += coordDim * 8;
+        return [x, y];
+      }
+
+      if (baseType === 1) {
+        // Point
+        const coords = readPointCoords();
+        return { type: "Point", coordinates: coords, srid };
+      }
+
+      if (baseType === 2) {
+        // LineString
         const numPoints = view.getUint32(offset, isLittleEndian);
         offset += 4;
         const points: number[][] = [];
         for (let i = 0; i < numPoints && offset + 16 <= buffer.length; i++) {
-          const x = view.getFloat64(offset, isLittleEndian);
-          offset += 8;
-          const y = view.getFloat64(offset, isLittleEndian);
-          offset += 8;
-          points.push([x, y]);
+          points.push(readPointCoords());
         }
-        rings.push(points);
+        return { type: "LineString", coordinates: points, srid };
       }
-      return { type: "Polygon", coordinates: rings, srid };
+
+      if (baseType === 3) {
+        // Polygon
+        const numRings = view.getUint32(offset, isLittleEndian);
+        offset += 4;
+        const rings: number[][][] = [];
+        for (let r = 0; r < numRings; r++) {
+          const numPoints = view.getUint32(offset, isLittleEndian);
+          offset += 4;
+          const points: number[][] = [];
+          for (let i = 0; i < numPoints && offset + 16 <= buffer.length; i++) {
+            points.push(readPointCoords());
+          }
+          rings.push(points);
+        }
+        return { type: "Polygon", coordinates: rings, srid };
+      }
+
+      if (baseType === 4) {
+        // MultiPoint
+        const numPoints = view.getUint32(offset, isLittleEndian);
+        offset += 4;
+        const points: number[][] = [];
+        for (let i = 0; i < numPoints; i++) {
+          if (offset >= buffer.length) break;
+          const nextByte = view.getUint8(offset);
+          if (nextByte === 0 || nextByte === 1) {
+            const ptGeom = readGeometry();
+            if (ptGeom && ptGeom.coordinates) points.push(ptGeom.coordinates);
+          } else {
+            points.push(readPointCoords());
+          }
+        }
+        return { type: "MultiPoint", coordinates: points, srid };
+      }
+
+      if (baseType === 5) {
+        // MultiLineString
+        const numLines = view.getUint32(offset, isLittleEndian);
+        offset += 4;
+        const lines: number[][][] = [];
+        for (let i = 0; i < numLines; i++) {
+          if (offset >= buffer.length) break;
+          const lineGeom = readGeometry();
+          if (lineGeom && lineGeom.coordinates) lines.push(lineGeom.coordinates);
+        }
+        return { type: "MultiLineString", coordinates: lines, srid };
+      }
+
+      if (baseType === 6) {
+        // MultiPolygon
+        const numPolys = view.getUint32(offset, isLittleEndian);
+        offset += 4;
+        const polys: number[][][][] = [];
+        for (let i = 0; i < numPolys; i++) {
+          if (offset >= buffer.length) break;
+          const polyGeom = readGeometry();
+          if (polyGeom && polyGeom.coordinates) polys.push(polyGeom.coordinates);
+        }
+        return { type: "MultiPolygon", coordinates: polys, srid };
+      }
+
+      if (baseType === 7) {
+        // GeometryCollection
+        const numGeoms = view.getUint32(offset, isLittleEndian);
+        offset += 4;
+        const geoms: GeoJsonGeometry[] = [];
+        for (let i = 0; i < numGeoms; i++) {
+          if (offset >= buffer.length) break;
+          const g = readGeometry();
+          if (g) geoms.push(g);
+        }
+        return { type: "GeometryCollection", coordinates: [], geometries: geoms, srid };
+      }
+
+      return null;
     }
 
-    return null;
+    return readGeometry();
   } catch {
     return null;
   }
@@ -290,10 +373,11 @@ export function parseGisToGeoJson(val: unknown): GeoJsonGeometry | null {
   if (s.startsWith("{") && s.endsWith("}")) {
     try {
       const parsed = JSON.parse(s);
-      if (parsed.type && parsed.coordinates) {
+      if (parsed.type && (parsed.coordinates || parsed.geometries)) {
         return {
           type: parsed.type,
           coordinates: parsed.coordinates,
+          geometries: parsed.geometries,
           srid: parsed.srid,
         };
       }
@@ -306,7 +390,7 @@ export function parseGisToGeoJson(val: unknown): GeoJsonGeometry | null {
   const wktResult = parseWkt(s);
   if (wktResult) return wktResult;
 
-  // 4. Try WKB Hex
+  // 4. Try WKB / EWKB Hex
   if (/^[0-9a-fA-F]{16,}$/.test(s)) {
     const wkbResult = parseWkbHex(s);
     if (wkbResult) return wkbResult;
@@ -317,7 +401,6 @@ export function parseGisToGeoJson(val: unknown): GeoJsonGeometry | null {
   if (pairMatch) {
     const n1 = parseFloat(pairMatch[1]);
     const n2 = parseFloat(pairMatch[2]);
-    // Determine which is lat (usually -90 to 90) and lng (-180 to 180)
     if (Math.abs(n1) <= 90 && Math.abs(n2) <= 180) {
       return { type: "Point", coordinates: [n2, n1] }; // [lng, lat]
     }
@@ -378,9 +461,18 @@ export function formatGisSummary(val: unknown): GisSummary | null {
     const exterior = geom.coordinates?.[0] || [];
     pointCount = exterior.length;
     coordsPreview = `${pointCount} vertices`;
+  } else if (type === "MultiPoint") {
+    pointCount = geom.coordinates?.length || 0;
+    coordsPreview = `${pointCount} pts`;
+  } else if (type === "MultiLineString") {
+    pointCount = geom.coordinates?.length || 0;
+    coordsPreview = `${pointCount} lines`;
   } else if (type === "MultiPolygon") {
     pointCount = geom.coordinates?.length || 0;
-    coordsPreview = `${pointCount} polys`;
+    coordsPreview = `${pointCount} poly${pointCount === 1 ? "" : "s"}`;
+  } else if (type === "GeometryCollection") {
+    pointCount = geom.geometries?.length || 0;
+    coordsPreview = `${pointCount} items`;
   } else {
     coordsPreview = type;
   }
