@@ -9,8 +9,19 @@ pub async fn get_schema_diagram(id: String, database: String, state: State<'_, D
 
     match profile.r#type {
         SupportedDB::Postgres => {
-            // 1. Get all public tables first to guarantee all tables are discovered
-            let tbl_query = "SELECT tablename::text AS name FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;";
+            // 1. Get all user tables across all non-system schemas (e.g. public, reporting, etc.)
+            let tbl_query = "
+                SELECT 
+                    CASE 
+                        WHEN schemaname = 'public' THEN tablename::text 
+                        ELSE (schemaname || '.' || tablename)::text 
+                    END AS name,
+                    schemaname::text AS schema_name,
+                    tablename::text AS table_name
+                FROM pg_tables 
+                WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+                ORDER BY (schemaname = 'public') DESC, tablename ASC;
+            ";
             let tbl_rows = execute_query(&pool, tbl_query).await.map_err(|e| format!("Could not read the table list: {}", e))?;
 
             let mut tables_map: std::collections::BTreeMap<String, Vec<serde_json::Value>> = std::collections::BTreeMap::new();
@@ -24,12 +35,18 @@ pub async fn get_schema_diagram(id: String, database: String, state: State<'_, D
                 }
             }
 
-            // 2. Get all columns with primary key information via information_schema
+            // 2. Get all columns with accurate primary key information across all schemas
             let col_query = "
                 SELECT 
-                    c.table_name::text AS table_name,
+                    CASE 
+                        WHEN c.table_schema = 'public' THEN c.table_name::text 
+                        ELSE (c.table_schema || '.' || c.table_name)::text 
+                    END AS table_name,
                     c.column_name::text AS column_name,
-                    c.data_type::text AS data_type,
+                    CASE 
+                        WHEN c.data_type = 'USER-DEFINED' THEN c.udt_name::text 
+                        ELSE c.data_type::text 
+                    END AS data_type,
                     EXISTS (
                         SELECT 1 
                         FROM information_schema.table_constraints tc 
@@ -42,8 +59,8 @@ pub async fn get_schema_diagram(id: String, database: String, state: State<'_, D
                           AND kcu.column_name = c.column_name
                     ) AS is_primary_key
                 FROM information_schema.columns c
-                WHERE c.table_schema = 'public'
-                ORDER BY c.table_name, c.ordinal_position;
+                WHERE c.table_schema NOT IN ('pg_catalog', 'information_schema')
+                ORDER BY c.table_schema, c.table_name, c.ordinal_position;
             ";
             let col_rows = execute_query(&pool, col_query).await.map_err(|e| format!("Could not read column metadata: {}", e))?;
 
@@ -71,21 +88,31 @@ pub async fn get_schema_diagram(id: String, database: String, state: State<'_, D
                 })
             }).collect();
 
-            // 3. Get all foreign keys
+            // 3. Get all foreign keys via pg_catalog (100% accurate, handles all schemas & composite FKs)
             let fk_query = "
                 SELECT
-                    tc.table_name::text AS from_table,
-                    kcu.column_name::text AS from_column,
-                    ccu.table_name::text AS to_table,
-                    ccu.column_name::text AS to_column
-                FROM information_schema.table_constraints AS tc
-                JOIN information_schema.key_column_usage AS kcu
-                  ON tc.constraint_name = kcu.constraint_name
-                  AND tc.table_schema = kcu.table_schema
-                JOIN information_schema.constraint_column_usage AS ccu
-                  ON ccu.constraint_name = tc.constraint_name
-                  AND ccu.table_schema = tc.table_schema
-                WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public';
+                    CASE WHEN n_src.nspname = 'public' THEN src.relname::text ELSE (n_src.nspname || '.' || src.relname)::text END AS from_table,
+                    a_src.attname::text AS from_column,
+                    CASE WHEN n_tgt.nspname = 'public' THEN tgt.relname::text ELSE (n_tgt.nspname || '.' || tgt.relname)::text END AS to_table,
+                    a_tgt.attname::text AS to_column
+                FROM (
+                    SELECT 
+                        conrelid, 
+                        confrelid, 
+                        unnest(conkey) AS conkey_attnum, 
+                        unnest(confkey) AS confkey_attnum,
+                        connamespace
+                    FROM pg_constraint 
+                    WHERE contype = 'f'
+                ) fk
+                JOIN pg_class src ON src.oid = fk.conrelid
+                JOIN pg_namespace n_src ON n_src.oid = src.relnamespace
+                JOIN pg_attribute a_src ON a_src.attrelid = fk.conrelid AND a_src.attnum = fk.conkey_attnum
+                JOIN pg_class tgt ON tgt.oid = fk.confrelid
+                JOIN pg_namespace n_tgt ON n_tgt.oid = tgt.relnamespace
+                JOIN pg_attribute a_tgt ON a_tgt.attrelid = fk.confrelid AND a_tgt.attnum = fk.confkey_attnum
+                WHERE n_src.nspname NOT IN ('pg_catalog', 'information_schema')
+                  AND n_tgt.nspname NOT IN ('pg_catalog', 'information_schema');
             ";
             let fk_rows = execute_query(&pool, fk_query).await.map_err(|e| format!("Could not read foreign key metadata: {}", e))?;
 
@@ -115,6 +142,27 @@ pub async fn get_schema_diagram(id: String, database: String, state: State<'_, D
         }
 
         SupportedDB::Mariadb => {
+            // 1. Get all tables in database
+            let tbl_query = "
+                SELECT TABLE_NAME AS name 
+                FROM information_schema.TABLES 
+                WHERE TABLE_SCHEMA = DATABASE() 
+                ORDER BY TABLE_NAME;
+            ";
+            let tbl_rows = execute_query(&pool, tbl_query).await.map_err(|e| format!("Could not read the table list: {}", e))?;
+
+            let mut tables_map: std::collections::BTreeMap<String, Vec<serde_json::Value>> = std::collections::BTreeMap::new();
+            for tr in tbl_rows {
+                if let Some(obj) = tr.as_object() {
+                    if let Some(tbl) = obj.get("name").and_then(|v| v.as_str()) {
+                        if !tbl.is_empty() {
+                            tables_map.insert(tbl.to_string(), Vec::new());
+                        }
+                    }
+                }
+            }
+
+            // 2. Get all columns
             let col_query = "
                 SELECT 
                     TABLE_NAME AS table_name,
@@ -127,19 +175,6 @@ pub async fn get_schema_diagram(id: String, database: String, state: State<'_, D
             ";
             let col_rows = execute_query(&pool, col_query).await.map_err(|e| format!("Could not read column metadata: {}", e))?;
 
-            let fk_query = "
-                SELECT 
-                    TABLE_NAME AS from_table,
-                    COLUMN_NAME AS from_column,
-                    REFERENCED_TABLE_NAME AS to_table,
-                    REFERENCED_COLUMN_NAME AS to_column
-                FROM information_schema.KEY_COLUMN_USAGE
-                WHERE TABLE_SCHEMA = DATABASE()
-                  AND REFERENCED_TABLE_NAME IS NOT NULL;
-            ";
-            let fk_rows = execute_query(&pool, fk_query).await.map_err(|e| format!("Could not read foreign key metadata: {}", e))?;
-
-            let mut tables_map: std::collections::BTreeMap<String, Vec<serde_json::Value>> = std::collections::BTreeMap::new();
             for r in col_rows {
                 if let Some(obj) = r.as_object() {
                     let tbl = obj.get("table_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -164,6 +199,20 @@ pub async fn get_schema_diagram(id: String, database: String, state: State<'_, D
                     "columns": columns
                 })
             }).collect();
+
+            // 3. Get all foreign keys
+            let fk_query = "
+                SELECT 
+                    TABLE_NAME AS from_table,
+                    COLUMN_NAME AS from_column,
+                    REFERENCED_TABLE_NAME AS to_table,
+                    REFERENCED_COLUMN_NAME AS to_column
+                FROM information_schema.KEY_COLUMN_USAGE
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND REFERENCED_TABLE_NAME IS NOT NULL
+                ORDER BY TABLE_NAME, ORDINAL_POSITION;
+            ";
+            let fk_rows = execute_query(&pool, fk_query).await.map_err(|e| format!("Could not read foreign key metadata: {}", e))?;
 
             let mut relations = Vec::new();
             for r in fk_rows {
@@ -191,7 +240,7 @@ pub async fn get_schema_diagram(id: String, database: String, state: State<'_, D
         }
 
         SupportedDB::Sqlite => {
-            let tbl_query = "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'";
+            let tbl_query = "SELECT name FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY name";
             let tbl_rows = execute_query(&pool, tbl_query).await.map_err(|e| format!("Could not read the table list: {}", e))?;
 
             let mut tables = Vec::new();

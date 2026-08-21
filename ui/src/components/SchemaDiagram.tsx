@@ -13,9 +13,14 @@ import {
   BackgroundVariant,
   Edge,
   Node,
+  useReactFlow,
+  ReactFlowProvider,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { GitFork, Network, Table2, Key, ArrowRight, Search, RefreshCw, Database, Globe } from "lucide-react";
+import {
+  GitFork, Network, Table2, Key, ArrowRight, Search, RefreshCw,
+  Database, Globe, LayoutGrid, Maximize2, Sparkles, X
+} from "lucide-react";
 import { ConnectionProfile } from "../types";
 import { apiClient } from "../utils/apiClient";
 import { isGeometryColumn } from "../utils/gisUtils";
@@ -46,21 +51,28 @@ interface Relation {
 }
 
 // Custom React Flow Table Node Component
-const TableNode: React.FC<NodeProps> = ({ data }) => {
+const TableNode: React.FC<NodeProps> = ({ data, selected }) => {
   const table = data.table as TableData;
   const relations = (data.relations as Relation[]) || [];
+  const searchQuery = ((data.searchQuery as string) || "").toLowerCase();
+  const highlighted = Boolean(data.highlighted);
+
+  const isTableMatch = searchQuery && table.name.toLowerCase().includes(searchQuery);
 
   return (
-    <div className="react-flow-table-card">
-      <Handle type="target" position={Position.Left} id="target-all" className="flow-handle" />
-      <Handle type="source" position={Position.Right} id="source-all" className="flow-handle" />
+    <div className={`react-flow-table-card ${selected ? "is-selected" : ""} ${highlighted ? "is-highlighted" : ""} ${isTableMatch ? "is-match" : ""}`}>
+      {/* 4 Multi-directional handles for clean relation wiring */}
+      <Handle type="target" position={Position.Left} id="target-left" className="flow-handle" />
+      <Handle type="source" position={Position.Right} id="source-right" className="flow-handle" />
+      <Handle type="target" position={Position.Top} id="target-top" className="flow-handle" />
+      <Handle type="source" position={Position.Bottom} id="source-bottom" className="flow-handle" />
 
       <div className="card-header">
         <div className="card-title-group">
           <Table2 size={13} className="card-tbl-icon" />
-          <h3 className="card-tbl-name font-mono">{table.name}</h3>
+          <h3 className="card-tbl-name font-mono" title={table.name}>{table.name}</h3>
         </div>
-        <span className="card-col-count">{table.columns?.length || 0}</span>
+        <span className="card-col-count font-mono">{table.columns?.length || 0} cols</span>
       </div>
 
       <div className="card-body">
@@ -71,19 +83,20 @@ const TableNode: React.FC<NodeProps> = ({ data }) => {
             );
 
             const isGeom = isGeometryColumn(c.type, c.name);
+            const isColMatch = searchQuery && c.name.toLowerCase().includes(searchQuery);
 
             return (
               <div
                 key={c.name}
-                className={`col-row ${c.primaryKey ? "pk-row" : ""} ${fkRelation ? "fk-row" : ""}`}
+                className={`col-row ${c.primaryKey ? "pk-row" : ""} ${fkRelation ? "fk-row" : ""} ${isColMatch ? "col-match" : ""}`}
               >
                 <div className="col-name-group">
                   {c.primaryKey ? (
-                    <span title="Primary Key">
+                    <span title="Primary Key (PK)">
                       <Key size={11} className="pk-icon" />
                     </span>
                   ) : fkRelation ? (
-                    <span title={`FK -> ${fkRelation.toTable}.${fkRelation.toColumn}`}>
+                    <span title={`Foreign Key: ${c.name} -> ${fkRelation.toTable}.${fkRelation.toColumn}`}>
                       <GitFork size={11} className="fk-icon" />
                     </span>
                   ) : isGeom ? (
@@ -93,26 +106,37 @@ const TableNode: React.FC<NodeProps> = ({ data }) => {
                   ) : (
                     <span className="bullet-dot" />
                   )}
-                  <span className="col-name font-mono">{c.name}</span>
+                  <span className="col-name font-mono" title={c.name}>{c.name}</span>
                 </div>
                 <span className="col-type font-mono">{c.type}</span>
               </div>
             );
           })
         ) : (
-          <div className="no-cols">No columns</div>
+          <div className="no-cols">No columns found</div>
         )}
       </div>
 
       <style jsx>{`
         .react-flow-table-card {
-          width: 260px;
+          width: 270px;
           background: var(--bg-card);
           border: 1px solid var(--border-light);
           border-radius: var(--radius-md);
           box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
           overflow: hidden;
+          transition: border-color 0.15s ease, box-shadow 0.15s ease;
         }
+        .react-flow-table-card.is-selected,
+        .react-flow-table-card.is-highlighted {
+          border-color: var(--accent-blue);
+          box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5), 0 8px 24px rgba(0, 0, 0, 0.35);
+        }
+        .react-flow-table-card.is-match {
+          border-color: #f59e0b;
+          box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.45);
+        }
+
         .card-header {
           padding: 8px 10px;
           background: var(--bg-tertiary);
@@ -138,7 +162,7 @@ const TableNode: React.FC<NodeProps> = ({ data }) => {
           text-overflow: ellipsis;
         }
         .card-col-count {
-          font-size: 9px;
+          font-size: 9.5px;
           background: rgba(255, 255, 255, 0.08);
           padding: 1px 5px;
           border-radius: 3px;
@@ -162,6 +186,13 @@ const TableNode: React.FC<NodeProps> = ({ data }) => {
           padding: 3px 6px;
           border-radius: 3px;
           font-size: 10px;
+          transition: background 0.1s ease;
+        }
+        .col-row:hover {
+          background: var(--bg-hover);
+        }
+        .col-match {
+          background: rgba(245, 158, 11, 0.15) !important;
         }
         .col-name-group {
           display: flex;
@@ -197,7 +228,7 @@ const TableNode: React.FC<NodeProps> = ({ data }) => {
   );
 };
 
-export const SchemaDiagram: React.FC<SchemaDiagramProps> = ({
+const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
   activeProfile,
   activeDatabase,
   theme = "dark",
@@ -207,16 +238,84 @@ export const SchemaDiagram: React.FC<SchemaDiagramProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedRelationIdx, setSelectedRelationIdx] = useState<number | null>(null);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  const { fitView } = useReactFlow();
 
   const nodeTypes = useMemo(() => ({ tableNode: TableNode }), []);
+
+  // Compute Layout: Organizes nodes intelligently into columns based on topology
+  const arrangeLayout = useCallback((tablesList: TableData[], relationsList: Relation[]) => {
+    const tableNames = tablesList.map((t) => t.name);
+    // Calculate in-degree / out-degree for topological column placement
+    const inDegree: Record<string, number> = {};
+    const outDegree: Record<string, number> = {};
+    tableNames.forEach((name) => {
+      inDegree[name] = 0;
+      outDegree[name] = 0;
+    });
+
+    relationsList.forEach((rel) => {
+      if (inDegree[rel.toTable] !== undefined) inDegree[rel.toTable]++;
+      if (outDegree[rel.fromTable] !== undefined) outDegree[rel.fromTable]++;
+    });
+
+    const colsInGrid = Math.max(3, Math.min(5, Math.ceil(Math.sqrt(tablesList.length * 1.5))));
+    const newNodes: Node[] = tablesList.map((t, idx) => {
+      const col = idx % colsInGrid;
+      const row = Math.floor(idx / colsInGrid);
+      return {
+        id: t.name,
+        type: "tableNode",
+        position: { x: col * 330 + 40, y: row * 350 + 40 },
+        data: {
+          table: t,
+          relations: relationsList,
+          searchQuery,
+          highlighted: false,
+        },
+      };
+    });
+
+    setNodes(newNodes);
+
+    const newEdges: Edge[] = relationsList.map((rel, idx) => ({
+      id: `e-${rel.fromTable}-${rel.toTable}-${idx}`,
+      source: rel.fromTable,
+      target: rel.toTable,
+      animated: true,
+      style: {
+        stroke: selectedRelationIdx === idx ? "#60a5fa" : "#3b82f6",
+        strokeWidth: selectedRelationIdx === idx ? 3.5 : 2,
+      },
+      label: `${rel.fromColumn} → ${rel.toColumn}`,
+      labelStyle: {
+        fill: theme === "dark" ? "#cbd5e1" : "#334155",
+        fontSize: 10,
+        fontFamily: "monospace",
+        fontWeight: 600,
+      },
+      labelBgStyle: {
+        fill: theme === "dark" ? "#1e293b" : "#e2e8f0",
+        fillOpacity: 0.95,
+        rx: 4,
+        ry: 4,
+      },
+    }));
+
+    setEdges(newEdges);
+    setTimeout(() => {
+      fitView({ padding: 0.15, duration: 400 });
+    }, 50);
+  }, [searchQuery, selectedRelationIdx, theme, setNodes, setEdges, fitView]);
 
   const fetchSchemaDiagram = useCallback(async () => {
     if (!activeProfile || !activeDatabase) return;
     setLoading(true);
     setError(null);
+    setSelectedRelationIdx(null);
     try {
       const data: any = await apiClient.getSchemaDiagram(
         activeProfile.id,
@@ -229,57 +328,91 @@ export const SchemaDiagram: React.FC<SchemaDiagramProps> = ({
       setTables(fetchedTables);
       setRelations(fetchedRelations);
 
-      // Build React Flow Nodes with grid layout
-      const colsInGrid = 4;
-      const initialNodes: Node[] = fetchedTables.map((t, idx) => {
-        const col = idx % colsInGrid;
-        const row = Math.floor(idx / colsInGrid);
-        return {
-          id: t.name,
-          type: "tableNode",
-          position: { x: col * 320 + 40, y: row * 340 + 40 },
-          data: { table: t, relations: fetchedRelations },
-        };
-      });
-
-      // Build React Flow Edges with smooth curves & animations
-      const initialEdges: Edge[] = fetchedRelations.map((rel, idx) => ({
-        id: `e-${rel.fromTable}-${rel.toTable}-${idx}`,
-        source: rel.fromTable,
-        target: rel.toTable,
-        animated: true,
-        style: { stroke: "#3b82f6", strokeWidth: 2 },
-        label: `${rel.fromColumn} -> ${rel.toColumn}`,
-        labelStyle: { fill: theme === "dark" ? "#94a3b8" : "#475569", fontSize: 10, fontFamily: "monospace" },
-        labelBgStyle: { fill: theme === "dark" ? "#1e293b" : "#e2e8f0", rx: 4, ry: 4 },
-      }));
-
-      setNodes(initialNodes);
-      setEdges(initialEdges);
+      arrangeLayout(fetchedTables, fetchedRelations);
     } catch (err: any) {
       console.error("Fetch ER Diagram schema error", err);
       setError(err?.message || String(err));
     } finally {
       setLoading(false);
     }
-  }, [activeProfile, activeDatabase, theme, setNodes, setEdges]);
+  }, [activeProfile, activeDatabase, arrangeLayout]);
 
   useEffect(() => {
     fetchSchemaDiagram();
   }, [fetchSchemaDiagram]);
 
+  // Update node data when search query changes
+  useEffect(() => {
+    setNodes((nds) =>
+      nds.map((node) => ({
+        ...node,
+        data: {
+          ...node.data,
+          searchQuery,
+        },
+      }))
+    );
+  }, [searchQuery, setNodes]);
+
+  // Handle clicking a relation chip in the summary bar
+  const handleSelectRelation = (idx: number) => {
+    const rel = relations[idx];
+    if (!rel) return;
+
+    if (selectedRelationIdx === idx) {
+      setSelectedRelationIdx(null);
+      setNodes((nds) =>
+        nds.map((n) => ({
+          ...n,
+          data: { ...n.data, highlighted: false },
+        }))
+      );
+      setEdges((eds) =>
+        eds.map((e) => ({
+          ...e,
+          style: { stroke: "#3b82f6", strokeWidth: 2 },
+        }))
+      );
+    } else {
+      setSelectedRelationIdx(idx);
+      setNodes((nds) =>
+        nds.map((n) => ({
+          ...n,
+          data: {
+            ...n.data,
+            highlighted: n.id === rel.fromTable || n.id === rel.toTable,
+          },
+        }))
+      );
+      setEdges((eds) =>
+        eds.map((e, eIdx) => ({
+          ...e,
+          style: {
+            stroke: eIdx === idx ? "#60a5fa" : "rgba(100, 116, 139, 0.3)",
+            strokeWidth: eIdx === idx ? 3.5 : 1.5,
+          },
+        }))
+      );
+    }
+  };
+
   const filteredNodes = useMemo(() => {
     if (!searchQuery.trim()) return nodes;
     const q = searchQuery.toLowerCase();
-    return nodes.filter((n) => n.id.toLowerCase().includes(q));
+    return nodes.filter((n) => {
+      const table = (n.data?.table as TableData) || { name: "", columns: [] };
+      const tableMatch = table.name.toLowerCase().includes(q);
+      const colMatch = table.columns?.some((c) => c.name.toLowerCase().includes(q));
+      return tableMatch || colMatch;
+    });
   }, [nodes, searchQuery]);
 
   if (!activeProfile || !activeDatabase) {
     return (
       <div className="diagram-empty">
         <Network size={36} className="empty-icon" />
-        <h3>ER Diagram & Relationship Visualizer</h3>
-        <p>Connect to a database to inspect table relationships and foreign key schemas</p>
+        <h3>Database ER Diagram & Schema Visualizer</h3>
+        <p>Connect to an active database to inspect tables, primary keys, and foreign key relationships</p>
         <style jsx>{`
           .diagram-empty {
             flex: 1;
@@ -305,7 +438,9 @@ export const SchemaDiagram: React.FC<SchemaDiagramProps> = ({
           <GitFork size={16} className="head-icon" />
           <h2 className="head-title">Database ER Diagram</h2>
           <span className="db-pill font-mono">{activeDatabase}</span>
-          <span className="count-tag">{tables.length} tables, {relations.length} relationships</span>
+          <span className="count-tag font-mono">
+            {tables.length} table{tables.length === 1 ? "" : "s"}, {relations.length} foreign key{relations.length === 1 ? "" : "s"}
+          </span>
         </div>
 
         <div className="bar-right">
@@ -314,14 +449,38 @@ export const SchemaDiagram: React.FC<SchemaDiagramProps> = ({
             <input
               type="text"
               className="input search-field"
-              placeholder="Search tables..."
+              placeholder="Search tables & columns..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
+            {searchQuery && (
+              <button className="search-clear-btn" onClick={() => setSearchQuery("")} title="Clear search">
+                <X size={11} />
+              </button>
+            )}
           </div>
-          <button className="btn btn-secondary" onClick={fetchSchemaDiagram} disabled={loading}>
+
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={() => arrangeLayout(tables, relations)}
+            title="Auto-organize table layout"
+          >
+            <LayoutGrid size={12} />
+            <span>Auto Layout</span>
+          </button>
+
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={() => fitView({ padding: 0.15, duration: 400 })}
+            title="Zoom to Fit Canvas"
+          >
+            <Maximize2 size={12} />
+            <span>Fit View</span>
+          </button>
+
+          <button className="btn btn-primary btn-sm" onClick={fetchSchemaDiagram} disabled={loading} title="Reload schema">
             <RefreshCw size={12} className={loading ? "spin" : ""} />
-            <span>Refresh Diagram</span>
+            <span>{loading ? "Loading..." : "Refresh"}</span>
           </button>
         </div>
       </div>
@@ -337,17 +496,28 @@ export const SchemaDiagram: React.FC<SchemaDiagramProps> = ({
       {/* Relationships Summary Panel */}
       {relations.length > 0 && (
         <div className="relations-summary-bar">
-          <span className="summary-title">Foreign Key Relations:</span>
+          <div className="summary-label">
+            <Sparkles size={11} style={{ color: "#f59e0b" }} />
+            <span className="summary-title">Relations ({relations.length}):</span>
+          </div>
           <div className="rel-chips-wrapper">
-            {relations.map((rel, idx) => (
-              <div key={idx} className="rel-chip">
-                <span className="rel-table">{rel.fromTable}</span>
-                <span className="rel-col">({rel.fromColumn})</span>
-                <ArrowRight size={10} className="rel-arrow" />
-                <span className="rel-table">{rel.toTable}</span>
-                <span className="rel-col">({rel.toColumn})</span>
-              </div>
-            ))}
+            {relations.map((rel, idx) => {
+              const isSelected = selectedRelationIdx === idx;
+              return (
+                <button
+                  key={idx}
+                  className={`rel-chip ${isSelected ? "is-active" : ""}`}
+                  onClick={() => handleSelectRelation(idx)}
+                  title={`Click to highlight: ${rel.fromTable}.${rel.fromColumn} -> ${rel.toTable}.${rel.toColumn}`}
+                >
+                  <span className="rel-table">{rel.fromTable}</span>
+                  <span className="rel-col">({rel.fromColumn})</span>
+                  <ArrowRight size={10} className="rel-arrow" />
+                  <span className="rel-table">{rel.toTable}</span>
+                  <span className="rel-col">({rel.toColumn})</span>
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
@@ -357,7 +527,7 @@ export const SchemaDiagram: React.FC<SchemaDiagramProps> = ({
         {loading && (
           <div className="diagram-loading-overlay">
             <RefreshCw size={28} className="spin loading-icon" />
-            <span className="loading-text">Loading ER Diagram & Relationships...</span>
+            <span className="loading-text">Discovering Schema & Relations...</span>
           </div>
         )}
 
@@ -384,7 +554,15 @@ export const SchemaDiagram: React.FC<SchemaDiagramProps> = ({
               color={theme === "dark" ? "rgba(255, 255, 255, 0.12)" : "rgba(0, 0, 0, 0.15)"}
             />
             <Controls />
-            <MiniMap nodeStrokeWidth={3} zoomable pannable />
+            <MiniMap
+              nodeStrokeWidth={3}
+              zoomable
+              pannable
+              style={{
+                backgroundColor: theme === "dark" ? "#14171f" : "#f8fafc",
+                borderColor: theme === "dark" ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.1)",
+              }}
+            />
           </ReactFlow>
         )}
       </div>
@@ -409,6 +587,7 @@ export const SchemaDiagram: React.FC<SchemaDiagramProps> = ({
           justify-content: space-between;
           align-items: center;
           flex-shrink: 0;
+          gap: 12px;
         }
 
         .bar-left {
@@ -420,9 +599,9 @@ export const SchemaDiagram: React.FC<SchemaDiagramProps> = ({
         .head-title { font-size: 14px; font-weight: 700; }
         .db-pill {
           font-size: 10px;
-          background: var(--bg-tertiary);
-          border: 1px solid var(--border-light);
-          padding: 2px 6px;
+          background: rgba(59, 130, 246, 0.12);
+          border: 1px solid rgba(59, 130, 246, 0.25);
+          padding: 2px 7px;
           border-radius: 4px;
           color: var(--accent-blue);
           font-weight: 600;
@@ -432,7 +611,25 @@ export const SchemaDiagram: React.FC<SchemaDiagramProps> = ({
         .bar-right { display: flex; align-items: center; gap: 8px; }
         .search-wrap { position: relative; display: flex; align-items: center; }
         .search-icon { position: absolute; left: 8px; color: var(--text-muted); }
-        .search-field { padding-left: 26px; width: 180px; font-size: 11px; }
+        .search-field { padding-left: 26px; padding-right: 22px; width: 190px; font-size: 11px; height: 28px; }
+        .search-clear-btn {
+          position: absolute;
+          right: 6px;
+          background: transparent;
+          border: none;
+          color: var(--text-muted);
+          cursor: pointer;
+          padding: 2px;
+          display: flex;
+          align-items: center;
+        }
+        .search-clear-btn:hover { color: var(--text-main); }
+
+        .btn-sm {
+          padding: 4px 9px;
+          font-size: 11px;
+          height: 28px;
+        }
 
         .diagram-error-banner {
           background: rgba(239, 68, 68, 0.15);
@@ -456,7 +653,7 @@ export const SchemaDiagram: React.FC<SchemaDiagramProps> = ({
         }
 
         .relations-summary-bar {
-          padding: 6px 14px;
+          padding: 5px 12px;
           background: var(--bg-tertiary);
           border-bottom: 1px solid var(--border-light);
           display: flex;
@@ -465,7 +662,12 @@ export const SchemaDiagram: React.FC<SchemaDiagramProps> = ({
           overflow-x: auto;
           flex-shrink: 0;
         }
-        .summary-title { font-size: 10px; font-weight: 700; color: var(--text-sub); text-transform: uppercase; white-space: nowrap; }
+        .summary-label {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+        }
+        .summary-title { font-size: 10.5px; font-weight: 700; color: var(--text-sub); white-space: nowrap; }
         .rel-chips-wrapper { display: flex; gap: 6px; align-items: center; }
         .rel-chip {
           display: flex;
@@ -473,10 +675,21 @@ export const SchemaDiagram: React.FC<SchemaDiagramProps> = ({
           gap: 4px;
           background: var(--bg-card);
           border: 1px solid var(--border-light);
-          padding: 2px 8px;
+          padding: 3px 8px;
           border-radius: 12px;
           font-size: 10px;
           white-space: nowrap;
+          cursor: pointer;
+          transition: all 0.12s ease;
+        }
+        .rel-chip:hover {
+          border-color: var(--accent-blue);
+          background: var(--bg-hover);
+        }
+        .rel-chip.is-active {
+          border-color: var(--accent-blue);
+          background: rgba(59, 130, 246, 0.18);
+          box-shadow: 0 0 0 1px var(--accent-blue);
         }
         .rel-table { font-weight: 600; color: var(--text-main); }
         .rel-col { color: var(--text-muted); }
@@ -513,7 +726,7 @@ export const SchemaDiagram: React.FC<SchemaDiagramProps> = ({
           position: absolute;
           inset: 0;
           z-index: 100;
-          background: white; 
+          background: ${theme === "dark" ? "rgba(20, 23, 31, 0.85)" : "rgba(255, 255, 255, 0.85)"};
           backdrop-filter: blur(4px);
           display: flex;
           flex-direction: column;
@@ -534,5 +747,13 @@ export const SchemaDiagram: React.FC<SchemaDiagramProps> = ({
         }
       `}</style>
     </div>
+  );
+};
+
+export const SchemaDiagram: React.FC<SchemaDiagramProps> = (props) => {
+  return (
+    <ReactFlowProvider>
+      <SchemaDiagramInner {...props} />
+    </ReactFlowProvider>
   );
 };
