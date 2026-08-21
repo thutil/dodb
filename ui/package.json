@@ -6,7 +6,8 @@
     "dev": "next dev -p 5821",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "fonts": "node scripts/fetch-fonts.mjs"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
