@@ -15,6 +15,7 @@ import {
   CornerDownLeft,
   X,
   Layers,
+  Workflow,
 } from "lucide-react";
 import { ConnectionProfile } from "../types";
 
@@ -36,8 +37,8 @@ interface CommandPaletteProps {
   databases: string[];
   activeDatabase: string;
   onSelectDatabase: (db: string) => void;
-  activeView: "explorer" | "sql" | "admin" | "diagram";
-  onChangeView: (view: "explorer" | "sql" | "admin" | "diagram") => void;
+  activeView: "explorer" | "sql" | "admin" | "diagram" | "visual-query";
+  onChangeView: (view: "explorer" | "sql" | "admin" | "diagram" | "visual-query") => void;
   onOpenConnections: () => void;
   onOpenCreateTable?: () => void;
   onOpenAuditLogs?: () => void;
@@ -120,6 +121,17 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         hint: "Run custom SQL scripts",
         action: () => {
           onChangeView("sql");
+          onClose();
+        },
+      },
+      {
+        id: "nav-visual-query",
+        title: "Visual Query Builder (JOIN & Filters)",
+        category: "Navigation",
+        icon: <Workflow size={14} className="cmd-icon-nav" />,
+        hint: "Visual drag-and-drop query builder",
+        action: () => {
+          onChangeView("visual-query");
           onClose();
         },
       },

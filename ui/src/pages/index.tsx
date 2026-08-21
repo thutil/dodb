@@ -13,6 +13,7 @@ import { DataGrid, PendingChanges, CommitResult } from "../components/DataGrid";
 import { SqlConsole } from "../components/SqlConsole";
 import { AdminPanel } from "../components/AdminPanel";
 import { SchemaDiagram } from "../components/SchemaDiagram";
+import { VisualQueryBuilder } from "../components/VisualQueryBuilder";
 import { CommandPalette } from "../components/CommandPalette";
 import { AlertCircle, X, CheckCircle2, Download } from "lucide-react";
 import { ConnectionProfile, ColumnInfo, TableRowData, QueryExecutionResult, ColumnFilter, DBType } from "../types";
@@ -28,10 +29,51 @@ const SESSION_ID_PREFIX = "session-";
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:5820/api";
 
 
+interface ErrorBoundaryState {
+  hasError: boolean;
+  errorMsg: string;
+}
+
+class ViewErrorBoundary extends React.Component<{ children: React.ReactNode }, ErrorBoundaryState> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, errorMsg: "" };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, errorMsg: error?.message || String(error) };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error("View ErrorBoundary caught error:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", padding: 32, gap: 12, color: "var(--text-main)" }}>
+          <div style={{ fontWeight: 700, fontSize: 14 }}>Something went wrong loading this view</div>
+          <div style={{ fontSize: 11, color: "var(--accent-red)", fontFamily: "monospace" }}>{this.state.errorMsg}</div>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => this.setState({ hasError: false, errorMsg: "" })}
+            style={{ marginTop: 8 }}
+          >
+            Reload View
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function Home() {
   const [appVersion, setAppVersion] = useState<string>(DEFAULT_APP_VERSION);
   const [theme, setTheme] = useState<"dark" | "light">("dark");
-  const [activeView, setActiveView] = useState<"explorer" | "sql" | "admin" | "diagram">("explorer");
+  const [activeView, setActiveView] = useState<"explorer" | "sql" | "admin" | "diagram" | "visual-query">("explorer");
+  const [sqlConsoleInitialQuery, setSqlConsoleInitialQuery] = useState<string>("");
 
   const [profiles, setProfiles] = useState<ConnectionProfile[]>([]);
   const [activeProfile, setActiveProfile] = useState<ConnectionProfile | null>(null);
@@ -777,7 +819,7 @@ export default function Home() {
         />
 
         <div className="app-main-body">
-          {activeView !== "admin" && activeView !== "diagram" && (
+          {activeView !== "admin" && activeView !== "diagram" && activeView !== "visual-query" && (
             <SidebarExplorer
               databases={databases}
               activeDatabase={activeDatabase}
@@ -841,61 +883,77 @@ export default function Home() {
                 </button>
               </div>
             )}
-            {activeView === "explorer" ? (
-              <DataGrid
-                activeProfile={activeProfile}
-                activeDatabase={activeDatabase}
-                tableName={activeTable}
-                columns={columns}
-                rows={rows}
-                totalRows={totalRows}
-                loading={loadingData}
-                page={page}
-                pageSize={pageSize}
-                onPageChange={setPage}
-                onRefresh={fetchTableData}
-                onCommitChanges={handleCommitChanges}
-                sortColumn={sortColumn}
-                sortOrder={sortOrder}
-                onSortChange={(col, order) => {
-                  setSortColumn(col);
-                  setSortOrder(order);
-                }}
-                searchQuery={searchQuery}
-                onSearchChange={setSearchQuery}
-                filters={filters}
-                onFiltersChange={setFilters}
-                theme={theme}
-                errorMessage={tableError}
-                onCreateTable={() => setIsCreateTableOpen(true)}
-              />
-            ) : activeView === "sql" ? (
-              <SqlConsole
-                activeDatabase={activeDatabase}
-                activeTable={activeTable}
-                tables={tables}
-                columns={columns}
-                theme={theme}
-                onExecuteSql={handleExecuteSql}
-                onCommitChanges={handleCommitChanges}
-              />
-
-            ) : activeView === "diagram" ? (
-              <SchemaDiagram
-                activeProfile={activeProfile}
-                activeDatabase={activeDatabase}
-                apiBase={API_BASE}
-                theme={theme}
-              />
-            ) : (
-              <AdminPanel
-                activeProfile={activeProfile}
-                activeDatabase={activeDatabase}
-                databases={databases}
-                tables={tables}
-                onRefreshDatabases={fetchDatabases}
-              />
-            )}
+            <ViewErrorBoundary key={activeView}>
+              {activeView === "explorer" ? (
+                <DataGrid
+                  activeProfile={activeProfile}
+                  activeDatabase={activeDatabase}
+                  tableName={activeTable}
+                  columns={columns}
+                  rows={rows}
+                  totalRows={totalRows}
+                  loading={loadingData}
+                  page={page}
+                  pageSize={pageSize}
+                  onPageChange={setPage}
+                  onRefresh={fetchTableData}
+                  onCommitChanges={handleCommitChanges}
+                  sortColumn={sortColumn}
+                  sortOrder={sortOrder}
+                  onSortChange={(col, order) => {
+                    setSortColumn(col);
+                    setSortOrder(order);
+                  }}
+                  searchQuery={searchQuery}
+                  onSearchChange={setSearchQuery}
+                  filters={filters}
+                  onFiltersChange={setFilters}
+                  theme={theme}
+                  errorMessage={tableError}
+                  onCreateTable={() => setIsCreateTableOpen(true)}
+                />
+              ) : activeView === "sql" ? (
+                <SqlConsole
+                  activeDatabase={activeDatabase}
+                  activeTable={activeTable}
+                  tables={tables}
+                  columns={columns}
+                  theme={theme}
+                  initialSql={sqlConsoleInitialQuery}
+                  onExecuteSql={handleExecuteSql}
+                  onCommitChanges={handleCommitChanges}
+                />
+              ) : activeView === "visual-query" ? (
+                <VisualQueryBuilder
+                  activeProfile={activeProfile}
+                  activeDatabase={activeDatabase}
+                  tables={tables}
+                  theme={theme}
+                  initialSql={sqlConsoleInitialQuery}
+                  onExecuteSql={handleExecuteSql}
+                  onCommitChanges={handleCommitChanges}
+                  onOpenInSqlConsole={(sql) => {
+                    setSqlConsoleInitialQuery(sql);
+                    setActiveView("sql");
+                  }}
+                />
+              ) : activeView === "diagram" ? (
+                <SchemaDiagram
+                  activeProfile={activeProfile}
+                  activeDatabase={activeDatabase}
+                  apiBase={API_BASE}
+                  theme={theme}
+                />
+              ) : (
+                <AdminPanel
+                  activeProfile={activeProfile}
+                  activeDatabase={activeDatabase}
+                  databases={databases}
+                  tables={tables}
+                  onRefreshDatabases={fetchDatabases}
+                />
+              )}
+            </ViewErrorBoundary>
           </main>
         </div>
 

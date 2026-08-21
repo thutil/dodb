@@ -85,3 +85,43 @@ export interface AuditLogFilter {
   endDate?: string;
 }
 
+export type JoinType = "INNER" | "LEFT" | "RIGHT" | "FULL";
+
+export interface VisualJoinInfo {
+  id: string;
+  joinType: JoinType;
+  fromTable: string;
+  fromColumn: string;
+  toTable: string;
+  toColumn: string;
+}
+
+export type VisualFilterOperator =
+  | "="
+  | "!="
+  | ">"
+  | "<"
+  | ">="
+  | "<="
+  | "LIKE"
+  | "NOT LIKE"
+  | "IN"
+  | "IS NULL"
+  | "IS NOT NULL";
+
+export interface VisualFilterCondition {
+  id: string;
+  table: string;
+  column: string;
+  operator: VisualFilterOperator;
+  value: string;
+  logic: "AND" | "OR";
+}
+
+export interface VisualSortCondition {
+  id: string;
+  table: string;
+  column: string;
+  direction: "ASC" | "DESC";
+}
+

@@ -20,6 +20,7 @@ import {
   RefreshCw,
   ExternalLink,
   Plus,
+  Workflow,
 } from "lucide-react";
 import { ConnectionProfile, DBType } from "../types";
 import { quoteTableIdent } from "../utils/ddlBuilder";
@@ -34,8 +35,8 @@ interface HeaderProps {
   tables?: string[];
   activeTable?: string | null;
   onSelectTable?: (table: string) => void;
-  activeView: "explorer" | "sql" | "admin" | "diagram";
-  onChangeView: (view: "explorer" | "sql" | "admin" | "diagram") => void;
+  activeView: "explorer" | "sql" | "admin" | "diagram" | "visual-query";
+  onChangeView: (view: "explorer" | "sql" | "admin" | "diagram" | "visual-query") => void;
   onOpenConnections: () => void;
   onDisconnect?: () => void;
   onOpenAuditLogs?: () => void;
@@ -485,6 +486,14 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <Terminal size={12} className="tab-icon" />
             <span className="tab-label">SQL</span>
+          </button>
+          <button
+            className={`tab-btn ${activeView === "visual-query" ? "active" : ""}`}
+            onClick={() => onChangeView("visual-query")}
+            title="Visual Query Builder (Drag-and-Drop JOIN & Filters)"
+          >
+            <Workflow size={12} className="tab-icon" />
+            <span className="tab-label">Visual Query</span>
           </button>
           <button
             className={`tab-btn ${activeView === "diagram" ? "active" : ""}`}
