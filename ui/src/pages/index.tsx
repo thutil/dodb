@@ -728,13 +728,34 @@ export default function Home() {
               setPage(0);
             }
           }}
+          tables={tables}
           activeTable={activeTable}
+          onSelectTable={(tbl) => {
+            if (tbl !== activeTable) {
+              fetchSeqRef.current += 1;
+              setRows([]);
+              setColumns([]);
+              setTotalRows(0);
+              setLoadingData(true);
+              setActiveTable(tbl);
+              setPage(0);
+              if (activeView !== "explorer") {
+                setActiveView("explorer");
+              }
+            }
+          }}
           activeView={activeView}
           onChangeView={setActiveView}
           onOpenConnections={() => setIsConnModalOpen(true)}
           onDisconnect={handleDisconnect}
           onOpenAuditLogs={() => setIsAuditLogOpen(true)}
           onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+          onViewStructure={(tbl) => setStructureModalTable(tbl)}
+          onOpenInSql={(sql) => {
+            setActiveView("sql");
+            handleExecuteSql(sql);
+          }}
+          onRefreshDatabases={fetchDatabases}
           latencyMs={latencyMs}
           theme={theme}
           onToggleTheme={toggleTheme}

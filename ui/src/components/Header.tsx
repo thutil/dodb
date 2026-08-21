@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Database,
   Terminal,
@@ -14,8 +14,15 @@ import {
   Search,
   Activity,
   Table as TableIcon,
+  Check,
+  Copy,
+  Layers,
+  RefreshCw,
+  ExternalLink,
+  Plus,
 } from "lucide-react";
-import { ConnectionProfile } from "../types";
+import { ConnectionProfile, DBType } from "../types";
+import { quoteTableIdent } from "../utils/ddlBuilder";
 
 interface HeaderProps {
   activeProfile: ConnectionProfile | null;
@@ -24,13 +31,18 @@ interface HeaderProps {
   activeDatabase: string;
   databases: string[];
   onSelectDatabase: (db: string) => void;
+  tables?: string[];
   activeTable?: string | null;
+  onSelectTable?: (table: string) => void;
   activeView: "explorer" | "sql" | "admin" | "diagram";
   onChangeView: (view: "explorer" | "sql" | "admin" | "diagram") => void;
   onOpenConnections: () => void;
   onDisconnect?: () => void;
   onOpenAuditLogs?: () => void;
   onOpenCommandPalette?: () => void;
+  onViewStructure?: (table: string) => void;
+  onOpenInSql?: (sql: string) => void;
+  onRefreshDatabases?: () => void;
   latencyMs?: number | null;
   theme: "dark" | "light";
   onToggleTheme: () => void;
@@ -43,44 +55,387 @@ export const Header: React.FC<HeaderProps> = ({
   activeDatabase,
   databases,
   onSelectDatabase,
+  tables = [],
   activeTable,
+  onSelectTable,
   activeView,
   onChangeView,
   onOpenConnections,
   onDisconnect,
   onOpenAuditLogs,
   onOpenCommandPalette,
+  onViewStructure,
+  onOpenInSql,
+  onRefreshDatabases,
   latencyMs,
   theme,
   onToggleTheme,
 }) => {
+  const [openMenu, setOpenMenu] = useState<"host" | "db" | "table" | null>(null);
+  const [dbSearch, setDbSearch] = useState("");
+  const [tableSearch, setTableSearch] = useState("");
+  const [copiedTable, setCopiedTable] = useState(false);
+  const breadcrumbRef = useRef<HTMLDivElement>(null);
+
+  // Close breadcrumb dropdown when clicking outside or pressing Escape
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (breadcrumbRef.current && !breadcrumbRef.current.contains(e.target as Node)) {
+        setOpenMenu(null);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpenMenu(null);
+      }
+    };
+
+    window.addEventListener("mousedown", handleOutsideClick);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("mousedown", handleOutsideClick);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
+
+  const handleCopyTableName = (e: React.MouseEvent, name: string) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(name);
+    setCopiedTable(true);
+    setTimeout(() => setCopiedTable(false), 1200);
+  };
+
+  const handleOpenTableInSql = (tbl: string) => {
+    setOpenMenu(null);
+    const dialect: DBType =
+      activeProfile?.type === "mariadb"
+        ? "mariadb"
+        : activeProfile?.type === "sqlite"
+        ? "sqlite"
+        : "postgres";
+    const quoted = quoteTableIdent(tbl, dialect);
+    const sql = `SELECT * FROM ${quoted} LIMIT 100;`;
+    if (onOpenInSql) {
+      onOpenInSql(sql);
+    } else {
+      onChangeView("sql");
+    }
+  };
+
+  const filteredDatabases = databases.filter((db) =>
+    db.toLowerCase().includes(dbSearch.toLowerCase())
+  );
+
+  const filteredTables = tables.filter((t) =>
+    t.toLowerCase().includes(tableSearch.toLowerCase())
+  );
+
   return (
     <header className="app-header">
       {/* Left: Brand logo & Context Breadcrumb */}
       <div className="header-left">
-        <div className="brand" title="dodb Database Manager">
+        <div
+          className="brand clickable"
+          onClick={() => onChangeView("explorer")}
+          title="dodb Database Manager - Click to go to Data Explorer"
+        >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/icon.png" alt="dodb mascot" className="brand-mascot-img" />
           <span className="brand-title">DODB</span>
         </div>
 
         {activeProfile && (
-          <div className="header-breadcrumb" title="Active Context Path">
+          <div className="header-breadcrumb" ref={breadcrumbRef} title="Active Context Path (Click to switch or navigate)">
             <span className="bc-divider">/</span>
-            <span className="bc-item bc-host" title={`Host: ${activeProfile.host || activeProfile.name}`}>
-              {activeProfile.name}
-            </span>
+
+            {/* Segment 1: Host / Connection Profile */}
+            <div className="bc-segment-wrap">
+              <button
+                type="button"
+                className={`bc-item bc-host bc-interactive ${openMenu === "host" ? "is-open" : ""}`}
+                onClick={() => {
+                  setOpenMenu((prev) => (prev === "host" ? null : "host"));
+                  setDbSearch("");
+                  setTableSearch("");
+                }}
+                title={`Connected Profile: ${activeProfile.name} (${activeProfile.host || "Local"}) - Click to switch profile or manage connections`}
+              >
+                <Server size={11} className="bc-segment-icon" />
+                <span className="bc-label">{activeProfile.name}</span>
+                <ChevronDown size={9} className={`bc-caret ${openMenu === "host" ? "caret-up" : ""}`} />
+              </button>
+
+              {openMenu === "host" && (
+                <div className="bc-dropdown-popover">
+                  <div className="bc-dropdown-header">
+                    <div className="bc-dropdown-title">Host / Connection</div>
+                    <span className={`db-type-badge ${activeProfile.type}`}>
+                      {activeProfile.type.toUpperCase()}
+                    </span>
+                  </div>
+                  <div className="bc-dropdown-subinfo">
+                    {activeProfile.host ? `${activeProfile.host}:${activeProfile.port || "default"}` : "Local Database"}
+                  </div>
+
+                  {profiles && profiles.length > 0 && (
+                    <>
+                      <div className="bc-dropdown-section-title">Switch Connection</div>
+                      <div className="bc-dropdown-list">
+                        {profiles.map((p) => (
+                          <button
+                            key={p.id}
+                            type="button"
+                            className={`bc-dropdown-item ${p.id === activeProfile.id ? "active" : ""}`}
+                            onClick={() => {
+                              setOpenMenu(null);
+                              if (p.id !== activeProfile.id && onSelectProfile) {
+                                onSelectProfile(p);
+                              }
+                            }}
+                          >
+                            <Server size={12} className="item-icon" />
+                            <span className="item-text">{p.name}</span>
+                            <span className={`db-type-badge small ${p.type}`}>{p.type}</span>
+                            {p.id === activeProfile.id && <Check size={12} className="check-icon" />}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+
+                  <div className="bc-dropdown-divider" />
+                  <button
+                    type="button"
+                    className="bc-dropdown-item action-item"
+                    onClick={() => {
+                      setOpenMenu(null);
+                      onOpenConnections();
+                    }}
+                  >
+                    <Plus size={12} className="item-icon" />
+                    <span>Manage Connections...</span>
+                  </button>
+
+                  {onDisconnect && (
+                    <button
+                      type="button"
+                      className="bc-dropdown-item action-item danger"
+                      onClick={() => {
+                        setOpenMenu(null);
+                        onDisconnect();
+                      }}
+                    >
+                      <LogOut size={12} className="item-icon" />
+                      <span>Disconnect</span>
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
             <ChevronRight size={10} className="bc-arrow" />
-            <span className="bc-item bc-db" title={`Database: ${activeDatabase || "default"}`}>
-              {activeDatabase || "default"}
-            </span>
+
+            {/* Segment 2: Active Database */}
+            <div className="bc-segment-wrap">
+              <button
+                type="button"
+                className={`bc-item bc-db bc-interactive ${openMenu === "db" ? "is-open" : ""}`}
+                onClick={() => {
+                  setOpenMenu((prev) => (prev === "db" ? null : "db"));
+                  setDbSearch("");
+                  setTableSearch("");
+                }}
+                title={`Database: ${activeDatabase || "default"} - Click to switch database`}
+              >
+                <Database size={11} className="bc-segment-icon" />
+                <span className="bc-label">{activeDatabase || "default"}</span>
+                <ChevronDown size={9} className={`bc-caret ${openMenu === "db" ? "caret-up" : ""}`} />
+              </button>
+
+              {openMenu === "db" && (
+                <div className="bc-dropdown-popover">
+                  <div className="bc-dropdown-header">
+                    <div className="bc-dropdown-title">Databases ({databases.length})</div>
+                    {onRefreshDatabases && (
+                      <button
+                        type="button"
+                        className="bc-icon-btn-inline"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onRefreshDatabases();
+                        }}
+                        title="Refresh database list"
+                      >
+                        <RefreshCw size={10} />
+                      </button>
+                    )}
+                  </div>
+
+                  {databases.length > 5 && (
+                    <div className="bc-dropdown-search">
+                      <Search size={11} className="search-inline-icon" />
+                      <input
+                        type="text"
+                        placeholder="Search database..."
+                        value={dbSearch}
+                        onChange={(e) => setDbSearch(e.target.value)}
+                        autoFocus
+                        className="bc-search-input"
+                      />
+                    </div>
+                  )}
+
+                  <div className="bc-dropdown-list">
+                    {filteredDatabases.length === 0 ? (
+                      <div className="bc-dropdown-empty">No database found</div>
+                    ) : (
+                      filteredDatabases.map((db) => (
+                        <button
+                          key={db}
+                          type="button"
+                          className={`bc-dropdown-item ${db === activeDatabase ? "active" : ""}`}
+                          onClick={() => {
+                            setOpenMenu(null);
+                            onSelectDatabase(db);
+                            if (activeView !== "explorer") {
+                              onChangeView("explorer");
+                            }
+                          }}
+                        >
+                          <Database size={12} className="item-icon" />
+                          <span className="item-text">{db}</span>
+                          {db === activeDatabase && <Check size={12} className="check-icon" />}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Segment 3: Active Table (if selected) */}
             {activeTable && (
               <>
                 <ChevronRight size={10} className="bc-arrow" />
-                <span className="bc-item bc-table" title={`Table: ${activeTable}`}>
-                  <TableIcon size={10} className="bc-table-icon" />
-                  {activeTable}
-                </span>
+                <div className="bc-segment-wrap">
+                  <button
+                    type="button"
+                    className={`bc-item bc-table bc-interactive ${openMenu === "table" ? "is-open" : ""}`}
+                    onClick={() => {
+                      setOpenMenu((prev) => (prev === "table" ? null : "table"));
+                      setDbSearch("");
+                      setTableSearch("");
+                    }}
+                    title={`Table: ${activeTable} - Click for table actions or quick switch`}
+                  >
+                    <TableIcon size={11} className="bc-segment-icon" />
+                    <span className="bc-label">{activeTable}</span>
+                    <ChevronDown size={9} className={`bc-caret ${openMenu === "table" ? "caret-up" : ""}`} />
+                  </button>
+
+                  {openMenu === "table" && (
+                    <div className="bc-dropdown-popover">
+                      <div className="bc-dropdown-header">
+                        <div className="bc-dropdown-title">Table Actions</div>
+                        <span className="bc-table-chip">{activeTable}</span>
+                      </div>
+
+                      <div className="bc-dropdown-actions">
+                        <button
+                          type="button"
+                          className="bc-dropdown-item action-item"
+                          onClick={() => {
+                            setOpenMenu(null);
+                            if (activeView !== "explorer") onChangeView("explorer");
+                          }}
+                        >
+                          <Database size={12} className="item-icon" />
+                          <span>Show in Data Explorer</span>
+                        </button>
+
+                        {onViewStructure && (
+                          <button
+                            type="button"
+                            className="bc-dropdown-item action-item"
+                            onClick={() => {
+                              setOpenMenu(null);
+                              onViewStructure(activeTable);
+                            }}
+                          >
+                            <Layers size={12} className="item-icon" />
+                            <span>View Structure (Schema)</span>
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          className="bc-dropdown-item action-item"
+                          onClick={() => handleOpenTableInSql(activeTable)}
+                        >
+                          <Terminal size={12} className="item-icon" />
+                          <span>Open in SQL Console</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          className="bc-dropdown-item action-item"
+                          onClick={(e) => handleCopyTableName(e, activeTable)}
+                        >
+                          {copiedTable ? <Check size={12} className="item-icon text-green" /> : <Copy size={12} className="item-icon" />}
+                          <span>{copiedTable ? "Copied Table Name!" : "Copy Table Name"}</span>
+                        </button>
+                      </div>
+
+                      {tables.length > 1 && (
+                        <>
+                          <div className="bc-dropdown-divider" />
+                          <div className="bc-dropdown-section-title">Switch Table ({tables.length})</div>
+
+                          {tables.length > 6 && (
+                            <div className="bc-dropdown-search">
+                              <Search size={11} className="search-inline-icon" />
+                              <input
+                                type="text"
+                                placeholder="Filter tables..."
+                                value={tableSearch}
+                                onChange={(e) => setTableSearch(e.target.value)}
+                                autoFocus
+                                className="bc-search-input"
+                              />
+                            </div>
+                          )}
+
+                          <div className="bc-dropdown-list max-h">
+                            {filteredTables.length === 0 ? (
+                              <div className="bc-dropdown-empty">No table found</div>
+                            ) : (
+                              filteredTables.map((t) => (
+                                <button
+                                  key={t}
+                                  type="button"
+                                  className={`bc-dropdown-item ${t === activeTable ? "active" : ""}`}
+                                  onClick={() => {
+                                    setOpenMenu(null);
+                                    if (onSelectTable) {
+                                      onSelectTable(t);
+                                    }
+                                    if (activeView !== "explorer") {
+                                      onChangeView("explorer");
+                                    }
+                                  }}
+                                >
+                                  <TableIcon size={12} className="item-icon" />
+                                  <span className="item-text">{t}</span>
+                                  {t === activeTable && <Check size={12} className="check-icon" />}
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
               </>
             )}
           </div>
@@ -269,30 +624,90 @@ export const Header: React.FC<HeaderProps> = ({
           -webkit-app-region: no-drag;
         }
 
+        .brand {
+          display: flex;
+          align-items: center;
+          gap: 7px;
+          color: var(--text-main);
+          -webkit-app-region: no-drag;
+          cursor: default;
+          padding: 2px 4px;
+          border-radius: 6px;
+          transition: background 0.15s ease;
+        }
+        .brand.clickable {
+          cursor: pointer;
+        }
+        .brand.clickable:hover {
+          background: var(--bg-hover);
+        }
+        .brand-mascot-img {
+          width: 22px;
+          height: 22px;
+          border-radius: 5px;
+          object-fit: cover;
+          box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+        }
+        .brand-title {
+          font-weight: 600;
+          font-size: 13px;
+          letter-spacing: -0.2px;
+        }
+
         .header-breadcrumb {
           display: flex;
           align-items: center;
-          gap: 5px;
+          gap: 4px;
           font-size: 11px;
           color: var(--text-muted);
           background: var(--bg-tertiary);
-          padding: 3px 8px;
+          padding: 2px 6px;
           border-radius: var(--radius-sm);
           border: 1px solid var(--border-light);
           white-space: nowrap;
-          overflow: hidden;
+          position: relative;
         }
         .bc-divider {
           color: var(--border-medium);
-          margin-right: 2px;
+          margin: 0 1px;
+          font-size: 11px;
         }
         .bc-arrow {
           color: var(--text-muted);
-          opacity: 0.6;
+          opacity: 0.5;
           flex-shrink: 0;
         }
+        .bc-segment-wrap {
+          position: relative;
+          display: inline-flex;
+          align-items: center;
+        }
         .bc-item {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          font-size: 11px;
           font-weight: 500;
+          padding: 2px 6px;
+          border-radius: 4px;
+          border: 1px solid transparent;
+          background: transparent;
+          color: var(--text-sub);
+          cursor: pointer;
+          transition: all 0.12s ease;
+          user-select: none;
+          font-family: inherit;
+          text-decoration: none;
+          line-height: 1.2;
+        }
+        .bc-item:hover, .bc-item.is-open {
+          background: var(--bg-hover);
+          color: var(--text-main);
+          border-color: var(--border-light);
+        }
+        .bc-item.is-open {
+          background: var(--bg-card);
+          box-shadow: var(--shadow-sm);
         }
         .bc-item.bc-host {
           color: var(--text-sub);
@@ -304,12 +719,220 @@ export const Header: React.FC<HeaderProps> = ({
         .bc-item.bc-table {
           color: var(--accent-blue);
           font-weight: 600;
+        }
+        .bc-segment-icon {
+          flex-shrink: 0;
+          opacity: 0.8;
+        }
+        .bc-label {
+          max-width: 140px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .bc-caret {
+          flex-shrink: 0;
+          opacity: 0.6;
+          transition: transform 0.15s ease;
+        }
+        .bc-caret.caret-up {
+          transform: rotate(180deg);
+        }
+
+        /* Breadcrumb Dropdown Popovers */
+        .bc-dropdown-popover {
+          position: absolute;
+          top: calc(100% + 6px);
+          left: 0;
+          min-width: 220px;
+          max-width: 290px;
+          background: var(--bg-card);
+          backdrop-filter: blur(20px);
+          -webkit-backdrop-filter: blur(20px);
+          border: 1px solid var(--border-medium, var(--border-light));
+          border-radius: var(--radius-md, 8px);
+          box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35), 0 0 1px rgba(255, 255, 255, 0.1);
+          padding: 6px;
+          z-index: 1000;
+          animation: popoverFadeIn 0.12s ease-out;
+        }
+        @keyframes popoverFadeIn {
+          from {
+            opacity: 0;
+            transform: translateY(-4px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        .bc-dropdown-header {
           display: flex;
           align-items: center;
-          gap: 3px;
+          justify-content: space-between;
+          padding: 4px 8px 6px 8px;
+          border-bottom: 1px solid var(--border-light);
+          gap: 6px;
         }
-        .bc-table-icon {
+        .bc-dropdown-title {
+          font-size: 10px;
+          font-weight: 700;
+          color: var(--text-muted);
+          text-transform: uppercase;
+          letter-spacing: 0.4px;
+        }
+        .bc-dropdown-subinfo {
+          font-size: 10px;
+          font-family: var(--font-mono);
+          color: var(--text-muted);
+          padding: 4px 8px 6px 8px;
+        }
+        .bc-dropdown-section-title {
+          font-size: 9.5px;
+          font-weight: 600;
+          color: var(--text-muted);
+          text-transform: uppercase;
+          padding: 6px 8px 3px 8px;
+          letter-spacing: 0.3px;
+        }
+        .bc-table-chip {
+          font-size: 9.5px;
+          font-family: var(--font-mono);
+          font-weight: 600;
+          color: var(--accent-blue);
+          background: rgba(59, 130, 246, 0.1);
+          padding: 1px 6px;
+          border-radius: 4px;
+          max-width: 140px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .bc-icon-btn-inline {
+          background: transparent;
+          border: none;
+          color: var(--text-muted);
+          cursor: pointer;
+          padding: 2px;
+          border-radius: 3px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: all 0.12s ease;
+        }
+        .bc-icon-btn-inline:hover {
+          background: var(--bg-hover);
+          color: var(--text-main);
+        }
+
+        .bc-dropdown-search {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-light);
+          border-radius: 4px;
+          padding: 3px 8px;
+          margin: 4px 4px 6px 4px;
+        }
+        .search-inline-icon {
+          color: var(--text-muted);
           flex-shrink: 0;
+        }
+        .bc-search-input {
+          background: transparent;
+          border: none;
+          outline: none;
+          font-size: 11px;
+          color: var(--text-main);
+          width: 100%;
+          font-family: inherit;
+        }
+        .bc-dropdown-list {
+          display: flex;
+          flex-direction: column;
+          gap: 1px;
+          max-height: 200px;
+          overflow-y: auto;
+          margin: 2px 0;
+        }
+        .bc-dropdown-list.max-h {
+          max-height: 240px;
+        }
+        .bc-dropdown-actions {
+          display: flex;
+          flex-direction: column;
+          gap: 1px;
+          margin: 4px 0 2px 0;
+        }
+        .bc-dropdown-item {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 6px 8px;
+          font-size: 11.5px;
+          color: var(--text-sub);
+          background: transparent;
+          border: none;
+          border-radius: 4px;
+          cursor: pointer;
+          text-align: left;
+          width: 100%;
+          font-family: inherit;
+          transition: all 0.1s ease;
+        }
+        .bc-dropdown-item:hover {
+          background: var(--bg-hover);
+          color: var(--text-main);
+        }
+        .bc-dropdown-item.active {
+          background: rgba(59, 130, 246, 0.12);
+          color: var(--accent-blue);
+          font-weight: 600;
+        }
+        .bc-dropdown-item.action-item {
+          font-size: 11px;
+          color: var(--text-main);
+        }
+        .bc-dropdown-item.action-item.danger {
+          color: var(--accent-rose, #ef4444);
+        }
+        .bc-dropdown-item.action-item.danger:hover {
+          background: rgba(239, 68, 68, 0.12);
+        }
+        .item-icon {
+          flex-shrink: 0;
+          opacity: 0.75;
+        }
+        .item-icon.text-green {
+          color: var(--accent-green);
+          opacity: 1;
+        }
+        .item-text {
+          flex: 1;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .check-icon {
+          color: var(--accent-blue);
+          flex-shrink: 0;
+        }
+        .db-type-badge.small {
+          font-size: 7.5px;
+          padding: 0 3px;
+        }
+        .bc-dropdown-divider {
+          height: 1px;
+          background: var(--border-light);
+          margin: 4px 2px;
+        }
+        .bc-dropdown-empty {
+          font-size: 11px;
+          color: var(--text-muted);
+          padding: 8px;
+          text-align: center;
+          font-style: italic;
         }
 
         .header-center {
