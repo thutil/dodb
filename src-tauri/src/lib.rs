@@ -31,6 +31,7 @@ pub fn run() {
         get_table_constraints,
         execute_ddl,
         disconnect_database,
+        ping_database,
         // ER Diagram Discovery
         get_schema_diagram,
         // File Dialog

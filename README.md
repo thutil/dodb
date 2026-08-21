@@ -9,11 +9,11 @@ dodb is a modern, native macOS database manager built around a simple idea: **wo
 
 The name **dodb** comes from the Thai pronunciation of “do,” meaning **“to see”**, combined with **DB** for database.
 
-It represents what dodb is about:
+It represents what dodb is about: **See the data. See the structure. See what is happening.**
 
-**See the data. See the structure. See what is happening.**
-
-dodb is designed to make databases feel less intimidating and more approachable without hiding the power that developers need.
+<p align="center">
+  <img src="docs/screenshot/inline_editor.png" alt="dodb Data Explorer and Inline Editor" width="100%" />
+</p>
 
 ---
 
@@ -21,309 +21,231 @@ dodb is designed to make databases feel less intimidating and more approachable 
 
 Database tools often become complicated as more features are added.
 
-dodb takes a different approach.
+dodb focuses on the core tasks developers actually do with databases:
 
-Instead of building another application filled with panels, dashboards, and abstractions, dodb focuses on the core things developers actually do with databases:
-
-* Connect
-* Explore
-* Query
-* Edit
-* Understand
-* Commit
-
-Everything is designed around clarity, speed, and a native macOS experience.
+* Connect & Inspect
+* Explore & Inline Edit
+* Query with Monaco Editor & Run Selected Text
+* Visualize Schemas (ER Diagram) & Spatial GIS Data (MapLibre GL)
+* Audit, Dump & Commit Transactions
 
 **No unnecessary clutter. No artificial complexity. Just your database.**
 
 ---
 
-## ✨ Features
+## Features & Screenshots
 
-### Interactive Data Explorer
+### Connection Management & Profiles
+Save and organize database connections with encrypted credentials (AES-256-GCM), group profiles, and single-click connect.
 
-Explore and manage database records through a familiar table interface.
-
-* Browse rows and columns
-* Create records
-* Edit records
-* Delete records
-* Sort and filter data
-* Pagination
-* Database-aware cell rendering
-
-### Inline Cell Editing
-
-Edit values directly inside the data grid.
-
-No unnecessary dialogs or multi-step forms when all you need to do is change a value.
-
-### Transactional Commit Bar
-
-Changes are clearly separated from the database until you decide to commit them.
-
-**Edit → Review → Commit**
-
-This makes data editing more deliberate, transparent, and predictable.
-
-### Multi-Database Support
-
-dodb currently supports:
-
-* PostgreSQL
-* MySQL
-* MariaDB
-* SQLite
-
-The database layer is designed to make adding additional engines possible as the project evolves.
-
-### Native macOS Experience
-
-dodb is built with macOS as the primary platform.
-
-The goal isn't to make a web application look like a Mac application.
-
-The goal is to build a database application that **feels at home on macOS**.
-
-From window behavior and keyboard interaction to layout, typography, and performance, dodb is designed with the platform in mind.
+<p align="center">
+  <img src="docs/screenshot/connection_group.png" alt="Connection Management" width="100%" />
+</p>
 
 ---
 
-## 🏗 Architecture
+### Interactive Data Explorer & Inline Editing
+* **Virtual Data Grid** — Smooth scrolling across thousands of records with pagination support.
+* **Database-Aware Cell Badges** — Distinct badges for DateTime, Booleans, JSON, Binary/BLOB, Enums, UUIDs, Primary Keys, and Spatial GIS geometries.
+* **Inline Cell Editing** — Edit values directly with double-click and review changes before committing.
+* **Transactional Staging Bar** — Staged mutations (Insert, Update, Delete) with diff review and atomic rollback.
+* **Advanced Filters & Sorting** — Multi-column sorting with rich operators (`equals`, `contains`, `startsWith`, `endsWith`, `gt`, `gte`, `lt`, `lte`, `isNull`, `isNotNull`).
+* **Search & Export** — Export table data to CSV, JSON, and SQL `INSERT` statements.
 
-dodb was completely rewritten from its original Node.js/Electron architecture into a Rust-based native stack.
-
-| Layer            | Technology            |
-| ---------------- | --------------------- |
-| Desktop Shell    | Tauri 2               |
-| Frontend         | Next.js 15 · React 19 |
-| Styling          | Tailwind CSS          |
-| Application Core | Rust · Tokio          |
-| Database Access  | SQLx                  |
-| Communication    | Tauri IPC             |
-| Platform         | macOS                 |
-
-### Why Rust?
-
-Database applications deal with network connections, concurrent queries, large datasets, and long-running operations.
-
-Rust provides dodb with a foundation that is:
-
-* Memory safe
-* Efficient
-* Concurrent
-* Predictable
-* Well suited for native applications
-
-The goal is not simply to make dodb fast.
-
-It is to give the application a solid foundation that can scale with the features we want to build next.
+<p align="center">
+  <img src="docs/screenshot/inline_editor.png" alt="Interactive Data Explorer" width="100%" />
+</p>
 
 ---
 
-## 🔐 Privacy
+### GIS & Spatial Data Support (MapLibre GL)
+* **Engines Supported** — PostGIS (`geometry`, `geography`), MySQL Spatial (`GEOMETRY`, `POINT`, `POLYGON`, etc.), and SpatiaLite.
+* **Universal Format Parser** — Automatically recognizes and decodes WKT (Well-Known Text), GeoJSON, and EWKB/WKB Hex binary formats.
+* **Interactive Map Viewer**:
+  * Vector & raster map rendering with Dark Matter, Positron Light, OpenStreetMap, and Satellite basemaps.
+  * Spatial feature inspector & table-wide multi-feature rendering.
+  * Interactive coordinate picker for inserting or editing geometries.
+  * Export spatial layers to standard `.geojson` files.
 
-Your database is your data.
-
-dodb is designed around direct connections from your Mac to your database.
-
-There is no requirement for a cloud account just to connect to a database, and dodb does not need to upload your database contents to a remote service in order to function.
-
-**Your databases stay yours.**
+<p align="center">
+  <img src="docs/screenshot/gis_viewer.png" alt="GIS and Spatial Map Viewer" width="100%" />
+</p>
 
 ---
 
-## 🚀 Getting Started
+### Monaco SQL Console & Auto-Completion
+* **Monaco Editor** with intelligent auto-completion for tables, columns, keywords, and SQL functions.
+* **Run Selection (Highlight to Run)** — Highlight any SQL query and run only the selected text with `Cmd + Enter`.
+* **Multi-Statement Engine** — Sequentially execute multi-statement SQL scripts with separate result tabs.
+* **Draggable Resizer** — Adjust editor pane height dynamically.
+* **Execution Metrics** — Real-time execution duration, returned rows, and affected rows indicators.
 
-### Requirements
+<p align="center">
+  <img src="docs/screenshot/autocomplete.png" alt="Monaco SQL Console and Autocomplete" width="100%" />
+</p>
 
-* macOS 11.0 or later
-* Apple Silicon or Intel
-* Rust toolchain
-* Node.js 18 or later
-* pnpm 8 or later
+---
 
-### Clone the repository
+### Visual Schema & ER Diagram
+* **Interactive Node Graph** powered by `@xyflow/react` to visualize tables, column types, and foreign key relationships.
+* **Multi-directional Handles** for clean edge routing and relationship alignment.
+* **Interactive Search & Relation Highlighting** — Highlight connected tables and foreign keys on click.
+* **Auto Layout** — Organizes tables into clean topology columns.
+
+<p align="center">
+  <img src="docs/screenshot/erd.png" alt="Visual Schema and ER Diagram" width="100%" />
+</p>
+
+---
+
+### Searchable Detailed Inspector & JSON View / Export
+* Right-click any row to inspect fields in full-screen modal with instant search and formatted JSON view.
+* Modal record editor with NULL toggles and auto-increment handling.
+* 1-click duplicate row and fast clipboard export (JSON, CSV, SQL INSERT).
+* View spatial geometry directly on the interactive map.
+
+<p align="center">
+  <img src="docs/screenshot/json_view_export.png" alt="Detailed Record Inspector and JSON View" width="100%" />
+</p>
+
+---
+
+### Table Structure & Visual Designer
+* Create new tables or alter existing schemas visually.
+* Column editor with type suggestions, nullability, defaults, primary keys, and auto-increment.
+* DDL Preview & Verification before executing destructive schema changes.
+
+### Database Administration & Monitoring
+* Server engine info, uptime, and connection metrics.
+* Process & connection monitor with rogue query termination (`Kill Process`).
+* Database and table storage metrics.
+
+### Audit Log & Action Trail
+* Comprehensive local audit logging for all queries, mutations, DDL executions, and connection events.
+* Filter by status, profile, action type, and date range.
+
+---
+
+## Supported Database Engines
+
+| Engine | Version | Spatial / GIS Support |
+| :--- | :--- | :--- |
+| **PostgreSQL** | 10+ / 14 / 15 / 16 / 17 | PostGIS (`geometry`, `geography`, WKT, EWKB) |
+| **MySQL** | 5.7 / 8.0+ | MySQL Spatial (`GEOMETRY`, `POINT`, `POLYGON`, etc.) |
+| **MariaDB** | 10.3+ | MariaDB Spatial |
+| **SQLite** | 3.x | SpatiaLite & WKT / GeoJSON |
+
+---
+
+## Architecture
+
+| Layer | Technology |
+| :--- | :--- |
+| Desktop Shell | Tauri 2 |
+| Frontend | Next.js 16 · React 19 |
+| Map Engine | MapLibre GL |
+| Diagram Engine | React Flow (xyflow) |
+| Editor | Monaco Editor |
+| Application Core | Rust · Tokio |
+| Database Access | SQLx |
+| Communication | Tauri IPC |
+| Platform | macOS (Apple Silicon & Intel) |
+
+### Privacy & Security
+* **Direct Socket Connections** — Connections are established directly from your machine to your database.
+* **Zero Telemetry / No Cloud Proxy** — Credentials, schemas, and records are never transmitted to third-party servers.
+* **Encrypted Storage** — Connection passwords and sensitive metadata are encrypted locally using AES-256-GCM.
+
+---
+
+## macOS Installation & Security Notice (Unsigned App Fix)
+
+When downloading pre-built `.dmg` or `.app` releases from GitHub without Apple Developer ID notarization, macOS Gatekeeper may display security warnings:
+
+* *“dodb is damaged and can’t be opened. You should move it to the Trash.”*
+* *“dodb cannot be opened because the developer cannot be verified.”*
+* *“Apple could not verify that dodb is free of malware.”*
+
+### วิธีแก้ไข / How to open unsigned app on macOS:
+
+#### Method 1: Terminal (Recommended / แนะนำ)
+After moving `dodb.app` to `/Applications`, open **Terminal** (`Terminal.app`) and run:
+
+```bash
+xattr -cr /Applications/dodb.app
+```
+
+Or remove the quarantine attribute specifically:
+
+```bash
+xattr -d com.apple.quarantine /Applications/dodb.app
+```
+
+Then launch **dodb** normally from Applications or Spotlight (`Cmd + Space`).
+
+---
+
+#### Method 2: Right-Click Open (คลิกขวาเพื่อเปิด)
+1. Open **Finder** and navigate to `/Applications`.
+2. **Right-click** (or `Control + Click`) on **dodb.app**.
+3. Click **Open** from the context menu.
+4. Click **Open** in the confirmation dialog.
+
+---
+
+#### Method 3: System Settings (การตั้งค่าระบบ)
+1. Open **System Settings** (การตั้งค่าระบบ).
+2. Go to **Privacy & Security** (ความเป็นส่วนตัวและความปลอดภัย).
+3. Scroll down to the **Security** (ความปลอดภัย) section.
+4. Click **Open Anyway** (เปิดต่อไป) next to the message stating *“dodb was blocked from use because it is not from an identified developer”*.
+
+---
+
+## Getting Started (Development)
+
+### Prerequisites
+* macOS 11.0 or later (Apple Silicon or Intel)
+* Rust toolchain (`rustc`, `cargo`): `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
+* Node.js 18+ and pnpm 8+: `npm install -g pnpm`
+
+### Clone & Install
 
 ```bash
 git clone https://github.com/bankjirapan/dodb.git
 cd dodb
-```
-
-### Install dependencies
-
-```bash
 pnpm install
 ```
 
-### Start development
+### Start Development Mode
 
 ```bash
 pnpm dev
 ```
 
-This starts the Tauri application with frontend hot reload and a development Rust build.
-
-> Development builds are intentionally unoptimized, so the application may feel slower than a production build.
-
 ---
 
-## 📦 Production Build
+## Production Build
 
-Build the optimized macOS application with:
+To build the optimized `.app` bundle and `.dmg` installer:
 
 ```bash
 pnpm tauri build
 ```
 
-Build artifacts are generated under:
-
-```text
-src-tauri/target/release/bundle/
-```
-
-This includes:
-
-* `.app` — macOS application bundle
-* `.dmg` — macOS disk image
+Generated artifacts:
+* `src-tauri/target/release/bundle/macos/dodb.app`
+* `src-tauri/target/release/bundle/dmg/dodb_<version>_<arch>.dmg`
 
 ---
 
-## 📁 Project Structure
+## License
 
-```text
-dodb/
-├── src-tauri/
-│   ├── src/
-│   │   ├── db_core/
-│   │   ├── profiles/
-│   │   └── main.rs
-│   ├── Cargo.toml
-│   └── tauri.conf.json
-│
-├── ui/
-│   ├── src/
-│   └── package.json
-│
-├── package.json
-└── README.md
-```
-
-The project is separated into two primary layers:
-
-**UI**
-Handles presentation, interaction, and the user experience.
-
-**Rust Core**
-Handles database connections, queries, application logic, and native functionality.
-
-Communication between the two layers happens through Tauri's IPC layer rather than a local REST server.
-
----
-
-## 🛣 Roadmap
-
-dodb is actively evolving.
-
-Areas currently being explored include:
-
-* [ ] Advanced SQL editor
-* [ ] Query history
-* [ ] Multiple database connections
-* [ ] Improved schema browser
-* [ ] Relationship visualization
-* [ ] Import and export workflows
-* [ ] Database comparison
-* [ ] Migration tools
-* [ ] Additional database engines
-* [ ] Advanced keyboard workflows
-* [ ] Large dataset performance improvements
-
-The roadmap is intentionally flexible.
-
-New features should make dodb **more useful**, not simply **more complicated**.
-
----
-
-## 🤝 Contributing
-
-dodb is open source and contributions are welcome.
-
-You can contribute by:
-
-* Reporting bugs
-* Suggesting improvements
-* Improving the UI
-* Optimizing the Rust core
-* Adding database support
-* Improving documentation
-* Submitting pull requests
-
-For larger changes, opening an issue before starting implementation is encouraged so the direction can be discussed first.
-
----
-
-## 🧭 Design Principles
-
-dodb is built around a few principles.
-
-### Clarity over complexity
-
-A powerful database tool does not need a complicated interface.
-
-### Native over wrapped
-
-Desktop applications should feel like desktop applications.
-
-### Visible over hidden
-
-Users should understand what their database tool is doing.
-
-### Fast over flashy
-
-Performance is part of the experience.
-
-### Open over locked-in
-
-Your database belongs to you.
-
-### Useful over feature-heavy
-
-Every feature should solve a real problem.
-
----
-
-## The idea behind dodb
-
-The name started with a simple word:
-
-**ดู**
-
-In Thai, *ดู* means **to see, to look, or to watch**.
-
-And that's exactly what we want dodb to help you do.
-
-**See your data.**
-**See your schema.**
-**See your changes.**
-**See your database.**
-
-Then, when you're ready:
-
-**Change it.**
-
----
-
-## 📄 License
-
-dodb is distributed under the [MIT License](LICENSE).
+dodb is open source software distributed under the [MIT License](LICENSE).
 
 ---
 
 ## Made by thutil
 
-dodb is designed and developed by **thutil**.
-
-Built in 2026 for developers who want a database tool that stays out of the way.
+Designed and developed by **thutil**.
 
 **dodb — See your data. Understand your database.**

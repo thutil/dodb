@@ -22,13 +22,14 @@ import { apiClient } from "../utils/apiClient";
 import { auditLogger } from "../utils/auditLogger";
 import { dumpManager, DumpProgress } from "../utils/dumpManager";
 
-const APP_VERSION = "1.0.0";
+const DEFAULT_APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION || "0.1.0";
 const SESSION_ID_PREFIX = "session-";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:5820/api";
 
 
 export default function Home() {
+  const [appVersion, setAppVersion] = useState<string>(DEFAULT_APP_VERSION);
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [activeView, setActiveView] = useState<"explorer" | "sql" | "admin" | "diagram">("explorer");
 
@@ -68,6 +69,9 @@ export default function Home() {
   const [searchQuery, setSearchQuery] = useState("");
   const [filters, setFilters] = useState<ColumnFilter[]>([]);
 
+  // Real-time Database Ping Latency
+  const [latencyMs, setLatencyMs] = useState<number | null>(null);
+
   // Request sequence ref to prevent table data race condition
   const fetchSeqRef = React.useRef(0);
 
@@ -87,6 +91,20 @@ export default function Home() {
 
     mediaQuery.addEventListener("change", handleChange);
     return () => mediaQuery.removeEventListener("change", handleChange);
+  }, []);
+
+  // Dynamically load Tauri version at runtime if running in desktop app
+  useEffect(() => {
+    const loadVersion = async () => {
+      try {
+        const { getVersion } = await import("@tauri-apps/api/app");
+        const v = await getVersion();
+        if (v) setAppVersion(v);
+      } catch {
+        // Fallback to build-time process.env.NEXT_PUBLIC_APP_VERSION
+      }
+    };
+    loadVersion();
   }, []);
 
   // Subscribe to background dump progress & notify
@@ -231,6 +249,16 @@ export default function Home() {
     }
   }, [activeDatabase, fetchTables]);
 
+  // Reset pagination, sorting, filters, search, and table error when switching table, database, or connection
+  useEffect(() => {
+    setPage(0);
+    setSortColumn(null);
+    setSortOrder("ASC");
+    setSearchQuery("");
+    setFilters([]);
+    setTableError(null);
+  }, [activeProfile?.id, activeDatabase, activeTable]);
+
   const fetchTableData = useCallback(async () => {
     if (!activeProfile || !activeDatabase || !activeTable) return;
     const currentReqSeq = ++fetchSeqRef.current;
@@ -245,6 +273,15 @@ export default function Home() {
       const colData: any = await apiClient.getColumns(reqProfileId, reqDatabase, reqTable);
       if (fetchSeqRef.current !== currentReqSeq) return;
 
+      const fetchedCols = colData.columns || [];
+      setColumns(fetchedCols);
+
+      // Validate sortColumn belongs to current table
+      const effectiveSortCol = sortColumn && fetchedCols.some((c: any) => c.name === sortColumn) ? sortColumn : null;
+      if (sortColumn && !effectiveSortCol) {
+        setSortColumn(null);
+      }
+
       // 2. Fetch paginated rows with sorting, search, and filtering
       const rowData: any = await apiClient.getRows(
         reqProfileId,
@@ -252,14 +289,13 @@ export default function Home() {
         reqTable,
         pageSize,
         page * pageSize,
-        sortColumn,
+        effectiveSortCol,
         sortOrder,
         searchQuery,
         filters
       );
       if (fetchSeqRef.current !== currentReqSeq) return;
 
-      setColumns(colData.columns || []);
       setRows(rowData.rows || []);
       setTotalRows(rowData.total || 0);
       setTableError(null);
@@ -281,6 +317,31 @@ export default function Home() {
       fetchTableData();
     }
   }, [activeDatabase, activeTable, page, sortColumn, sortOrder, searchQuery, filters, fetchTableData]);
+
+  // Real-time Database Ping Heartbeat (measures actual round-trip latency)
+  useEffect(() => {
+    if (!activeProfile) {
+      setLatencyMs(null);
+      return;
+    }
+
+    let isMounted = true;
+    const pingServer = async () => {
+      try {
+        const ms = await apiClient.pingDatabase(activeProfile.id, activeDatabase || undefined);
+        if (isMounted) setLatencyMs(ms);
+      } catch {
+        if (isMounted) setLatencyMs(null);
+      }
+    };
+
+    pingServer();
+    const interval = setInterval(pingServer, 4000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [activeProfile?.id, activeDatabase]);
 
   const handleSaveProfile = async (profileData: Partial<ConnectionProfile>) => {
     const previous = activeProfile;
@@ -682,13 +743,35 @@ export default function Home() {
               setPage(0);
             }
           }}
+          tables={tables}
           activeTable={activeTable}
+          onSelectTable={(tbl) => {
+            if (tbl !== activeTable) {
+              fetchSeqRef.current += 1;
+              setRows([]);
+              setColumns([]);
+              setTotalRows(0);
+              setLoadingData(true);
+              setActiveTable(tbl);
+              setPage(0);
+              if (activeView !== "explorer") {
+                setActiveView("explorer");
+              }
+            }
+          }}
           activeView={activeView}
           onChangeView={setActiveView}
           onOpenConnections={() => setIsConnModalOpen(true)}
           onDisconnect={handleDisconnect}
           onOpenAuditLogs={() => setIsAuditLogOpen(true)}
           onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+          onViewStructure={(tbl) => setStructureModalTable(tbl)}
+          onOpenInSql={(sql) => {
+            setActiveView("sql");
+            handleExecuteSql(sql);
+          }}
+          onRefreshDatabases={fetchDatabases}
+          latencyMs={latencyMs}
           theme={theme}
           onToggleTheme={toggleTheme}
         />
@@ -794,6 +877,7 @@ export default function Home() {
                 columns={columns}
                 theme={theme}
                 onExecuteSql={handleExecuteSql}
+                onCommitChanges={handleCommitChanges}
               />
 
             ) : activeView === "diagram" ? (
@@ -955,7 +1039,7 @@ export default function Home() {
 
         <footer className="app-footer">
           <div className="footer-left">
-            <span className="footer-version">dodb v{APP_VERSION}</span>
+            <span className="footer-version">dodb v{appVersion}</span>
             <span className="footer-dot">•</span>
             <span className="footer-status">
               DB Engine: {activeProfile ? activeProfile.type.toUpperCase() : "Offline"}

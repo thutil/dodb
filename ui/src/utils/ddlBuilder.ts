@@ -1,4 +1,5 @@
 import { DBType } from "../types";
+import { isGeometryColumn } from "./gisUtils";
 
 /**
  * Dialect-aware DDL generation for Postgres, MariaDB/MySQL and SQLite.
@@ -201,6 +202,13 @@ const isFkUsable = (f: ForeignKeyDraft): boolean =>
 // ---------------------------------------------------------------------------
 
 export function buildCreateTable(draft: TableDraft, d: DBType): string[] {
+  const stmts: string[] = [];
+
+  // In Postgres, geometry/geography types require the PostGIS extension
+  if (d === "postgres" && draft.columns.some((c) => isGeometryColumn(c.type, c.name))) {
+    stmts.push("CREATE EXTENSION IF NOT EXISTS postgis;");
+  }
+
   const pkCols = draft.columns.filter((c) => c.primaryKey);
 
   // SQLite: a single auto-increment PK must be declared inline and must not
@@ -221,9 +229,9 @@ export function buildCreateTable(draft: TableDraft, d: DBType): string[] {
   }
 
   const suffix = d === "mariadb" ? " ENGINE=InnoDB" : "";
-  const stmts = [
-    "CREATE TABLE " + quoteTableIdent(draft.name, d) + " (\n" + lines.join(",\n") + "\n)" + suffix + ";",
-  ];
+  stmts.push(
+    "CREATE TABLE " + quoteTableIdent(draft.name, d) + " (\n" + lines.join(",\n") + "\n)" + suffix + ";"
+  );
 
   for (const idx of draft.indexes) {
     if (isIndexUsable(idx)) stmts.push(createIndexStmt(idx, draft.name, d));
@@ -307,6 +315,11 @@ export function diffTable(original: TableDraft, draft: TableDraft, d: DBType): s
   const table = original.name;
   const T = quoteTableIdent(table, d);
   const out: string[] = [];
+
+  // In Postgres, if any draft column has a geometry type, ensure postgis extension is loaded
+  if (d === "postgres" && draft.columns.some((c) => isGeometryColumn(c.type, c.name))) {
+    out.push("CREATE EXTENSION IF NOT EXISTS postgis;");
+  }
 
   const origColsByName = new Map(original.columns.map((c) => [c.name, c]));
   const keptOriginalNames = new Set(

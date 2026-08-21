@@ -1,8 +1,17 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import Editor, { Monaco, OnMount } from "@monaco-editor/react";
-import { Play, Clock, Database, CheckCircle2, AlertCircle, FileCode, Sparkles, Layers, Table2, Code2, Copy, Check, Download, WrapText } from "lucide-react";
+import {
+  Play, Clock, Database, CheckCircle2, AlertCircle, FileCode, Sparkles,
+  Layers, Table2, Code2, Copy, Check, Download, WrapText, Globe,
+  Edit2, Edit3, Trash2, RotateCcw, Eye, Search, X, Plus, Key, Zap,
+  GripHorizontal, ListFilter
+} from "lucide-react";
 import { QueryExecutionResult, ColumnInfo } from "../types";
+import { PendingChanges, CommitResult } from "./DataGrid";
+import { isGeometryColumn, isGisData, formatGisSummary, parseGisToGeoJson } from "../utils/gisUtils";
+import { GisMapViewer, GisFeatureRecord } from "./GisMapViewer";
+import { splitSqlStatements, getStatementAtLine, stripCommentsAndTrim } from "../utils/sqlUtils";
 
 interface SqlConsoleProps {
   activeDatabase: string;
@@ -11,8 +20,15 @@ interface SqlConsoleProps {
   columns?: ColumnInfo[];
   theme?: "dark" | "light";
   onExecuteSql: (sql: string) => Promise<QueryExecutionResult>;
+  onCommitChanges?: (changes: PendingChanges) => Promise<CommitResult>;
 }
 
+export interface StatementResultItem {
+  id: number;
+  sql: string;
+  result: QueryExecutionResult;
+  executionTimeMs: number;
+}
 
 const SQL_KEYWORDS = [
   "SELECT", "FROM", "WHERE", "JOIN", "INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "FULL JOIN", "CROSS JOIN",
@@ -52,6 +68,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
   columns = [],
   theme = "dark",
   onExecuteSql,
+  onCommitChanges,
 }) => {
   const [sql, setSql] = useState<string>(
     activeTable ? `SELECT * FROM ${activeTable} LIMIT 50;` : "SELECT 1;"
@@ -59,11 +76,65 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<QueryExecutionResult | null>(null);
 
-  // Result View Mode: Table vs JSON
-  const [resultViewMode, setResultViewMode] = useState<"table" | "json">("table");
+  // Selection & Cursor Tracking
+  const [selectedSql, setSelectedSql] = useState<string>("");
+  const [selectionInfo, setSelectionInfo] = useState<{ lines: number; chars: number } | null>(null);
+  const [cursorPos, setCursorPos] = useState<{ line: number; column: number }>({ line: 1, column: 1 });
+
+  // Multi-statement results & tabs
+  const [statementResults, setStatementResults] = useState<StatementResultItem[]>([]);
+  const [activeResultTab, setActiveResultTab] = useState<number>(0);
+  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
+
+  // Editor Resizing State
+  const [editorHeight, setEditorHeight] = useState<number>(200);
+  const [isDraggingResize, setIsDraggingResize] = useState<boolean>(false);
+
+  // Result View Mode: Table vs JSON vs GIS Map
+  const [resultViewMode, setResultViewMode] = useState<"table" | "json" | "gis">("table");
   const [resultJsonFormat, setResultJsonFormat] = useState<"pretty" | "compact">("pretty");
   const [copiedJson, setCopiedJson] = useState(false);
   const [jsonWrap, setJsonWrap] = useState(true);
+
+  // Row Editing & Pending Transactions State
+  const [editedCells, setEditedCells] = useState<{ [rowIdx: number]: Record<string, unknown> }>({});
+  const [deletedRowIndices, setDeletedRowIndices] = useState<Set<number>>(new Set());
+  const [editingCell, setEditingCell] = useState<{ rowIdx: number; colName: string; originalVal: unknown } | null>(null);
+  const [editValue, setEditValue] = useState<string>("");
+
+  // Context Menu State
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    rowIdx: number;
+    row: Record<string, unknown>;
+  } | null>(null);
+
+  // Searchable Row Inspector Modal State
+  const [inspectRowModal, setInspectRowModal] = useState<{
+    rowIdx: number;
+    row: Record<string, unknown>;
+  } | null>(null);
+  const [inspectSearchTerm, setInspectSearchTerm] = useState<string>("");
+
+  // Full Row Edit Modal State
+  const [rowEditModal, setRowEditModal] = useState<{
+    rowIdx: number;
+    data: Record<string, unknown>;
+  } | null>(null);
+
+  // GIS Map Viewer Modal State (single cell / geometry click)
+  const [gisModalData, setGisModalData] = useState<{
+    title: string;
+    subtitle?: string;
+    value: unknown;
+    pickerMode?: boolean;
+    onPick?: (coords: { lng: number; lat: number; wkt: string }) => void;
+  } | null>(null);
+
+  // Status message for transactions
+  const [commitMsg, setCommitMsg] = useState<{ success: boolean; text: string } | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<Monaco | null>(null);
@@ -74,6 +145,291 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
   const columnsRef = useRef(columns);
   tablesRef.current = tables;
   columnsRef.current = columns;
+
+  const numUpdates = Object.keys(editedCells).length;
+  const numDeletes = deletedRowIndices.size;
+  const totalPending = numUpdates + numDeletes;
+
+  // Parsed SQL statements from current editor content
+  const parsedStatements = useMemo(() => splitSqlStatements(sql), [sql]);
+  const currentStatementAtCursor = useMemo(() => {
+    return getStatementAtLine(parsedStatements, cursorPos.line);
+  }, [parsedStatements, cursorPos.line]);
+
+  const currentStmtIndex = useMemo(() => {
+    if (!currentStatementAtCursor) return -1;
+    return parsedStatements.findIndex(
+      (s) => s.startIndex === currentStatementAtCursor.startIndex && s.endIndex === currentStatementAtCursor.endIndex
+    );
+  }, [parsedStatements, currentStatementAtCursor]);
+
+  // Clean summary of a SQL statement for tab display
+  const getStatementSummary = (sqlStr: string, maxLen = 28): string => {
+    const clean = sqlStr.replace(/\s+/g, " ").trim();
+    if (clean.length <= maxLen) return clean;
+    return clean.substring(0, maxLen) + "...";
+  };
+
+  // Build GIS feature records for query result rows
+  const gisFeatures: GisFeatureRecord[] = React.useMemo(() => {
+    if (!result?.rows || result.rows.length === 0) return [];
+    const feats: GisFeatureRecord[] = [];
+    const cols = Object.keys(result.rows[0] || {});
+
+    // Find which columns contain GIS data
+    const gisColNames = cols.filter((col) => {
+      if (isGeometryColumn("", col)) return true;
+      return result.rows!.some((row) => isGisData(row[col]));
+    });
+
+    if (gisColNames.length === 0) return [];
+
+    result.rows.forEach((row, idx) => {
+      if (deletedRowIndices.has(idx)) return;
+      const rowEdits = editedCells[idx] || {};
+      const effectiveRow = { ...row, ...rowEdits };
+
+      for (const gc of gisColNames) {
+        const val = effectiveRow[gc];
+        const geom = parseGisToGeoJson(val);
+        if (geom) {
+          feats.push({
+            id: `${idx}_${gc}`,
+            geometry: geom,
+            properties: effectiveRow as Record<string, unknown>,
+            label: `${gc} (Row #${idx + 1})`,
+          });
+        }
+      }
+    });
+    return feats;
+  }, [result?.rows, deletedRowIndices, editedCells]);
+
+  // If view mode is GIS but current query has no GIS data, fall back to table
+  useEffect(() => {
+    if (resultViewMode === "gis" && gisFeatures.length === 0) {
+      setResultViewMode("table");
+    }
+  }, [gisFeatures.length, resultViewMode]);
+
+  // Dismiss context menu on outside click
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handleOutside = () => setContextMenu(null);
+    window.addEventListener("click", handleOutside);
+    return () => window.removeEventListener("click", handleOutside);
+  }, [contextMenu]);
+
+  // Handle ESC key to dismiss sub-modals (Inspector, Row Modal, GIS, Inline Edit)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (contextMenu) setContextMenu(null);
+        else if (gisModalData) setGisModalData(null);
+        else if (inspectRowModal) setInspectRowModal(null);
+        else if (rowEditModal) setRowEditModal(null);
+        else if (editingCell) setEditingCell(null);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [contextMenu, gisModalData, inspectRowModal, rowEditModal, editingCell]);
+
+  // Start inline editing
+  const startEditing = (rowIdx: number, colName: string, currentVal: unknown) => {
+    setEditingCell({ rowIdx, colName, originalVal: currentVal });
+    setEditValue(currentVal === null || currentVal === undefined ? "" : String(currentVal));
+  };
+
+  // Coerce value based on column definition or raw type
+  const coerceVal = (colName: string, rawStr: string, origVal: unknown): unknown => {
+    if (rawStr === "" && origVal === null) return null;
+    const colDef = columns.find((c) => c.name === colName);
+    if (colDef) {
+      const type = colDef.type.toLowerCase();
+      const trimmed = rawStr.trim();
+      if (/(int|serial)/.test(type) && /^-?\d+$/.test(trimmed)) {
+        const n = Number(trimmed);
+        return Number.isSafeInteger(n) ? n : trimmed;
+      }
+      if (/(double|real|float|numeric|decimal)/.test(type)) {
+        const n = Number(trimmed);
+        return Number.isFinite(n) ? n : rawStr;
+      }
+      if (/bool/.test(type)) {
+        const v = trimmed.toLowerCase();
+        if (["true", "t", "1", "yes"].includes(v)) return true;
+        if (["false", "f", "0", "no"].includes(v)) return false;
+      }
+    } else {
+      if (typeof origVal === "number") {
+        const n = Number(rawStr);
+        if (!isNaN(n)) return n;
+      } else if (typeof origVal === "boolean") {
+        if (rawStr === "true") return true;
+        if (rawStr === "false") return false;
+      }
+    }
+    return rawStr;
+  };
+
+  // Save inline cell edit
+  const saveCellEdit = () => {
+    if (!editingCell) return;
+    const { rowIdx, colName, originalVal } = editingCell;
+    const newVal = coerceVal(colName, editValue, originalVal);
+    if (newVal === originalVal) {
+      setEditingCell(null);
+      return;
+    }
+    setEditedCells((prev) => ({
+      ...prev,
+      [rowIdx]: {
+        ...(prev[rowIdx] || {}),
+        [colName]: newVal,
+      },
+    }));
+    setEditingCell(null);
+  };
+
+  // Toggle delete mark on a row
+  const toggleDeleteRow = (rowIdx: number) => {
+    setDeletedRowIndices((prev) => {
+      const next = new Set(prev);
+      if (next.has(rowIdx)) next.delete(rowIdx);
+      else next.add(rowIdx);
+      return next;
+    });
+  };
+
+  // Discard / Rollback changes
+  const handleRollback = () => {
+    setEditedCells({});
+    setDeletedRowIndices(new Set());
+    setEditingCell(null);
+    setCommitMsg(null);
+  };
+
+  // Infer target table name
+  const getTargetTable = useCallback((): string | null => {
+    if (activeTable) return activeTable;
+    const currentCode = editorRef.current ? editorRef.current.getValue() : sql;
+    const match = currentCode.match(/FROM\s+["`]?([a-zA-Z0-9_]+)["`]?/i);
+    return match ? match[1] : null;
+  }, [activeTable, sql]);
+
+  // Generate UPDATE and DELETE SQL statements
+  const generateChangesSql = useCallback((): string[] => {
+    if (!result?.rows) return [];
+    const tbl = getTargetTable() || "table_name";
+    const statements: string[] = [];
+
+    // 1. Deletes
+    deletedRowIndices.forEach((rIdx) => {
+      const orig = result.rows![rIdx];
+      if (!orig) return;
+      const whereParts: string[] = [];
+      const pkCols = columns.filter((c) => c.primaryKey).map((c) => c.name);
+      const keyCols = pkCols.length > 0 ? pkCols : (orig["id"] !== undefined ? ["id"] : Object.keys(orig).slice(0, 3));
+      keyCols.forEach((col) => {
+        const v = orig[col];
+        if (v === null || v === undefined) whereParts.push(`"${col}" IS NULL`);
+        else if (typeof v === "number" || typeof v === "boolean") whereParts.push(`"${col}" = ${v}`);
+        else whereParts.push(`"${col}" = '${String(v).replace(/'/g, "''")}'`);
+      });
+      statements.push(`DELETE FROM "${tbl}" WHERE ${whereParts.join(" AND ")};`);
+    });
+
+    // 2. Updates
+    Object.keys(editedCells).forEach((rIdxStr) => {
+      const rIdx = Number(rIdxStr);
+      if (deletedRowIndices.has(rIdx)) return;
+      const orig = result.rows![rIdx];
+      const edits = editedCells[rIdx];
+      if (!orig || !edits) return;
+
+      const setParts: string[] = [];
+      Object.keys(edits).forEach((col) => {
+        const v = edits[col];
+        if (v === null || v === undefined) setParts.push(`"${col}" = NULL`);
+        else if (typeof v === "number" || typeof v === "boolean") setParts.push(`"${col}" = ${v}`);
+        else wherePartsPushVal(setParts, col, v);
+      });
+
+      if (setParts.length === 0) return;
+
+      const whereParts: string[] = [];
+      const pkCols = columns.filter((c) => c.primaryKey).map((c) => c.name);
+      const keyCols = pkCols.length > 0 ? pkCols : (orig["id"] !== undefined ? ["id"] : Object.keys(orig).slice(0, 3));
+      keyCols.forEach((col) => {
+        const v = orig[col];
+        if (v === null || v === undefined) whereParts.push(`"${col}" IS NULL`);
+        else if (typeof v === "number" || typeof v === "boolean") whereParts.push(`"${col}" = ${v}`);
+        else whereParts.push(`"${col}" = '${String(v).replace(/'/g, "''")}'`);
+      });
+
+      statements.push(`UPDATE "${tbl}" SET ${setParts.join(", ")} WHERE ${whereParts.join(" AND ")};`);
+    });
+
+    return statements;
+  }, [result?.rows, getTargetTable, deletedRowIndices, columns, editedCells]);
+
+  function wherePartsPushVal(arr: string[], col: string, v: unknown) {
+    if (v === null || v === undefined) arr.push(`"${col}" = NULL`);
+    else if (typeof v === "number" || typeof v === "boolean") arr.push(`"${col}" = ${v}`);
+    else arr.push(`"${col}" = '${String(v).replace(/'/g, "''")}'`);
+  }
+
+  // Copy SQL changes
+  const handleCopyChangesSql = () => {
+    const stmts = generateChangesSql();
+    if (stmts.length === 0) return;
+    navigator.clipboard.writeText(stmts.join("\n"));
+    setCommitMsg({ success: true, text: `Copied ${stmts.length} SQL statement(s) to clipboard` });
+    setTimeout(() => setCommitMsg(null), 3000);
+  };
+
+  // Commit changes to database
+  const handleCommitChanges = async () => {
+    if (totalPending === 0) return;
+    const stmts = generateChangesSql();
+    if (stmts.length === 0) return;
+
+    setSubmitting(true);
+    setCommitMsg(null);
+    try {
+      const sqlToRun = stmts.join("\n");
+      const res = await onExecuteSql(sqlToRun);
+      if (res.error) {
+        setCommitMsg({ success: false, text: res.error });
+      } else {
+        // Apply changes to local result rows
+        if (result?.rows) {
+          const updatedRows = result.rows
+            .map((r, idx) => {
+              if (deletedRowIndices.has(idx)) return null;
+              if (editedCells[idx]) return { ...r, ...editedCells[idx] };
+              return r;
+            })
+            .filter(Boolean) as Record<string, any>[];
+
+          setResult((prev) => (prev ? { ...prev, rows: updatedRows, rowsReturned: updatedRows.length } : null));
+        }
+        setEditedCells({});
+        setDeletedRowIndices(new Set());
+        setCommitMsg({
+          success: true,
+          text: `Successfully committed ${totalPending} change(s)! (${res.affectedRows ?? totalPending} rows affected)`,
+        });
+        setTimeout(() => setCommitMsg(null), 4000);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setCommitMsg({ success: false, text: msg });
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   const handleCopyResultJson = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -96,24 +452,158 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
     URL.revokeObjectURL(url);
   };
 
-  const handleRun = useCallback(async () => {
-    const currentCode = editorRef.current ? editorRef.current.getValue() : sql;
-    if (!currentCode.trim()) return;
+  // Execution Engine for single or multiple SQL statements
+  const executeStatements = useCallback(async (statementsToRun: string[]) => {
+    const validStatements = statementsToRun
+      .map((s) => stripCommentsAndTrim(s))
+      .filter((s) => s.length > 0);
+
+    if (validStatements.length === 0) return;
+
     setLoading(true);
     setResult(null);
-    const start = performance.now();
-    try {
-      const res = await onExecuteSql(currentCode);
-      const duration = Math.round(performance.now() - start);
-      setResult({ ...res, executionTimeMs: duration });
-    } catch (err: unknown) {
-      const duration = Math.round(performance.now() - start);
-      const msg = err instanceof Error ? err.message : String(err);
-      setResult({ error: msg || "Query execution failed", executionTimeMs: duration });
-    } finally {
-      setLoading(false);
+    setEditedCells({});
+    setDeletedRowIndices(new Set());
+    setEditingCell(null);
+    setContextMenu(null);
+    setInspectRowModal(null);
+    setRowEditModal(null);
+    setCommitMsg(null);
+
+    const resultsList: StatementResultItem[] = [];
+
+    for (let idx = 0; idx < validStatements.length; idx++) {
+      const stmtSql = validStatements[idx];
+      setBatchProgress({ current: idx + 1, total: validStatements.length });
+      const start = performance.now();
+
+      try {
+        const res = await onExecuteSql(stmtSql);
+        const duration = Math.round(performance.now() - start);
+        resultsList.push({
+          id: idx + 1,
+          sql: stmtSql,
+          result: { ...res, executionTimeMs: duration },
+          executionTimeMs: duration,
+        });
+
+        if (res.error) {
+          break; // Stop subsequent statements on error
+        }
+      } catch (err: unknown) {
+        const duration = Math.round(performance.now() - start);
+        const msg = err instanceof Error ? err.message : String(err);
+        resultsList.push({
+          id: idx + 1,
+          sql: stmtSql,
+          result: { error: msg || "Query execution failed", executionTimeMs: duration },
+          executionTimeMs: duration,
+        });
+        break;
+      }
     }
-  }, [sql, onExecuteSql]);
+
+    setStatementResults(resultsList);
+    setBatchProgress(null);
+    setLoading(false);
+
+    if (resultsList.length > 0) {
+      // Pick best tab: error tab if any, else first tab with rows, else last tab
+      let defaultTab = 0;
+      const errorTabIdx = resultsList.findIndex((r) => r.result.error);
+      if (errorTabIdx >= 0) {
+        defaultTab = errorTabIdx;
+      } else {
+        const rowTabIdx = resultsList.findIndex((r) => r.result.rows && r.result.rows.length > 0);
+        defaultTab = rowTabIdx >= 0 ? rowTabIdx : resultsList.length - 1;
+      }
+      setActiveResultTab(defaultTab);
+      setResult(resultsList[defaultTab].result);
+    }
+  }, [onExecuteSql]);
+
+  // Primary Execute Handler: Runs highlighted selection if present, else runs statement at cursor (or single query)
+  const handleRunSelectionOrCurrent = useCallback(() => {
+    const model = editorRef.current?.getModel();
+    const selection = editorRef.current?.getSelection();
+    let textToRun = "";
+
+    if (selection && model && !selection.isEmpty()) {
+      textToRun = model.getValueInRange(selection).trim();
+    } else if (selectedSql.trim()) {
+      textToRun = selectedSql.trim();
+    }
+
+    if (textToRun) {
+      // Split selected text in case multiple statements were highlighted
+      const stmts = splitSqlStatements(textToRun);
+      if (stmts.length > 0) {
+        executeStatements(stmts.map((s) => s.sql));
+      } else {
+        executeStatements([textToRun]);
+      }
+      return;
+    }
+
+    // No selection: run statement at cursor if multiple exist, else run full editor
+    const currentCode = editorRef.current ? editorRef.current.getValue() : sql;
+    const currentPos = editorRef.current?.getPosition() || cursorPos;
+    const allStmts = splitSqlStatements(currentCode);
+
+    if (allStmts.length > 1) {
+      const atCursor = getStatementAtLine(allStmts, currentPos.lineNumber);
+      if (atCursor) {
+        executeStatements([atCursor.sql]);
+        return;
+      }
+    }
+
+    executeStatements(allStmts.length > 0 ? [allStmts[0].sql] : [currentCode]);
+  }, [selectedSql, sql, cursorPos, executeStatements]);
+
+  // Run all statements in the editor sequentially
+  const handleRunAll = useCallback(() => {
+    const currentCode = editorRef.current ? editorRef.current.getValue() : sql;
+    const allStmts = splitSqlStatements(currentCode);
+    if (allStmts.length > 0) {
+      executeStatements(allStmts.map((s) => s.sql));
+    } else if (currentCode.trim()) {
+      executeStatements([currentCode]);
+    }
+  }, [sql, executeStatements]);
+
+  // Switch between result tabs when multiple queries ran
+  const switchResultTab = (idx: number) => {
+    if (!statementResults[idx]) return;
+    setActiveResultTab(idx);
+    setResult(statementResults[idx].result);
+    setEditedCells({});
+    setDeletedRowIndices(new Set());
+    setEditingCell(null);
+  };
+
+  // Draggable Resizer Handler for Monaco Editor height
+  const handleMouseDownResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsDraggingResize(true);
+    const startY = e.clientY;
+    const startHeight = editorHeight;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const delta = moveEvent.clientY - startY;
+      const newHeight = Math.max(100, Math.min(650, startHeight + delta));
+      setEditorHeight(newHeight);
+    };
+
+    const handleMouseUp = () => {
+      setIsDraggingResize(false);
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+  };
 
   // Register or update Monaco Auto-completion Provider for SQL
   const setupCompletion = useCallback((monaco: Monaco) => {
@@ -200,12 +690,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
     editorRef.current = editor;
     monacoRef.current = monaco;
 
-    // Register Cmd + Enter / Ctrl + Enter to run query
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
-      handleRun();
-    });
-
-    // Custom dark theme styling matching macOS DoDB
+    // Define custom dark theme
     monaco.editor.defineTheme("dodb-dark", {
       base: "vs-dark",
       inherit: true,
@@ -213,99 +698,224 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
         { token: "keyword", foreground: "60a5fa", fontStyle: "bold" },
         { token: "string.sql", foreground: "34d399" },
         { token: "number", foreground: "f59e0b" },
-        { token: "comment", foreground: "64748b", fontStyle: "italic" },
-        { token: "operator.sql", foreground: "93c5fd" },
+        { token: "comment", foreground: "6b7280", fontStyle: "italic" },
+        { token: "operator.sql", foreground: "f472b6" },
       ],
       colors: {
         "editor.background": "#14171f",
         "editor.foreground": "#e2e8f0",
+        "editor.lineHighlightBackground": "#1e2433",
+        "editorCursor.foreground": "#60a5fa",
         "editorLineNumber.foreground": "#475569",
         "editorLineNumber.activeForeground": "#94a3b8",
-        "editor.lineHighlightBackground": "#1e243380",
-        "editorCursor.foreground": "#60a5fa",
-        "editorSuggestWidget.background": "#1e2230",
-        "editorSuggestWidget.border": "#334155",
-        "editorSuggestWidget.selectedBackground": "#2563eb",
       },
     });
 
+    monaco.editor.setTheme(theme === "dark" ? "dodb-dark" : "light");
     setupCompletion(monaco);
+
+    // Track text selection changes in editor
+    editor.onDidChangeCursorSelection(() => {
+      const sel = editor.getSelection();
+      const model = editor.getModel();
+      if (sel && model && !sel.isEmpty()) {
+        const text = model.getValueInRange(sel).trim();
+        setSelectedSql(text);
+        setSelectionInfo({
+          lines: Math.abs(sel.endLineNumber - sel.startLineNumber) + 1,
+          chars: text.length,
+        });
+      } else {
+        setSelectedSql("");
+        setSelectionInfo(null);
+      }
+    });
+
+    // Track cursor line & column
+    editor.onDidChangeCursorPosition((e) => {
+      setCursorPos({ line: e.position.lineNumber, column: e.position.column });
+    });
+
+    // Keyboard shortcut: Cmd/Ctrl + Enter to run selection or current query
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
+      handleRunSelectionOrCurrent();
+    });
+
+    // Keyboard shortcut: Cmd/Ctrl + Shift + Enter to run ALL statements
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Enter, () => {
+      handleRunAll();
+    });
+
+    // Right-Click Context Menu Actions in Editor
+    editor.addAction({
+      id: "run-selection-or-current",
+      label: "▶ Run Selection / Current Query (รันคำสั่งที่เลือก / ปัจจุบัน)",
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
+      contextMenuGroupId: "navigation",
+      contextMenuOrder: 1,
+      run: () => {
+        handleRunSelectionOrCurrent();
+      },
+    });
+
+    editor.addAction({
+      id: "run-all-queries",
+      label: "⚡ Run All Queries (รันคำสั่งทั้งหมด)",
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Enter],
+      contextMenuGroupId: "navigation",
+      contextMenuOrder: 2,
+      run: () => {
+        handleRunAll();
+      },
+    });
   };
 
+  // Re-register auto-complete when database, tables, or columns change
   useEffect(() => {
     if (monacoRef.current) {
       setupCompletion(monacoRef.current);
     }
-  }, [tables, columns, setupCompletion]);
+  }, [tables, columns, activeDatabase, setupCompletion]);
 
+  // Update theme dynamically
   useEffect(() => {
-    return () => {
-      if (completionProviderRef.current) {
-        completionProviderRef.current.dispose();
-      }
-    };
-  }, []);
-
-  const applyTemplate = (template: string) => {
-    setSql(template);
-    if (editorRef.current) {
-      editorRef.current.setValue(template);
-      editorRef.current.focus();
+    if (monacoRef.current) {
+      monacoRef.current.editor.setTheme(theme === "dark" ? "dodb-dark" : "light");
     }
-  };
+  }, [theme]);
 
   return (
     <div className="sql-console">
-      {/* Top Toolbar */}
+      {/* SQL Toolbar */}
       <div className="sql-bar">
         <div className="bar-left">
-          {activeDatabase && (
-            <div className="active-db-tag">
-              <Database size={12} />
-              <span>{activeDatabase}</span>
-            </div>
-          )}
+          <div className="active-db-tag font-mono">
+            <Database size={12} />
+            <span>{activeDatabase || "No Database"}</span>
+          </div>
+
           <div className="template-chips">
-            <span className="chips-label">Templates:</span>
-            <button
-              className="btn btn-secondary chip-btn"
-              onClick={() => applyTemplate(activeTable ? `SELECT * FROM ${activeTable} LIMIT 50;` : "SELECT 1;")}
-            >
-              SELECT
-            </button>
+            <span className="chips-label">Snippets:</span>
             {activeTable && (
-              <>
-                <button
-                  className="btn btn-secondary chip-btn"
-                  onClick={() => applyTemplate(`SELECT COUNT(*) FROM ${activeTable};`)}
-                >
-                  COUNT
-                </button>
-                <button
-                  className="btn btn-secondary chip-btn"
-                  onClick={() => applyTemplate(`SELECT column_name, data_type FROM information_schema.columns WHERE table_name = '${activeTable}';`)}
-                >
-                  SCHEMA
-                </button>
-              </>
+              <button
+                className="btn btn-secondary btn-sm chip-btn"
+                onClick={() => setSql(`SELECT * FROM ${activeTable} LIMIT 50;`)}
+                title="Select 50 rows from active table"
+              >
+                SELECT *
+              </button>
+            )}
+            <button
+              className="btn btn-secondary btn-sm chip-btn"
+              onClick={() =>
+                setSql(
+                  activeTable
+                    ? `SELECT COUNT(*) AS total_count FROM ${activeTable};`
+                    : "SELECT COUNT(*) FROM information_schema.tables;"
+                )
+              }
+              title="Count total records"
+            >
+              COUNT(*)
+            </button>
+            {tables.length > 0 && (
+              <button
+                className="btn btn-secondary btn-sm chip-btn"
+                onClick={() =>
+                  setSql(
+                    activeTable
+                      ? `SELECT * FROM ${activeTable} ORDER BY 1 DESC LIMIT 10;`
+                      : `SELECT * FROM ${tables[0]} LIMIT 10;`
+                  )
+                }
+                title="Order by recent rows"
+              >
+                Recent Rows
+              </button>
             )}
           </div>
         </div>
 
         <div className="bar-right">
-          <div className="hint-pill">
-            <Sparkles size={11} className="sparkle-icon" />
-            <span>Auto-Suggest Active</span>
+          {selectionInfo ? (
+            <div className="selection-active-badge">
+              <Sparkles size={11} className="sparkle-icon" />
+              <span>
+                Selection: {selectionInfo.lines} line{selectionInfo.lines > 1 ? "s" : ""} ({selectionInfo.chars} chars)
+              </span>
+              <button
+                className="btn-clear-sel"
+                onClick={() => {
+                  if (editorRef.current) {
+                    const pos = editorRef.current.getPosition();
+                    if (pos) editorRef.current.setPosition(pos);
+                  }
+                  setSelectedSql("");
+                  setSelectionInfo(null);
+                }}
+                title="Clear highlight selection"
+              >
+                <X size={10} />
+              </button>
+            </div>
+          ) : parsedStatements.length > 1 ? (
+            <div className="hint-pill">
+              <span className="statement-count-pill font-mono">
+                Query {currentStmtIndex >= 0 ? currentStmtIndex + 1 : 1} of {parsedStatements.length}
+              </span>
+              <span>(Highlight or Cmd+Enter to Run)</span>
+            </div>
+          ) : (
+            <div className="hint-pill">
+              <Sparkles size={11} className="sparkle-icon" />
+              <span>Highlight to run selection | Cmd+Enter to Run</span>
+            </div>
+          )}
+
+          <div className="run-button-group">
+            <button
+              className={`btn btn-primary run-query-btn ${selectionInfo ? "has-selection" : ""}`}
+              onClick={handleRunSelectionOrCurrent}
+              disabled={loading}
+              title={
+                selectionInfo
+                  ? "Run highlighted text (Cmd + Enter)"
+                  : parsedStatements.length > 1
+                  ? `Run query #${currentStmtIndex >= 0 ? currentStmtIndex + 1 : 1} at cursor (Cmd + Enter)`
+                  : "Run SQL (Cmd + Enter)"
+              }
+            >
+              <Play size={13} fill={selectionInfo ? "currentColor" : "none"} />
+              <span>
+                {loading
+                  ? batchProgress
+                    ? `Running (${batchProgress.current}/${batchProgress.total})...`
+                    : "Executing..."
+                  : selectionInfo
+                  ? `Run Selection (${selectionInfo.lines}L)`
+                  : parsedStatements.length > 1
+                  ? `Run Current (#${currentStmtIndex >= 0 ? currentStmtIndex + 1 : 1})`
+                  : "Run (Cmd + Enter)"}
+              </span>
+            </button>
+
+            {(parsedStatements.length > 1 || (selectionInfo && splitSqlStatements(selectedSql).length > 1)) && (
+              <button
+                className="btn btn-secondary btn-run-all"
+                onClick={handleRunAll}
+                disabled={loading}
+                title="Run all queries in sequence (Cmd + Shift + Enter)"
+              >
+                <Zap size={12} className="zap-icon" />
+                <span>Run All ({parsedStatements.length})</span>
+              </button>
+            )}
           </div>
-          <button className="btn btn-primary run-query-btn" onClick={handleRun} disabled={loading}>
-            <Play size={13} />
-            <span>{loading ? "Executing..." : "Run (Cmd + Enter)"}</span>
-          </button>
         </div>
       </div>
 
       {/* Monaco Code Editor */}
-      <div className="editor-container">
+      <div className="editor-container" style={{ height: editorHeight }}>
         <Editor
           height="100%"
           language="sql"
@@ -332,8 +942,63 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
         />
       </div>
 
+      {/* Draggable Resizer Bar */}
+      <div
+        className={`editor-resizer ${isDraggingResize ? "is-resizing" : ""}`}
+        onMouseDown={handleMouseDownResize}
+        onDoubleClick={() => setEditorHeight(200)}
+        title="Drag to resize SQL editor (Double-click to reset height)"
+      >
+        <div className="resizer-handle">
+          <GripHorizontal size={12} />
+        </div>
+      </div>
+
       {/* Results Section */}
       <div className="results-pane">
+        {/* Multi-Statement Result Tabs Bar */}
+        {statementResults.length > 1 && (
+          <div className="statement-tabs-bar">
+            <div className="tabs-list">
+              {statementResults.map((item, idx) => {
+                const isCurrent = activeResultTab === idx;
+                const hasErr = Boolean(item.result.error);
+                return (
+                  <button
+                    key={item.id || idx}
+                    className={`stmt-tab-btn ${isCurrent ? "active" : ""} ${hasErr ? "tab-error" : ""}`}
+                    onClick={() => switchResultTab(idx)}
+                    title={item.sql}
+                  >
+                    {hasErr ? (
+                      <AlertCircle size={11} className="tab-icon-err" />
+                    ) : (
+                      <CheckCircle2 size={11} className="tab-icon-ok" />
+                    )}
+                    <span className="stmt-tab-num font-mono">#{idx + 1}</span>
+                    <span className="stmt-tab-title font-mono">{getStatementSummary(item.sql, 28)}</span>
+                    <span className="stmt-tab-badge">
+                      {hasErr
+                        ? "Error"
+                        : typeof item.result.affectedRows === "number"
+                        ? `${item.result.affectedRows} aff`
+                        : `${item.result.rowsReturned ?? item.result.rows?.length ?? 0} rows`}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="tabs-summary font-mono">
+              <span>
+                {statementResults.filter((r) => !r.result.error).length}/{statementResults.length} executed
+              </span>
+              <span>
+                {statementResults.reduce((acc, r) => acc + (r.executionTimeMs || 0), 0)} ms
+              </span>
+            </div>
+          </div>
+        )}
+
         {result && (
           <div className="results-bar">
             <div className="results-bar-left">
@@ -398,6 +1063,16 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                     <Code2 size={12} />
                     <span>JSON</span>
                   </button>
+                  {gisFeatures.length > 0 && (
+                    <button
+                      className={`view-toggle-btn ${resultViewMode === "gis" ? "active" : ""}`}
+                      onClick={() => setResultViewMode("gis")}
+                      title="GIS Spatial Map View (MapLibre GL)"
+                    >
+                      <Globe size={12} />
+                      <span>Map ({gisFeatures.length})</span>
+                    </button>
+                  )}
                 </div>
 
                 {resultViewMode === "json" && (
@@ -457,12 +1132,61 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
           </div>
         )}
 
+        {/* Transaction Commit / Rollback Bar */}
+        {totalPending > 0 && (
+          <div className={`transaction-bar ${numDeletes > 0 ? "has-deletions" : ""}`}>
+            <div className="tx-info">
+              <Edit2 size={13} className="tx-icon" />
+              <span>
+                Uncommitted Changes ({totalPending}): {numUpdates > 0 && `${numUpdates} edited, `}
+                {numDeletes > 0 && (
+                  <strong className="tx-delete-highlight">
+                    <Trash2 size={12} style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} />
+                    {numDeletes} marked for deletion
+                  </strong>
+                )}
+              </span>
+            </div>
+
+            <div className="tx-actions">
+              <button className="btn btn-secondary btn-sm" onClick={handleRollback} disabled={submitting}>
+                <RotateCcw size={11} />
+                <span>Rollback</span>
+              </button>
+              <button className="btn btn-secondary btn-sm" onClick={handleCopyChangesSql} disabled={submitting} title="Copy UPDATE/DELETE SQL">
+                <FileCode size={11} />
+                <span>Copy SQL</span>
+              </button>
+              <button className="btn btn-primary btn-sm btn-commit-action" onClick={handleCommitChanges} disabled={submitting}>
+                <Check size={11} />
+                <span>{submitting ? "Committing..." : "Commit Changes"}</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {commitMsg && (
+          <div className={`status-bar-msg ${commitMsg.success ? "success" : "error"}`}>
+            {commitMsg.success ? <Check size={13} /> : <AlertCircle size={13} />}
+            <span>{commitMsg.text}</span>
+          </div>
+        )}
+
         {result?.error && <div className="error-display font-mono">{result.error}</div>}
 
         {result?.rows && (
           <div className="results-table-scroll">
             {result.rows.length === 0 ? (
               <div className="no-data-text">Query executed successfully. 0 rows returned.</div>
+            ) : resultViewMode === "gis" ? (
+              <div className="gis-view-wrapper" style={{ height: "100%", width: "100%", position: "relative" }}>
+                <GisMapViewer
+                  isInline
+                  records={gisFeatures}
+                  title="Query Results — GIS Spatial View"
+                  subtitle={`${gisFeatures.length} spatial feature${gisFeatures.length === 1 ? "" : "s"} found in query`}
+                />
+              </div>
             ) : resultViewMode === "json" ? (
               <div className="json-result-wrapper">
                 <Editor
@@ -500,25 +1224,97 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                       </tr>
                     </thead>
                     <tbody>
-                      {result.rows!.map((row, rIdx) => (
-                        <tr key={rIdx}>
-                          <td className="row-idx" style={{ textAlign: "center" }}>{rIdx + 1}</td>
-                          {cols.map((col) => {
-                            const val = row[col];
-                            return (
-                              <td key={col}>
-                                {val === null ? (
-                                  <span className="null-val">NULL</span>
-                                ) : typeof val === "object" ? (
-                                  JSON.stringify(val)
-                                ) : (
-                                  String(val)
-                                )}
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      ))}
+                      {result.rows!.map((row, rIdx) => {
+                        const isDeleted = deletedRowIndices.has(rIdx);
+                        const rowEdits = editedCells[rIdx] || {};
+                        const effectiveRow = { ...row, ...rowEdits };
+
+                        return (
+                          <tr
+                            key={rIdx}
+                            className={isDeleted ? "row-deleted" : ""}
+                            onContextMenu={(e) => {
+                              e.preventDefault();
+                              setContextMenu({
+                                x: e.clientX,
+                                y: e.clientY,
+                                rowIdx: rIdx,
+                                row: effectiveRow,
+                              });
+                            }}
+                          >
+                            <td className="row-idx" style={{ textAlign: "center" }}>
+                              {isDeleted ? (
+                                <span title="Marked for deletion" style={{ color: "#f87171" }}>×</span>
+                              ) : (
+                                rIdx + 1
+                              )}
+                            </td>
+                            {cols.map((col) => {
+                              const val = effectiveRow[col];
+                              const isModified = rowEdits[col] !== undefined;
+                              const isEditing = editingCell?.rowIdx === rIdx && editingCell?.colName === col;
+                              const isNull = val === null || val === undefined;
+                              const isGeom = !isNull && (isGeometryColumn("", col) || isGisData(val));
+                              const gisSummary = isGeom ? formatGisSummary(val) : null;
+
+                              return (
+                                <td
+                                  key={col}
+                                  className={`cell-data ${isModified ? "cell-modified" : ""} ${isNull ? "cell-null" : ""}`}
+                                  onDoubleClick={() => !isDeleted && startEditing(rIdx, col, val)}
+                                  title={
+                                    isDeleted
+                                      ? "Row marked for deletion"
+                                      : gisSummary
+                                      ? "Click badge to view on GIS map; double-click to edit cell"
+                                      : "Double-click to edit cell (ดับเบิลคลิกเพื่อแก้ไข)"
+                                  }
+                                >
+                                  {isEditing ? (
+                                    <div className="inline-edit-wrap">
+                                      <input
+                                        autoFocus
+                                        type="text"
+                                        className="cell-edit-input"
+                                        value={editValue}
+                                        onChange={(e) => setEditValue(e.target.value)}
+                                        onBlur={saveCellEdit}
+                                        onKeyDown={(e) => {
+                                          if (e.key === "Enter") saveCellEdit();
+                                          if (e.key === "Escape") setEditingCell(null);
+                                        }}
+                                      />
+                                    </div>
+                                  ) : isNull ? (
+                                    <span className="null-val">NULL</span>
+                                  ) : gisSummary ? (
+                                    <span
+                                      className="gis-badge-pill"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setGisModalData({
+                                          title: `Query Result — ${col}`,
+                                          subtitle: `Row #${rIdx + 1}`,
+                                          value: val,
+                                        });
+                                      }}
+                                      title="Click to view spatial shape on interactive map"
+                                    >
+                                      <Globe size={10} />
+                                      <span>{gisSummary.label}</span>
+                                    </span>
+                                  ) : typeof val === "object" ? (
+                                    JSON.stringify(val)
+                                  ) : (
+                                    String(val)
+                                  )}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 );
@@ -527,6 +1323,442 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
           </div>
         )}
       </div>
+
+      {/* Row Right-Click Context Menu */}
+      {contextMenu && (
+        <div
+          className="row-context-menu"
+          style={{
+            top: typeof window !== "undefined" ? Math.min(contextMenu.y, window.innerHeight - 280) : contextMenu.y,
+            left: typeof window !== "undefined" ? Math.min(contextMenu.x, window.innerWidth - 220) : contextMenu.x,
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="context-menu-header">
+            Row #{contextMenu.rowIdx + 1}
+          </div>
+          <button
+            className="context-menu-item"
+            onClick={() => {
+              setInspectRowModal({ rowIdx: contextMenu.rowIdx, row: contextMenu.row });
+              setInspectSearchTerm("");
+              setContextMenu(null);
+            }}
+          >
+            <Eye size={13} />
+            <span>Inspect Details</span>
+          </button>
+          <button
+            className="context-menu-item"
+            onClick={() => {
+              setRowEditModal({ rowIdx: contextMenu.rowIdx, data: { ...contextMenu.row } });
+              setContextMenu(null);
+            }}
+          >
+            <Edit3 size={13} />
+            <span>Edit Record (แก้ไขข้อมูล)</span>
+          </button>
+          {Object.keys(contextMenu.row).some((k) => isGisData(contextMenu.row[k])) && (
+            <button
+              className="context-menu-item"
+              onClick={() => {
+                const gCol = Object.keys(contextMenu.row).find((k) => isGisData(contextMenu.row[k]));
+                if (gCol) {
+                  setGisModalData({
+                    title: `Row #${contextMenu.rowIdx + 1} — ${gCol}`,
+                    subtitle: `Spatial Feature Inspector`,
+                    value: contextMenu.row[gCol],
+                  });
+                }
+                setContextMenu(null);
+              }}
+            >
+              <Globe size={13} style={{ color: "var(--accent-blue)" }} />
+              <span>View on Map</span>
+            </button>
+          )}
+          <div className="context-menu-separator" />
+          <button
+            className="context-menu-item"
+            onClick={() => {
+              navigator.clipboard.writeText(JSON.stringify(contextMenu.row, null, 2));
+              setContextMenu(null);
+            }}
+          >
+            <Copy size={13} />
+            <span>Copy as JSON</span>
+          </button>
+          <button
+            className="context-menu-item"
+            onClick={() => {
+              const tbl = getTargetTable() || "table_name";
+              const cols = Object.keys(contextMenu.row).filter((k) => contextMenu.row[k] !== undefined);
+              const colList = cols.map((c) => `"${c}"`).join(", ");
+              const valList = cols.map((c) => {
+                const v = contextMenu.row[c];
+                if (v === null) return "NULL";
+                if (typeof v === "number" || typeof v === "boolean") return String(v);
+                return `'${String(v).replace(/'/g, "''")}'`;
+              }).join(", ");
+              const sql = `INSERT INTO "${tbl}" (${colList}) VALUES (${valList});`;
+              navigator.clipboard.writeText(sql);
+              setContextMenu(null);
+            }}
+          >
+            <FileCode size={13} />
+            <span>Copy as SQL INSERT</span>
+          </button>
+          <div className="context-menu-separator" />
+          <button
+            className={`context-menu-item ${deletedRowIndices.has(contextMenu.rowIdx) ? "" : "danger"}`}
+            onClick={() => {
+              toggleDeleteRow(contextMenu.rowIdx);
+              setContextMenu(null);
+            }}
+          >
+            {deletedRowIndices.has(contextMenu.rowIdx) ? <RotateCcw size={13} /> : <Trash2 size={13} />}
+            <span>{deletedRowIndices.has(contextMenu.rowIdx) ? "Restore Record" : "Delete Record (ลบแถว)"}</span>
+          </button>
+        </div>
+      )}
+
+      {/* Searchable Row Inspector Modal */}
+      {inspectRowModal && (
+        <div className="row-detail-overlay" onClick={() => setInspectRowModal(null)}>
+          <div className="row-detail-card" onClick={(e) => e.stopPropagation()}>
+            <div className="row-detail-header">
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <div className="gis-icon-tag">
+                  <Eye size={15} />
+                </div>
+                <div>
+                  <div className="gis-title">Record Details #{inspectRowModal.rowIdx + 1}</div>
+                  <div className="gis-subtitle">{Object.keys(inspectRowModal.row).length} attributes</div>
+                </div>
+              </div>
+
+              <div className="row-detail-search-box">
+                <Search size={13} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+                <input
+                  type="text"
+                  placeholder="Search field or value..."
+                  className="row-detail-search-input font-mono"
+                  value={inspectSearchTerm}
+                  onChange={(e) => setInspectSearchTerm(e.target.value)}
+                  autoFocus
+                />
+                {inspectSearchTerm && (
+                  <button className="icon-clear-btn" onClick={() => setInspectSearchTerm("")}>
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+
+              <button className="gis-close-btn" onClick={() => setInspectRowModal(null)} title="Close (Esc)">
+                <X size={15} />
+              </button>
+            </div>
+
+            <div className="row-detail-body">
+              {Object.keys(inspectRowModal.row)
+                .filter((colName) => {
+                  if (!inspectSearchTerm.trim()) return true;
+                  const term = inspectSearchTerm.toLowerCase();
+                  const val = inspectRowModal.row[colName];
+                  const valStr = val === null || val === undefined ? "null" : typeof val === "object" ? JSON.stringify(val) : String(val);
+                  return colName.toLowerCase().includes(term) || valStr.toLowerCase().includes(term);
+                })
+                .map((colName) => {
+                  const val = inspectRowModal.row[colName];
+                  const isNull = val === null || val === undefined;
+                  const isGeom = isGisData(val) || isGeometryColumn("", colName);
+                  const gisSum = isGeom && !isNull ? formatGisSummary(val) : null;
+                  const valStr = isNull ? "NULL" : typeof val === "object" ? JSON.stringify(val, null, 2) : String(val);
+                  const isMatch = inspectSearchTerm.trim().length > 0;
+                  const colDef = columns.find((c) => c.name === colName);
+
+                  return (
+                    <div key={colName} className={`row-detail-field-card ${isMatch ? "highlighted" : ""}`}>
+                      <div className="row-detail-field-header">
+                        <div className="row-detail-field-meta">
+                          {colDef?.primaryKey && (
+                            <span className="field-pk-badge font-mono" title="Primary Key">
+                              <Key size={10} /> PK
+                            </span>
+                          )}
+                          <span className="row-detail-field-name">{colName}</span>
+                          {colDef?.type && <span className="row-detail-field-type font-mono">{colDef.type}</span>}
+                          {isGeom && (
+                            <span className="gis-badge-pill" style={{ pointerEvents: "none" }}>
+                              <Globe size={9} /> GIS
+                            </span>
+                          )}
+                        </div>
+
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                          {isGeom && !isNull && (
+                            <button
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => {
+                                setGisModalData({
+                                  title: `Record #${inspectRowModal.rowIdx + 1} — ${colName}`,
+                                  subtitle: `Spatial Feature Inspector`,
+                                  value: val,
+                                });
+                              }}
+                              title="View on Map"
+                            >
+                              <Globe size={11} />
+                              <span>Map</span>
+                            </button>
+                          )}
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => navigator.clipboard.writeText(valStr)}
+                            title="Copy field value"
+                          >
+                            <Copy size={11} />
+                            <span>Copy</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className={`row-detail-field-val font-mono ${isNull ? "is-null" : ""}`}>
+                        {isGeom && gisSum ? (
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                            <span className="gis-badge-pill" style={{ margin: 0 }}>
+                              <Globe size={10} /> {gisSum.label}
+                            </span>
+                            <span style={{ color: "var(--text-sub)", fontSize: "11px" }}>{valStr}</span>
+                          </div>
+                        ) : (
+                          valStr
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+
+            <div className="row-detail-footer">
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => navigator.clipboard.writeText(JSON.stringify(inspectRowModal.row, null, 2))}
+                  title="Copy full row as JSON"
+                >
+                  <Copy size={12} />
+                  <span>Copy JSON</span>
+                </button>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    const tbl = getTargetTable() || "table_name";
+                    const cols = Object.keys(inspectRowModal.row).filter((k) => inspectRowModal.row[k] !== undefined);
+                    const colList = cols.map((c) => `"${c}"`).join(", ");
+                    const valList = cols.map((c) => {
+                      const v = inspectRowModal.row[c];
+                      if (v === null) return "NULL";
+                      if (typeof v === "number" || typeof v === "boolean") return String(v);
+                      return `'${String(v).replace(/'/g, "''")}'`;
+                    }).join(", ");
+                    const sql = `INSERT INTO "${tbl}" (${colList}) VALUES (${valList});`;
+                    navigator.clipboard.writeText(sql);
+                  }}
+                  title="Copy full row as SQL INSERT statement"
+                >
+                  <FileCode size={12} />
+                  <span>Copy SQL</span>
+                </button>
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <button
+                  className={`btn btn-sm ${deletedRowIndices.has(inspectRowModal.rowIdx) ? "btn-secondary" : "btn-danger"}`}
+                  onClick={() => toggleDeleteRow(inspectRowModal.rowIdx)}
+                >
+                  {deletedRowIndices.has(inspectRowModal.rowIdx) ? <RotateCcw size={12} /> : <Trash2 size={12} />}
+                  <span>{deletedRowIndices.has(inspectRowModal.rowIdx) ? "Restore Record" : "Delete Record"}</span>
+                </button>
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={() => {
+                    const rIdx = inspectRowModal.rowIdx;
+                    const rData = inspectRowModal.row;
+                    setInspectRowModal(null);
+                    setRowEditModal({ rowIdx: rIdx, data: { ...rData } });
+                  }}
+                >
+                  <Edit3 size={12} />
+                  <span>Edit Record</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Full Row Edit Modal */}
+      {rowEditModal && (
+        <div className="row-dialog-overlay" onClick={() => setRowEditModal(null)}>
+          <div className="row-dialog-card" onClick={(e) => e.stopPropagation()}>
+            <div className="row-dialog-header">
+              <div className="dialog-header-left">
+                <div className="dialog-icon-badge">
+                  <Edit3 size={14} />
+                </div>
+                <div className="dialog-title-group">
+                  <span className="dialog-title-text">Edit Record #{rowEditModal.rowIdx + 1}</span>
+                  <span className="dialog-sub-text">Modify row attributes and values</span>
+                </div>
+              </div>
+              <button className="dialog-close-btn" onClick={() => setRowEditModal(null)} title="Close (Esc)">
+                <X size={14} />
+              </button>
+            </div>
+
+            <div className="row-dialog-body">
+              {Object.keys(rowEditModal.data).map((colName) => {
+                const val = rowEditModal.data[colName];
+                const colDef = columns.find((c) => c.name === colName);
+                const isGeom = isGeometryColumn(colDef?.type, colName) || isGisData(val);
+
+                return (
+                  <div key={colName} className="field-record-card">
+                    <div className="field-card-top">
+                      <div className="field-meta-left">
+                        <span className="field-name-title">{colName}</span>
+                        {colDef?.type && <span className="field-type-badge">{colDef.type}</span>}
+                        {colDef?.primaryKey && <span className="field-pk-badge">PK</span>}
+                      </div>
+
+                      <div className="field-toggles-right">
+                        <button
+                          type="button"
+                          className={`toggle-chip-btn ${val === null ? "active-null-chip" : ""}`}
+                          onClick={() => {
+                            setRowEditModal({
+                              ...rowEditModal,
+                              data: { ...rowEditModal.data, [colName]: val === null ? "" : null },
+                            });
+                          }}
+                        >
+                          SET NULL
+                        </button>
+                      </div>
+                    </div>
+
+                    {val === null ? (
+                      <div className="null-field-display">NULL</div>
+                    ) : isGeom ? (
+                      <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                        <input
+                          type="text"
+                          className="input font-mono"
+                          style={{ flex: 1 }}
+                          value={typeof val === "object" ? JSON.stringify(val) : String(val)}
+                          onChange={(e) => {
+                            setRowEditModal({
+                              ...rowEditModal,
+                              data: { ...rowEditModal.data, [colName]: e.target.value },
+                            });
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => {
+                            setGisModalData({
+                              title: `Record #${rowEditModal.rowIdx + 1} — ${colName}`,
+                              subtitle: `Interactive Map Editor`,
+                              value: val,
+                              pickerMode: true,
+                              onPick: (coords) => {
+                                setRowEditModal((prev) => {
+                                  if (!prev) return null;
+                                  return {
+                                    ...prev,
+                                    data: { ...prev.data, [colName]: coords.wkt },
+                                  };
+                                });
+                                setGisModalData(null);
+                              },
+                            });
+                          }}
+                          title="Pick location or edit coordinates on map"
+                        >
+                          <Globe size={12} />
+                          <span>Map Picker</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <input
+                        type="text"
+                        className="input font-mono"
+                        value={typeof val === "object" ? JSON.stringify(val) : String(val)}
+                        onChange={(e) => {
+                          setRowEditModal({
+                            ...rowEditModal,
+                            data: { ...rowEditModal.data, [colName]: e.target.value },
+                          });
+                        }}
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="row-dialog-footer">
+              <button className="btn btn-secondary" onClick={() => setRowEditModal(null)}>
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={() => {
+                  const rIdx = rowEditModal.rowIdx;
+                  const originalRow = result?.rows?.[rIdx] || {};
+                  const changesObj: Record<string, unknown> = {};
+
+                  Object.keys(rowEditModal.data).forEach((col) => {
+                    const newVal = coerceVal(col, String(rowEditModal.data[col] ?? ""), originalRow[col]);
+                    const oldVal = originalRow[col];
+                    if (newVal !== oldVal) {
+                      changesObj[col] = rowEditModal.data[col] === null ? null : newVal;
+                    }
+                  });
+
+                  if (Object.keys(changesObj).length > 0) {
+                    setEditedCells((prev) => ({
+                      ...prev,
+                      [rIdx]: {
+                        ...(prev[rIdx] || {}),
+                        ...changesObj,
+                      },
+                    }));
+                  }
+                  setRowEditModal(null);
+                }}
+              >
+                <Check size={12} />
+                <span>Apply to Row (บันทึกการแก้ไข)</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* GIS Spatial Map Viewer Modal */}
+      {gisModalData && (
+        <GisMapViewer
+          value={gisModalData.value}
+          title={gisModalData.title}
+          subtitle={gisModalData.subtitle}
+          pickerMode={gisModalData.pickerMode}
+          onPickCoordinates={gisModalData.onPick}
+          onClose={() => setGisModalData(null)}
+        />
+      )}
 
       <style jsx>{`
         .sql-console {
@@ -595,18 +1827,206 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
         }
         .sparkle-icon { color: #f59e0b; }
 
+        .selection-active-badge {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 10.5px;
+          font-weight: 600;
+          color: #3b82f6;
+          background: rgba(59, 130, 246, 0.12);
+          border: 1px solid rgba(59, 130, 246, 0.35);
+          padding: 3px 8px;
+          border-radius: 12px;
+          animation: pulse-selection 2s infinite ease-in-out;
+        }
+        @keyframes pulse-selection {
+          0%, 100% { border-color: rgba(59, 130, 246, 0.35); }
+          50% { border-color: rgba(59, 130, 246, 0.75); }
+        }
+        .btn-clear-sel {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: transparent;
+          border: none;
+          color: #3b82f6;
+          cursor: pointer;
+          padding: 2px;
+          border-radius: 50%;
+          transition: all 0.12s ease;
+        }
+        .btn-clear-sel:hover {
+          background: rgba(59, 130, 246, 0.2);
+          color: #60a5fa;
+        }
+        .statement-count-pill {
+          font-weight: 600;
+          color: var(--accent-blue);
+          background: rgba(59, 130, 246, 0.1);
+          padding: 1px 5px;
+          border-radius: 4px;
+          margin-right: 4px;
+        }
+
+        .run-button-group {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+
         .run-query-btn {
           padding: 5px 12px;
           height: 30px;
         }
+        .run-query-btn.has-selection {
+          background: #2563eb !important;
+          box-shadow: 0 0 10px rgba(37, 99, 235, 0.35);
+        }
+
+        .btn-run-all {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          padding: 5px 10px;
+          height: 30px;
+          font-size: 11px;
+        }
+        .zap-icon {
+          color: #f59e0b;
+        }
 
         .editor-container {
-          height: 200px;
-          min-height: 140px;
+          min-height: 100px;
+          max-height: 650px;
           background: #14171f;
-          border-bottom: 1px solid var(--border-light);
           position: relative;
           flex-shrink: 0;
+        }
+
+        /* Draggable Resizer Bar */
+        .editor-resizer {
+          height: 6px;
+          background: var(--bg-header);
+          border-top: 1px solid var(--border-light);
+          border-bottom: 1px solid var(--border-light);
+          cursor: row-resize;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          user-select: none;
+          transition: background 0.15s ease;
+          z-index: 10;
+          flex-shrink: 0;
+        }
+        .editor-resizer:hover, .editor-resizer.is-resizing {
+          background: var(--accent-blue);
+        }
+        .editor-resizer:hover .resizer-handle, .editor-resizer.is-resizing .resizer-handle {
+          color: #fff;
+        }
+        .resizer-handle {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: var(--text-muted);
+          opacity: 0.7;
+        }
+
+        /* Multi-Statement Result Tabs */
+        .statement-tabs-bar {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 5px 12px;
+          background: var(--bg-header);
+          border-bottom: 1px solid var(--border-light);
+          gap: 10px;
+          overflow-x: auto;
+          flex-shrink: 0;
+        }
+        .tabs-list {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          overflow-x: auto;
+          scrollbar-width: none;
+        }
+        .tabs-list::-webkit-scrollbar {
+          display: none;
+        }
+        .stmt-tab-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 3px 8px;
+          background: var(--bg-card);
+          border: 1px solid var(--border-light);
+          border-radius: var(--radius-xs);
+          color: var(--text-sub);
+          font-size: 11px;
+          cursor: pointer;
+          white-space: nowrap;
+          transition: all 0.12s ease;
+        }
+        .stmt-tab-btn:hover {
+          background: var(--bg-hover);
+          color: var(--text-main);
+          border-color: var(--border-medium);
+        }
+        .stmt-tab-btn.active {
+          background: var(--bg-tertiary);
+          color: var(--text-main);
+          border-color: var(--accent-blue);
+          box-shadow: 0 0 0 1px var(--accent-blue);
+          font-weight: 600;
+        }
+        .stmt-tab-btn.tab-error {
+          border-color: rgba(239, 68, 68, 0.4);
+        }
+        .stmt-tab-btn.tab-error.active {
+          border-color: #ef4444;
+          box-shadow: 0 0 0 1px #ef4444;
+        }
+        .tab-icon-ok {
+          color: var(--accent-green);
+        }
+        .tab-icon-err {
+          color: #f87171;
+        }
+        .stmt-tab-num {
+          font-weight: 600;
+          color: var(--text-muted);
+        }
+        .stmt-tab-btn.active .stmt-tab-num {
+          color: var(--accent-blue);
+        }
+        .stmt-tab-title {
+          font-size: 10.5px;
+          color: var(--text-main);
+          max-width: 150px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .stmt-tab-badge {
+          font-size: 9.5px;
+          padding: 1px 4px;
+          border-radius: 3px;
+          background: var(--bg-app);
+          color: var(--text-muted);
+          font-family: var(--font-mono);
+        }
+        .stmt-tab-btn.active .stmt-tab-badge {
+          background: var(--bg-card);
+          color: var(--text-sub);
+        }
+        .tabs-summary {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 10px;
+          color: var(--text-muted);
+          white-space: nowrap;
         }
 
         .results-pane {
@@ -640,6 +2060,65 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
           align-items: center;
           gap: 8px;
           margin-left: auto;
+        }
+
+        /* Transaction Commit / Rollback Bar */
+        .transaction-bar {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 6px 14px;
+          background: rgba(245, 158, 11, 0.12);
+          border-bottom: 1px solid rgba(245, 158, 11, 0.28);
+          font-size: 11px;
+          color: #f59e0b;
+          flex-shrink: 0;
+          gap: 12px;
+        }
+        .transaction-bar.has-deletions {
+          background: rgba(239, 68, 68, 0.1);
+          border-bottom-color: rgba(239, 68, 68, 0.25);
+          color: #f87171;
+        }
+        .tx-info {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-weight: 500;
+        }
+        .tx-actions {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .btn-commit-action {
+          background: #f59e0b !important;
+          border-color: #f59e0b !important;
+          color: #18181b !important;
+          font-weight: 600;
+        }
+        .tx-delete-highlight {
+          color: #f87171;
+          margin-left: 6px;
+        }
+
+        .status-bar-msg {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 6px 14px;
+          font-size: 11px;
+          flex-shrink: 0;
+        }
+        .status-bar-msg.success {
+          background: rgba(16, 185, 129, 0.1);
+          color: var(--accent-green);
+          border-bottom: 1px solid rgba(16, 185, 129, 0.2);
+        }
+        .status-bar-msg.error {
+          background: rgba(239, 68, 68, 0.1);
+          color: #f87171;
+          border-bottom: 1px solid rgba(239, 68, 68, 0.2);
         }
 
         /* View Mode Segmented Control */
@@ -768,15 +2247,46 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
           border-bottom: 1px solid var(--border-light);
           border-right: 1px solid var(--border-light);
           white-space: nowrap;
+          cursor: default;
         }
 
         .sql-table tr:hover td {
           background: var(--bg-hover);
         }
 
+        .row-deleted {
+          opacity: 0.45;
+          text-decoration: line-through;
+          background: rgba(239, 68, 68, 0.08) !important;
+        }
+
+        .cell-modified {
+          background: rgba(245, 158, 11, 0.18) !important;
+          outline: 1px solid rgba(245, 158, 11, 0.45);
+        }
+
+        .inline-edit-wrap {
+          width: 100%;
+          display: flex;
+          align-items: center;
+        }
+        .cell-edit-input {
+          width: 100%;
+          padding: 2px 6px;
+          font-size: 11px;
+          font-family: inherit;
+          background: var(--bg-card);
+          border: 1px solid var(--accent-blue);
+          border-radius: var(--radius-xs);
+          color: var(--text-main);
+          outline: none;
+          box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+        }
+
         .row-idx {
           color: var(--text-muted);
           background: var(--bg-tertiary);
+          user-select: none;
         }
 
         .null-val {
@@ -791,13 +2301,241 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
           font-size: 11px;
         }
 
+        /* Full Row Edit Dialog */
+        .row-dialog-overlay {
+          position: fixed;
+          inset: 0;
+          background: rgba(0, 0, 0, 0.65);
+          backdrop-filter: blur(5px);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 1000;
+          padding: 20px;
+        }
+        .row-dialog-card {
+          width: 580px;
+          max-height: 85vh;
+          background: var(--bg-app);
+          border: 1px solid var(--border-medium);
+          border-radius: var(--radius-lg);
+          box-shadow: var(--shadow-popup);
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+        }
+        .row-dialog-header {
+          padding: 12px 18px;
+          background: var(--bg-header);
+          border-bottom: 1px solid var(--border-light);
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }
+        .dialog-header-left {
+          display: flex;
+          align-items: center;
+          gap: 9px;
+        }
+        .dialog-icon-badge {
+          width: 26px;
+          height: 26px;
+          border-radius: 6px;
+          background: var(--bg-tertiary);
+          color: var(--text-main);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border: 1px solid var(--border-light);
+        }
+        .dialog-title-group {
+          display: flex;
+          flex-direction: column;
+          gap: 1px;
+        }
+        .dialog-title-text {
+          font-size: 13px;
+          font-weight: 600;
+          color: var(--text-main);
+        }
+        .dialog-sub-text {
+          font-size: 11px;
+          color: var(--text-muted);
+        }
+        .dialog-close-btn {
+          background: transparent;
+          border: none;
+          color: var(--text-muted);
+          cursor: pointer;
+          padding: 5px;
+          border-radius: 5px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: all 0.12s ease;
+        }
+        .dialog-close-btn:hover {
+          color: var(--text-main);
+          background: var(--bg-hover);
+        }
+        .row-dialog-body {
+          flex: 1;
+          overflow-y: auto;
+          padding: 16px 18px;
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+        }
+        .field-record-card {
+          background: var(--bg-card);
+          border: 1px solid var(--border-light);
+          border-radius: var(--radius-sm);
+          padding: 10px 12px;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+        .field-card-top {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+        }
+        .field-meta-left {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          flex-wrap: wrap;
+        }
+        .field-name-title {
+          font-size: 11.5px;
+          font-weight: 600;
+          color: var(--text-main);
+        }
+        .field-type-badge {
+          font-size: 9px;
+          color: var(--text-muted);
+          background: var(--bg-tertiary);
+          padding: 1px 4px;
+          border-radius: 3px;
+          border: 1px solid var(--border-light);
+          font-family: var(--font-mono);
+        }
+        .field-pk-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 3px;
+          font-size: 8.5px;
+          font-weight: 600;
+          color: var(--text-sub);
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-light);
+          padding: 1px 4px;
+          border-radius: 3px;
+        }
+        .field-toggles-right {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+        }
+        .toggle-chip-btn {
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-light);
+          color: var(--text-muted);
+          font-size: 9.5px;
+          padding: 2px 6px;
+          border-radius: 3px;
+          cursor: pointer;
+          transition: all 0.12s ease;
+        }
+        .toggle-chip-btn:hover {
+          color: var(--text-main);
+        }
+        .active-null-chip {
+          background: rgba(239, 68, 68, 0.15) !important;
+          color: #f87171 !important;
+          border-color: rgba(239, 68, 68, 0.3) !important;
+        }
+        .null-field-display {
+          font-size: 11px;
+          color: var(--text-muted);
+          font-style: italic;
+          padding: 6px 8px;
+          background: var(--bg-tertiary);
+          border-radius: var(--radius-xs);
+          font-family: var(--font-mono);
+        }
+        .row-dialog-footer {
+          padding: 12px 18px;
+          background: var(--bg-header);
+          border-top: 1px solid var(--border-light);
+          display: flex;
+          justify-content: flex-end;
+          gap: 8px;
+        }
+
+        /* Searchable Row Inspector Modal */
+        .row-detail-field-card {
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-light);
+          border-radius: var(--radius-sm);
+          padding: 8px 12px;
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+        .row-detail-field-card.highlighted {
+          border-color: var(--accent-blue);
+          background: rgba(59, 130, 246, 0.04);
+        }
+        .row-detail-field-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+        }
+        .row-detail-field-meta {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+        .row-detail-field-name {
+          font-size: 11.5px;
+          font-weight: 600;
+          color: var(--text-main);
+        }
+        .row-detail-field-type {
+          font-size: 10px;
+          color: var(--text-muted);
+        }
+        .row-detail-field-val {
+          font-size: 11.5px;
+          color: var(--text-main);
+          word-break: break-all;
+        }
+        .row-detail-field-val.is-null {
+          color: var(--text-muted);
+          font-style: italic;
+        }
+        .row-detail-footer {
+          padding: 10px 18px;
+          border-top: 1px solid var(--border-light);
+          background: var(--bg-header);
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+        }
+        .icon-clear-btn {
+          background: transparent;
+          border: none;
+          color: var(--text-muted);
+          cursor: pointer;
+          padding: 2px;
+          display: flex;
+          align-items: center;
+        }
+
         /* Small Screen Responsive Layout */
         @media (max-width: 960px) {
-          .console-toolbar {
-            flex-wrap: wrap;
-            padding: 6px 10px;
-            gap: 8px;
-          }
           .template-chips {
             display: none;
           }

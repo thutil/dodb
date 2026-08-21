@@ -1,6 +1,6 @@
 {
   "name": "dodb",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "productName": "dodb",
   "description": "dodb - Modern Multi-Platform Database Manager for Postgres, MySQL, MariaDB & SQLite",
   "author": {
@@ -20,6 +20,11 @@
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/cli": "^2.11.4",
     "typescript": "^5.8.3"
+  },
+  "pnpm": {
+    "overrides": {
+      "dompurify": "^3.4.14"
+    }
   },
   "overrides": {
     "dompurify": "^3.4.14"
