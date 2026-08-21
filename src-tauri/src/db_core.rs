@@ -394,6 +394,11 @@ pub async fn execute_query(pool: &DbPool, query: &str) -> Result<Vec<serde_json:
                     } else if let Ok(v) = row.try_get::<Vec<u8>, _>(i) {
                         let s = decode_bytes_or_hex(&v);
                         map.insert(column.name().to_string(), serde_json::Value::String(s));
+                    } else if let Ok(v) = row.try_get_unchecked::<Vec<u8>, _>(i) {
+                        let s = decode_bytes_or_hex(&v);
+                        map.insert(column.name().to_string(), serde_json::Value::String(s));
+                    } else if let Ok(v) = row.try_get_unchecked::<String, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::String(v));
                     } else {
                         map.insert(column.name().to_string(), serde_json::Value::Null);
                     }
@@ -464,6 +469,13 @@ pub async fn execute_query(pool: &DbPool, query: &str) -> Result<Vec<serde_json:
                     } else if let Ok(v) = row.try_get::<Vec<u8>, _>(i) {
                         let s = decode_bytes_or_hex(&v);
                         map.insert(column.name().to_string(), serde_json::Value::String(s));
+                    } else if let Ok(v) = row.try_get_unchecked::<Vec<u8>, _>(i) {
+                        // Same unchecked fallback as the Postgres branch: spatial and other
+                        // driver-unknown types would otherwise be dropped as null.
+                        let s = decode_bytes_or_hex(&v);
+                        map.insert(column.name().to_string(), serde_json::Value::String(s));
+                    } else if let Ok(v) = row.try_get_unchecked::<String, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::String(v));
                     } else {
                         map.insert(column.name().to_string(), serde_json::Value::Null);
                     }
@@ -508,6 +520,13 @@ pub async fn execute_query(pool: &DbPool, query: &str) -> Result<Vec<serde_json:
                     } else if let Ok(v) = row.try_get::<Vec<u8>, _>(i) {
                         let s = decode_bytes_or_hex(&v);
                         map.insert(column.name().to_string(), serde_json::Value::String(s));
+                    } else if let Ok(v) = row.try_get_unchecked::<Vec<u8>, _>(i) {
+                        // Same unchecked fallback as the Postgres branch: spatial and other
+                        // driver-unknown types would otherwise be dropped as null.
+                        let s = decode_bytes_or_hex(&v);
+                        map.insert(column.name().to_string(), serde_json::Value::String(s));
+                    } else if let Ok(v) = row.try_get_unchecked::<String, _>(i) {
+                        map.insert(column.name().to_string(), serde_json::Value::String(v));
                     } else {
                         map.insert(column.name().to_string(), serde_json::Value::Null);
                     }
