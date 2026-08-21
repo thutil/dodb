@@ -9,11 +9,7 @@ dodb is a modern, native macOS database manager built around a simple idea: **wo
 
 The name **dodb** comes from the Thai pronunciation of “do,” meaning **“to see”**, combined with **DB** for database.
 
-It represents what dodb is about:
-
-**See the data. See the structure. See what is happening.**
-
-dodb is designed to make databases feel less intimidating and more approachable without hiding the power that developers need.
+It represents what dodb is about: **See the data. See the structure. See what is happening.**
 
 ---
 
@@ -21,211 +17,192 @@ dodb is designed to make databases feel less intimidating and more approachable 
 
 Database tools often become complicated as more features are added.
 
-dodb takes a different approach.
+dodb focuses on the core tasks developers actually do with databases:
 
-Instead of building another application filled with panels, dashboards, and abstractions, dodb focuses on the core things developers actually do with databases:
-
-* Connect
-* Explore
-* Query
-* Edit
-* Visualize (ER & GIS Maps)
-* Understand
-* Commit
-
-Everything is designed around clarity, speed, and a native macOS experience.
+* Connect & Inspect
+* Explore & Inline Edit
+* Query with Monaco Editor & Run Selected Text
+* Visualize Schemas (ER Diagram) & Spatial GIS Data (MapLibre GL)
+* Audit, Dump & Commit Transactions
 
 **No unnecessary clutter. No artificial complexity. Just your database.**
 
 ---
 
-## ✨ Features
+## Features
 
-### 📊 Interactive Data Explorer
-Explore and manage database records through a clean, high-performance table interface:
-* **Browse rows & columns** with smooth virtualization and adjustable page sizes
-* **Database-aware cell rendering** with specialized badges for DateTime, Booleans, JSON, Binary/BLOB, Enums, UUIDs, Auto-increment, and Spatial GIS geometries
-* **Inline Cell Editing** — Edit values directly inside cells with double-click without modal friction
-* **Transactional Commit Bar** — Changes are staged locally (Edit → Review → Commit) with full rollback and diff inspection before writing to the database
-* **Multi-column sorting & advanced filtering** with operators (`equals`, `contains`, `startsWith`, `endsWith`, `gt`, `gte`, `lt`, `lte`, `isNull`, `isNotNull`)
-* **Quick search** across rows and columns
-* **Export records** to CSV, JSON, and SQL `INSERT` statements
-* **Soft-delete & restoration** with staged deletion indicators
+### Interactive Data Explorer
+* **Virtual Data Grid** — Smooth scrolling across thousands of records with pagination support.
+* **Database-Aware Cell Badges** — Distinct badges for DateTime, Booleans, JSON, Binary/BLOB, Enums, UUIDs, Primary Keys, and Spatial GIS geometries.
+* **Inline Cell Editing** — Edit values directly with double-click and review changes before committing.
+* **Transactional Staging Bar** — Staged mutations (Insert, Update, Delete) with diff review and atomic rollback.
+* **Advanced Filters & Sorting** — Multi-column sorting with rich operators (`equals`, `contains`, `startsWith`, `endsWith`, `gt`, `gte`, `lt`, `lte`, `isNull`, `isNotNull`).
+* **Search & Export** — Export table data to CSV, JSON, and SQL `INSERT` statements.
 
-### 🖱️ Row Context Menu & Searchable Detailed Inspector
-Right-click on any table row to access instant contextual actions:
-* 🔍 **Detailed Record Inspector** — Full-screen searchable record modal with real-time field/value search, type badges, JSON viewers, and quick-copy buttons
-* ✏️ **Edit Record** — Comprehensive modal editor with auto-increment toggles and NULL switches
-* 🗺️ **View on Map** — Directly open spatial features on the interactive GIS map
-* 📑 **Duplicate Row** — 1-click clone row into the pending insert batch
-* 📋 **Copy as JSON & SQL** — Fast clipboard export of row data
-* 🗑️ **Delete / Restore Record** — Stage row deletion or restore marked rows
+### Searchable Detailed Inspector & Context Menu
+* Right-click any row to inspect fields in full-screen modal with instant search and JSON view.
+* Modal record editor with NULL toggles and auto-increment handling.
+* 1-click duplicate row and fast clipboard export.
+* View spatial geometry directly on the interactive map.
 
-### 🗺️ GIS & Spatial Data Support (Powered by MapLibre GL)
-First-class support for spatial databases and geometry types:
-* **Multi-Engine Spatial Support** — PostGIS (`geometry`, `geography`), MySQL Spatial (`GEOMETRY`, `POINT`, `LINESTRING`, `POLYGON`, `MULTIPOINT`, `MULTIPOLYGON`), and SpatiaLite
-* **Universal Format Parser** — Automatically recognizes and decodes WKT (Well-Known Text), GeoJSON, and EWKB/WKB Hex binary formats
-* **Interactive Map Viewer (MapLibre GL)**:
-  * High-performance vector & raster map rendering
-  * Multiple basemap layers: Dark Matter, Positron Light, OpenStreetMap, and Satellite Imagery
-  * Single geometry inspection mode & table-wide multi-record layer view
-  * Auto-fit bounding box (`fitBounds`), zoom controls, and cursor coordinate HUD
-  * **Interactive Coordinate Picker** — Click on the map to pick coordinates when inserting or editing records
-  * **Export to GeoJSON** — Export spatial table layers directly into standard `.geojson` files
+### GIS & Spatial Data Support (MapLibre GL)
+* **Engines Supported** — PostGIS (`geometry`, `geography`), MySQL Spatial (`GEOMETRY`, `POINT`, `POLYGON`, etc.), and SpatiaLite.
+* **Formats Supported** — Automatically parses WKT (Well-Known Text), GeoJSON, and EWKB/WKB Hex binary formats.
+* **Interactive Map Viewer**:
+  * Vector & raster map rendering with Dark Matter, Positron Light, OpenStreetMap, and Satellite basemaps.
+  * Spatial feature inspector & table-wide multi-feature rendering.
+  * Interactive coordinate picker for inserting or editing geometries.
+  * Export spatial layers to standard `.geojson` files.
 
-### 💻 Multi-Tab SQL Console
-A powerful SQL workspace built for speed:
-* **Monaco-powered SQL Editor** with syntax highlighting, auto-complete, and query formatting
-* **Multi-tab workspace** to write and run multiple queries concurrently
-* **Execution diagnostics** — Real-time query execution timing, affected rows, and returned record counters
-* **Query history** and log tracking
-* **Export query results** to CSV, JSON, and SQL
+### Monaco SQL Console
+* **Monaco Editor** with intelligent auto-completion for tables, columns, keywords, and SQL functions.
+* **Run Selection (Highlight to Run)** — Highlight any SQL query and run only the selected text with `Cmd + Enter`.
+* **Multi-Statement Engine** — Sequentially execute multi-statement SQL scripts with separate result tabs.
+* **Draggable Resizer** — Adjust editor pane height dynamically.
+* **Execution Metrics** — Real-time execution duration, returned rows, and affected rows indicators.
 
-### 🕸️ Visual Schema & ER Diagram
-Understand your database architecture visually:
-* **Interactive ER Diagram** powered by modern node-graph canvas (`@xyflow/react`)
-* **Automatic relationship discovery** — Visualizes foreign key connections and routing between tables
-* **Table cards** with column types, primary key badges, and spatial GIS indicators
-* **Canvas controls** — Zoom, pan, minimap, and search filter across diagram tables
+### Visual Schema & ER Diagram
+* **Interactive Node Graph** powered by `@xyflow/react` to visualize tables, column types, and foreign key relationships.
+* **Multi-directional Handles** for clean edge routing and relationship alignment.
+* **Interactive Search & Relation Highlighting** — Highlight connected tables and foreign keys on click.
+* **Auto Layout** — Organizes tables into clean topology columns.
 
-### 🛠️ Table Structure & Visual Designer
-Design and modify database tables with safety:
-* **Visual Table Designer** for creating new tables or altering existing schemas
-* **Column editor** with type suggestions (including GIS spatial types), nullability, defaults, primary keys, and auto-increment
-* **Foreign keys & index managers**
-* **DDL Preview & Verification** — Generates clean SQL DDL and prompts with confirmation before running destructive schema changes
+### Table Structure & Visual Designer
+* Create new tables or alter existing schemas visually.
+* Column editor with type suggestions, nullability, defaults, primary keys, and auto-increment.
+* DDL Preview & Verification before executing destructive schema changes.
 
-### 🖥️ Database Administration & Monitoring (Admin Panel)
-Monitor and manage your database servers in real-time:
-* **Server Health & Metrics** — Database engine version, uptime, connection pool statistics
-* **Process & Connection Manager** — View active queries and terminate rogue connections (Kill Process)
-* **Storage Metrics** — Database size, table storage usage, and index sizes
-* **Configuration Variables** viewer
+### Database Administration & Monitoring
+* Server engine info, uptime, and connection metrics.
+* Process & connection monitor with rogue query termination (`Kill Process`).
+* Database and table storage metrics.
 
-### 📜 Audit Log & Action Trail
-Track and inspect all operations performed through dodb:
-* Comprehensive audit logging for queries, mutations (`INSERT`/`UPDATE`/`DELETE`), DDL changes, and connection events
-* Filter by status (`SUCCESS`/`ERROR`), connection profile, action type, and date range
-* Execution duration and error stack trace inspection
-
-### ⌨️ Native macOS Ergonomics & Shortcuts
-* **Command Palette (`Cmd+K` / `Ctrl+K`)** for rapid navigation, switching tables, and running actions
-* **Theme customizer** — Seamless Dark Mode and Light Mode matching macOS system appearance
-* **GUI scale adjustments** for custom screen resolutions
-* **Encrypted connection credentials** stored safely using AES-256-GCM encryption
+### Audit Log & Action Trail
+* Comprehensive local audit logging for all queries, mutations, DDL executions, and connection events.
+* Filter by status, profile, action type, and date range.
 
 ---
 
-## 🗄 Supported Database Engines
+## Supported Database Engines
 
 | Engine | Version | Spatial / GIS Support |
 | :--- | :--- | :--- |
-| **PostgreSQL** | 10+ / 14 / 15 / 16 / 17 | ✅ PostGIS (`geometry`, `geography`, WKT, EWKB) |
-| **MySQL** | 5.7 / 8.0+ | ✅ MySQL Spatial (`GEOMETRY`, `POINT`, `POLYGON`, etc.) |
-| **MariaDB** | 10.3+ | ✅ MariaDB Spatial |
-| **SQLite** | 3.x | ✅ SpatiaLite & WKT / GeoJSON |
+| **PostgreSQL** | 10+ / 14 / 15 / 16 / 17 | PostGIS (`geometry`, `geography`, WKT, EWKB) |
+| **MySQL** | 5.7 / 8.0+ | MySQL Spatial (`GEOMETRY`, `POINT`, `POLYGON`, etc.) |
+| **MariaDB** | 10.3+ | MariaDB Spatial |
+| **SQLite** | 3.x | SpatiaLite & WKT / GeoJSON |
 
 ---
 
-## 🏗 Architecture
+## Architecture
 
-dodb is built with a high-performance native stack:
+| Layer | Technology |
+| :--- | :--- |
+| Desktop Shell | Tauri 2 |
+| Frontend | Next.js 16 · React 19 |
+| Map Engine | MapLibre GL |
+| Diagram Engine | React Flow (xyflow) |
+| Editor | Monaco Editor |
+| Application Core | Rust · Tokio |
+| Database Access | SQLx |
+| Communication | Tauri IPC |
+| Platform | macOS (Apple Silicon & Intel) |
 
-| Layer            | Technology            |
-| ---------------- | --------------------- |
-| Desktop Shell    | Tauri 2               |
-| Frontend         | Next.js 15 · React 19 |
-| Map Engine       | MapLibre GL           |
-| Diagram Engine   | React Flow (xyflow)   |
-| Editor           | Monaco Editor         |
-| Application Core | Rust · Tokio          |
-| Database Access  | SQLx                  |
-| Communication    | Tauri IPC             |
-| Platform         | macOS                 |
-
-### Why Rust & Tauri?
-
-Database applications deal with network connections, concurrent queries, large datasets, and long-running operations.
-
-Rust provides dodb with a foundation that is:
-* **Memory safe** and lightweight
-* **Efficient** with zero garbage-collection pauses
-* **Concurrent** using Tokio asynchronous runtime
-* **Predictable** for native desktop performance
+### Privacy & Security
+* **Direct Socket Connections** — Connections are established directly from your machine to your database.
+* **Zero Telemetry / No Cloud Proxy** — Credentials, schemas, and records are never transmitted to third-party servers.
+* **Encrypted Storage** — Connection passwords and sensitive metadata are encrypted locally using AES-256-GCM.
 
 ---
 
-## 🔐 Privacy & Security
+## macOS Installation & Security Notice (Unsigned App Fix)
 
-Your database is your data.
+When downloading pre-built `.dmg` or `.app` releases from GitHub without Apple Developer ID notarization, macOS Gatekeeper may display security warnings:
 
-* **Direct connections** — Direct socket connection from your Mac to your database.
-* **No cloud proxy** — dodb never sends your database credentials, schema, or records to external servers.
-* **Encrypted storage** — Connection passwords and sensitive profile metadata are encrypted locally using AES-256-GCM.
+* *“dodb is damaged and can’t be opened. You should move it to the Trash.”*
+* *“dodb cannot be opened because the developer cannot be verified.”*
+* *“Apple could not verify that dodb is free of malware.”*
+
+### วิธีแก้ไข / How to open unsigned app on macOS:
+
+#### Method 1: Terminal (Recommended / แนะนำ)
+After moving `dodb.app` to `/Applications`, open **Terminal** (`Terminal.app`) and run:
+
+```bash
+xattr -cr /Applications/dodb.app
+```
+
+Or remove the quarantine attribute specifically:
+
+```bash
+xattr -d com.apple.quarantine /Applications/dodb.app
+```
+
+Then launch **dodb** normally from Applications or Spotlight (`Cmd + Space`).
 
 ---
 
-## 🚀 Getting Started
+#### Method 2: Right-Click Open (คลิกขวาเพื่อเปิด)
+1. Open **Finder** and navigate to `/Applications`.
+2. **Right-click** (or `Control + Click`) on **dodb.app**.
+3. Click **Open** from the context menu.
+4. Click **Open** in the confirmation dialog.
 
-### Requirements
+---
 
+#### Method 3: System Settings (การตั้งค่าระบบ)
+1. Open **System Settings** (การตั้งค่าระบบ).
+2. Go to **Privacy & Security** (ความเป็นส่วนตัวและความปลอดภัย).
+3. Scroll down to the **Security** (ความปลอดภัย) section.
+4. Click **Open Anyway** (เปิดต่อไป) next to the message stating *“dodb was blocked from use because it is not from an identified developer”*.
+
+---
+
+## Getting Started (Development)
+
+### Prerequisites
 * macOS 11.0 or later (Apple Silicon or Intel)
-* Rust toolchain (`cargo`, `rustc`)
-* Node.js 18 or later
-* pnpm 8 or later
+* Rust toolchain (`rustc`, `cargo`): `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
+* Node.js 18+ and pnpm 8+: `npm install -g pnpm`
 
-### Clone the repository
+### Clone & Install
 
 ```bash
 git clone https://github.com/bankjirapan/dodb.git
 cd dodb
-```
-
-### Install dependencies
-
-```bash
 pnpm install
 ```
 
-### Start development
+### Start Development Mode
 
 ```bash
 pnpm dev
 ```
 
-This starts the Tauri application with hot-reload frontend and dev Rust core.
-
 ---
 
-## 📦 Production Build
+## Production Build
 
-Build the optimized macOS application bundle:
+To build the optimized `.app` bundle and `.dmg` installer:
 
 ```bash
 pnpm tauri build
 ```
 
-Build artifacts are generated under:
-
-```text
-src-tauri/target/release/bundle/
-```
-
-* `.app` — macOS application bundle
-* `.dmg` — macOS disk image
+Generated artifacts:
+* `src-tauri/target/release/bundle/macos/dodb.app`
+* `src-tauri/target/release/bundle/dmg/dodb_<version>_<arch>.dmg`
 
 ---
 
-## 📄 License
+## License
 
-dodb is distributed under the [MIT License](LICENSE).
+dodb is open source software distributed under the [MIT License](LICENSE).
 
 ---
 
 ## Made by thutil
 
-dodb is designed and developed by **thutil**.
-
-Built in 2026 for developers who want a database tool that stays out of the way.
+Designed and developed by **thutil**.
 
 **dodb — See your data. Understand your database.**
