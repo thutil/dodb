@@ -1,15 +1,17 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import Editor, { Monaco, OnMount } from "@monaco-editor/react";
 import {
   Play, Clock, Database, CheckCircle2, AlertCircle, FileCode, Sparkles,
   Layers, Table2, Code2, Copy, Check, Download, WrapText, Globe,
-  Edit2, Edit3, Trash2, RotateCcw, Eye, Search, X, Plus, Key, Zap
+  Edit2, Edit3, Trash2, RotateCcw, Eye, Search, X, Plus, Key, Zap,
+  GripHorizontal, ListFilter
 } from "lucide-react";
 import { QueryExecutionResult, ColumnInfo } from "../types";
 import { PendingChanges, CommitResult } from "./DataGrid";
 import { isGeometryColumn, isGisData, formatGisSummary, parseGisToGeoJson } from "../utils/gisUtils";
 import { GisMapViewer, GisFeatureRecord } from "./GisMapViewer";
+import { splitSqlStatements, getStatementAtLine, stripCommentsAndTrim } from "../utils/sqlUtils";
 
 interface SqlConsoleProps {
   activeDatabase: string;
@@ -19,6 +21,13 @@ interface SqlConsoleProps {
   theme?: "dark" | "light";
   onExecuteSql: (sql: string) => Promise<QueryExecutionResult>;
   onCommitChanges?: (changes: PendingChanges) => Promise<CommitResult>;
+}
+
+export interface StatementResultItem {
+  id: number;
+  sql: string;
+  result: QueryExecutionResult;
+  executionTimeMs: number;
 }
 
 const SQL_KEYWORDS = [
@@ -66,6 +75,20 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
   );
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<QueryExecutionResult | null>(null);
+
+  // Selection & Cursor Tracking
+  const [selectedSql, setSelectedSql] = useState<string>("");
+  const [selectionInfo, setSelectionInfo] = useState<{ lines: number; chars: number } | null>(null);
+  const [cursorPos, setCursorPos] = useState<{ line: number; column: number }>({ line: 1, column: 1 });
+
+  // Multi-statement results & tabs
+  const [statementResults, setStatementResults] = useState<StatementResultItem[]>([]);
+  const [activeResultTab, setActiveResultTab] = useState<number>(0);
+  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
+
+  // Editor Resizing State
+  const [editorHeight, setEditorHeight] = useState<number>(200);
+  const [isDraggingResize, setIsDraggingResize] = useState<boolean>(false);
 
   // Result View Mode: Table vs JSON vs GIS Map
   const [resultViewMode, setResultViewMode] = useState<"table" | "json" | "gis">("table");
@@ -126,6 +149,26 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
   const numUpdates = Object.keys(editedCells).length;
   const numDeletes = deletedRowIndices.size;
   const totalPending = numUpdates + numDeletes;
+
+  // Parsed SQL statements from current editor content
+  const parsedStatements = useMemo(() => splitSqlStatements(sql), [sql]);
+  const currentStatementAtCursor = useMemo(() => {
+    return getStatementAtLine(parsedStatements, cursorPos.line);
+  }, [parsedStatements, cursorPos.line]);
+
+  const currentStmtIndex = useMemo(() => {
+    if (!currentStatementAtCursor) return -1;
+    return parsedStatements.findIndex(
+      (s) => s.startIndex === currentStatementAtCursor.startIndex && s.endIndex === currentStatementAtCursor.endIndex
+    );
+  }, [parsedStatements, currentStatementAtCursor]);
+
+  // Clean summary of a SQL statement for tab display
+  const getStatementSummary = (sqlStr: string, maxLen = 28): string => {
+    const clean = sqlStr.replace(/\s+/g, " ").trim();
+    if (clean.length <= maxLen) return clean;
+    return clean.substring(0, maxLen) + "...";
+  };
 
   // Build GIS feature records for query result rows
   const gisFeatures: GisFeatureRecord[] = React.useMemo(() => {
@@ -409,9 +452,14 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
     URL.revokeObjectURL(url);
   };
 
-  const handleRun = useCallback(async () => {
-    const currentCode = editorRef.current ? editorRef.current.getValue() : sql;
-    if (!currentCode.trim()) return;
+  // Execution Engine for single or multiple SQL statements
+  const executeStatements = useCallback(async (statementsToRun: string[]) => {
+    const validStatements = statementsToRun
+      .map((s) => stripCommentsAndTrim(s))
+      .filter((s) => s.length > 0);
+
+    if (validStatements.length === 0) return;
+
     setLoading(true);
     setResult(null);
     setEditedCells({});
@@ -422,19 +470,140 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
     setRowEditModal(null);
     setCommitMsg(null);
 
-    const start = performance.now();
-    try {
-      const res = await onExecuteSql(currentCode);
-      const duration = Math.round(performance.now() - start);
-      setResult({ ...res, executionTimeMs: duration });
-    } catch (err: unknown) {
-      const duration = Math.round(performance.now() - start);
-      const msg = err instanceof Error ? err.message : String(err);
-      setResult({ error: msg || "Query execution failed", executionTimeMs: duration });
-    } finally {
-      setLoading(false);
+    const resultsList: StatementResultItem[] = [];
+
+    for (let idx = 0; idx < validStatements.length; idx++) {
+      const stmtSql = validStatements[idx];
+      setBatchProgress({ current: idx + 1, total: validStatements.length });
+      const start = performance.now();
+
+      try {
+        const res = await onExecuteSql(stmtSql);
+        const duration = Math.round(performance.now() - start);
+        resultsList.push({
+          id: idx + 1,
+          sql: stmtSql,
+          result: { ...res, executionTimeMs: duration },
+          executionTimeMs: duration,
+        });
+
+        if (res.error) {
+          break; // Stop subsequent statements on error
+        }
+      } catch (err: unknown) {
+        const duration = Math.round(performance.now() - start);
+        const msg = err instanceof Error ? err.message : String(err);
+        resultsList.push({
+          id: idx + 1,
+          sql: stmtSql,
+          result: { error: msg || "Query execution failed", executionTimeMs: duration },
+          executionTimeMs: duration,
+        });
+        break;
+      }
     }
-  }, [sql, onExecuteSql]);
+
+    setStatementResults(resultsList);
+    setBatchProgress(null);
+    setLoading(false);
+
+    if (resultsList.length > 0) {
+      // Pick best tab: error tab if any, else first tab with rows, else last tab
+      let defaultTab = 0;
+      const errorTabIdx = resultsList.findIndex((r) => r.result.error);
+      if (errorTabIdx >= 0) {
+        defaultTab = errorTabIdx;
+      } else {
+        const rowTabIdx = resultsList.findIndex((r) => r.result.rows && r.result.rows.length > 0);
+        defaultTab = rowTabIdx >= 0 ? rowTabIdx : resultsList.length - 1;
+      }
+      setActiveResultTab(defaultTab);
+      setResult(resultsList[defaultTab].result);
+    }
+  }, [onExecuteSql]);
+
+  // Primary Execute Handler: Runs highlighted selection if present, else runs statement at cursor (or single query)
+  const handleRunSelectionOrCurrent = useCallback(() => {
+    const model = editorRef.current?.getModel();
+    const selection = editorRef.current?.getSelection();
+    let textToRun = "";
+
+    if (selection && model && !selection.isEmpty()) {
+      textToRun = model.getValueInRange(selection).trim();
+    } else if (selectedSql.trim()) {
+      textToRun = selectedSql.trim();
+    }
+
+    if (textToRun) {
+      // Split selected text in case multiple statements were highlighted
+      const stmts = splitSqlStatements(textToRun);
+      if (stmts.length > 0) {
+        executeStatements(stmts.map((s) => s.sql));
+      } else {
+        executeStatements([textToRun]);
+      }
+      return;
+    }
+
+    // No selection: run statement at cursor if multiple exist, else run full editor
+    const currentCode = editorRef.current ? editorRef.current.getValue() : sql;
+    const currentPos = editorRef.current?.getPosition() || cursorPos;
+    const allStmts = splitSqlStatements(currentCode);
+
+    if (allStmts.length > 1) {
+      const atCursor = getStatementAtLine(allStmts, currentPos.lineNumber);
+      if (atCursor) {
+        executeStatements([atCursor.sql]);
+        return;
+      }
+    }
+
+    executeStatements(allStmts.length > 0 ? [allStmts[0].sql] : [currentCode]);
+  }, [selectedSql, sql, cursorPos, executeStatements]);
+
+  // Run all statements in the editor sequentially
+  const handleRunAll = useCallback(() => {
+    const currentCode = editorRef.current ? editorRef.current.getValue() : sql;
+    const allStmts = splitSqlStatements(currentCode);
+    if (allStmts.length > 0) {
+      executeStatements(allStmts.map((s) => s.sql));
+    } else if (currentCode.trim()) {
+      executeStatements([currentCode]);
+    }
+  }, [sql, executeStatements]);
+
+  // Switch between result tabs when multiple queries ran
+  const switchResultTab = (idx: number) => {
+    if (!statementResults[idx]) return;
+    setActiveResultTab(idx);
+    setResult(statementResults[idx].result);
+    setEditedCells({});
+    setDeletedRowIndices(new Set());
+    setEditingCell(null);
+  };
+
+  // Draggable Resizer Handler for Monaco Editor height
+  const handleMouseDownResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsDraggingResize(true);
+    const startY = e.clientY;
+    const startHeight = editorHeight;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const delta = moveEvent.clientY - startY;
+      const newHeight = Math.max(100, Math.min(650, startHeight + delta));
+      setEditorHeight(newHeight);
+    };
+
+    const handleMouseUp = () => {
+      setIsDraggingResize(false);
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+  };
 
   // Register or update Monaco Auto-completion Provider for SQL
   const setupCompletion = useCallback((monaco: Monaco) => {
@@ -545,9 +714,59 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
     monaco.editor.setTheme(theme === "dark" ? "dodb-dark" : "light");
     setupCompletion(monaco);
 
-    // Keyboard shortcut: Cmd/Ctrl + Enter to run
+    // Track text selection changes in editor
+    editor.onDidChangeCursorSelection(() => {
+      const sel = editor.getSelection();
+      const model = editor.getModel();
+      if (sel && model && !sel.isEmpty()) {
+        const text = model.getValueInRange(sel).trim();
+        setSelectedSql(text);
+        setSelectionInfo({
+          lines: Math.abs(sel.endLineNumber - sel.startLineNumber) + 1,
+          chars: text.length,
+        });
+      } else {
+        setSelectedSql("");
+        setSelectionInfo(null);
+      }
+    });
+
+    // Track cursor line & column
+    editor.onDidChangeCursorPosition((e) => {
+      setCursorPos({ line: e.position.lineNumber, column: e.position.column });
+    });
+
+    // Keyboard shortcut: Cmd/Ctrl + Enter to run selection or current query
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
-      handleRun();
+      handleRunSelectionOrCurrent();
+    });
+
+    // Keyboard shortcut: Cmd/Ctrl + Shift + Enter to run ALL statements
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Enter, () => {
+      handleRunAll();
+    });
+
+    // Right-Click Context Menu Actions in Editor
+    editor.addAction({
+      id: "run-selection-or-current",
+      label: "▶ Run Selection / Current Query (รันคำสั่งที่เลือก / ปัจจุบัน)",
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
+      contextMenuGroupId: "navigation",
+      contextMenuOrder: 1,
+      run: () => {
+        handleRunSelectionOrCurrent();
+      },
+    });
+
+    editor.addAction({
+      id: "run-all-queries",
+      label: "⚡ Run All Queries (รันคำสั่งทั้งหมด)",
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Enter],
+      contextMenuGroupId: "navigation",
+      contextMenuOrder: 2,
+      run: () => {
+        handleRunAll();
+      },
     });
   };
 
@@ -618,20 +837,85 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
         </div>
 
         <div className="bar-right">
-          <div className="hint-pill">
-            <Sparkles size={11} className="sparkle-icon" />
-            <span>Autocomplete active (Cmd+Enter to Run)</span>
-          </div>
+          {selectionInfo ? (
+            <div className="selection-active-badge">
+              <Sparkles size={11} className="sparkle-icon" />
+              <span>
+                Selection: {selectionInfo.lines} line{selectionInfo.lines > 1 ? "s" : ""} ({selectionInfo.chars} chars)
+              </span>
+              <button
+                className="btn-clear-sel"
+                onClick={() => {
+                  if (editorRef.current) {
+                    const pos = editorRef.current.getPosition();
+                    if (pos) editorRef.current.setPosition(pos);
+                  }
+                  setSelectedSql("");
+                  setSelectionInfo(null);
+                }}
+                title="Clear highlight selection"
+              >
+                <X size={10} />
+              </button>
+            </div>
+          ) : parsedStatements.length > 1 ? (
+            <div className="hint-pill">
+              <span className="statement-count-pill font-mono">
+                Query {currentStmtIndex >= 0 ? currentStmtIndex + 1 : 1} of {parsedStatements.length}
+              </span>
+              <span>(Highlight or Cmd+Enter to Run)</span>
+            </div>
+          ) : (
+            <div className="hint-pill">
+              <Sparkles size={11} className="sparkle-icon" />
+              <span>Highlight to run selection | Cmd+Enter to Run</span>
+            </div>
+          )}
 
-          <button className="btn btn-primary run-query-btn" onClick={handleRun} disabled={loading}>
-            <Play size={13} />
-            <span>{loading ? "Executing..." : "Run (Cmd + Enter)"}</span>
-          </button>
+          <div className="run-button-group">
+            <button
+              className={`btn btn-primary run-query-btn ${selectionInfo ? "has-selection" : ""}`}
+              onClick={handleRunSelectionOrCurrent}
+              disabled={loading}
+              title={
+                selectionInfo
+                  ? "Run highlighted text (Cmd + Enter)"
+                  : parsedStatements.length > 1
+                  ? `Run query #${currentStmtIndex >= 0 ? currentStmtIndex + 1 : 1} at cursor (Cmd + Enter)`
+                  : "Run SQL (Cmd + Enter)"
+              }
+            >
+              <Play size={13} fill={selectionInfo ? "currentColor" : "none"} />
+              <span>
+                {loading
+                  ? batchProgress
+                    ? `Running (${batchProgress.current}/${batchProgress.total})...`
+                    : "Executing..."
+                  : selectionInfo
+                  ? `Run Selection (${selectionInfo.lines}L)`
+                  : parsedStatements.length > 1
+                  ? `Run Current (#${currentStmtIndex >= 0 ? currentStmtIndex + 1 : 1})`
+                  : "Run (Cmd + Enter)"}
+              </span>
+            </button>
+
+            {(parsedStatements.length > 1 || (selectionInfo && splitSqlStatements(selectedSql).length > 1)) && (
+              <button
+                className="btn btn-secondary btn-run-all"
+                onClick={handleRunAll}
+                disabled={loading}
+                title="Run all queries in sequence (Cmd + Shift + Enter)"
+              >
+                <Zap size={12} className="zap-icon" />
+                <span>Run All ({parsedStatements.length})</span>
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
       {/* Monaco Code Editor */}
-      <div className="editor-container">
+      <div className="editor-container" style={{ height: editorHeight }}>
         <Editor
           height="100%"
           language="sql"
@@ -658,8 +942,63 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
         />
       </div>
 
+      {/* Draggable Resizer Bar */}
+      <div
+        className={`editor-resizer ${isDraggingResize ? "is-resizing" : ""}`}
+        onMouseDown={handleMouseDownResize}
+        onDoubleClick={() => setEditorHeight(200)}
+        title="Drag to resize SQL editor (Double-click to reset height)"
+      >
+        <div className="resizer-handle">
+          <GripHorizontal size={12} />
+        </div>
+      </div>
+
       {/* Results Section */}
       <div className="results-pane">
+        {/* Multi-Statement Result Tabs Bar */}
+        {statementResults.length > 1 && (
+          <div className="statement-tabs-bar">
+            <div className="tabs-list">
+              {statementResults.map((item, idx) => {
+                const isCurrent = activeResultTab === idx;
+                const hasErr = Boolean(item.result.error);
+                return (
+                  <button
+                    key={item.id || idx}
+                    className={`stmt-tab-btn ${isCurrent ? "active" : ""} ${hasErr ? "tab-error" : ""}`}
+                    onClick={() => switchResultTab(idx)}
+                    title={item.sql}
+                  >
+                    {hasErr ? (
+                      <AlertCircle size={11} className="tab-icon-err" />
+                    ) : (
+                      <CheckCircle2 size={11} className="tab-icon-ok" />
+                    )}
+                    <span className="stmt-tab-num font-mono">#{idx + 1}</span>
+                    <span className="stmt-tab-title font-mono">{getStatementSummary(item.sql, 28)}</span>
+                    <span className="stmt-tab-badge">
+                      {hasErr
+                        ? "Error"
+                        : typeof item.result.affectedRows === "number"
+                        ? `${item.result.affectedRows} aff`
+                        : `${item.result.rowsReturned ?? item.result.rows?.length ?? 0} rows`}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="tabs-summary font-mono">
+              <span>
+                {statementResults.filter((r) => !r.result.error).length}/{statementResults.length} executed
+              </span>
+              <span>
+                {statementResults.reduce((acc, r) => acc + (r.executionTimeMs || 0), 0)} ms
+              </span>
+            </div>
+          </div>
+        )}
+
         {result && (
           <div className="results-bar">
             <div className="results-bar-left">
@@ -1488,18 +1827,206 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
         }
         .sparkle-icon { color: #f59e0b; }
 
+        .selection-active-badge {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 10.5px;
+          font-weight: 600;
+          color: #3b82f6;
+          background: rgba(59, 130, 246, 0.12);
+          border: 1px solid rgba(59, 130, 246, 0.35);
+          padding: 3px 8px;
+          border-radius: 12px;
+          animation: pulse-selection 2s infinite ease-in-out;
+        }
+        @keyframes pulse-selection {
+          0%, 100% { border-color: rgba(59, 130, 246, 0.35); }
+          50% { border-color: rgba(59, 130, 246, 0.75); }
+        }
+        .btn-clear-sel {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: transparent;
+          border: none;
+          color: #3b82f6;
+          cursor: pointer;
+          padding: 2px;
+          border-radius: 50%;
+          transition: all 0.12s ease;
+        }
+        .btn-clear-sel:hover {
+          background: rgba(59, 130, 246, 0.2);
+          color: #60a5fa;
+        }
+        .statement-count-pill {
+          font-weight: 600;
+          color: var(--accent-blue);
+          background: rgba(59, 130, 246, 0.1);
+          padding: 1px 5px;
+          border-radius: 4px;
+          margin-right: 4px;
+        }
+
+        .run-button-group {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+
         .run-query-btn {
           padding: 5px 12px;
           height: 30px;
         }
+        .run-query-btn.has-selection {
+          background: #2563eb !important;
+          box-shadow: 0 0 10px rgba(37, 99, 235, 0.35);
+        }
+
+        .btn-run-all {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          padding: 5px 10px;
+          height: 30px;
+          font-size: 11px;
+        }
+        .zap-icon {
+          color: #f59e0b;
+        }
 
         .editor-container {
-          height: 200px;
-          min-height: 140px;
+          min-height: 100px;
+          max-height: 650px;
           background: #14171f;
-          border-bottom: 1px solid var(--border-light);
           position: relative;
           flex-shrink: 0;
+        }
+
+        /* Draggable Resizer Bar */
+        .editor-resizer {
+          height: 6px;
+          background: var(--bg-header);
+          border-top: 1px solid var(--border-light);
+          border-bottom: 1px solid var(--border-light);
+          cursor: row-resize;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          user-select: none;
+          transition: background 0.15s ease;
+          z-index: 10;
+          flex-shrink: 0;
+        }
+        .editor-resizer:hover, .editor-resizer.is-resizing {
+          background: var(--accent-blue);
+        }
+        .editor-resizer:hover .resizer-handle, .editor-resizer.is-resizing .resizer-handle {
+          color: #fff;
+        }
+        .resizer-handle {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: var(--text-muted);
+          opacity: 0.7;
+        }
+
+        /* Multi-Statement Result Tabs */
+        .statement-tabs-bar {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 5px 12px;
+          background: var(--bg-header);
+          border-bottom: 1px solid var(--border-light);
+          gap: 10px;
+          overflow-x: auto;
+          flex-shrink: 0;
+        }
+        .tabs-list {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          overflow-x: auto;
+          scrollbar-width: none;
+        }
+        .tabs-list::-webkit-scrollbar {
+          display: none;
+        }
+        .stmt-tab-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 3px 8px;
+          background: var(--bg-card);
+          border: 1px solid var(--border-light);
+          border-radius: var(--radius-xs);
+          color: var(--text-sub);
+          font-size: 11px;
+          cursor: pointer;
+          white-space: nowrap;
+          transition: all 0.12s ease;
+        }
+        .stmt-tab-btn:hover {
+          background: var(--bg-hover);
+          color: var(--text-main);
+          border-color: var(--border-medium);
+        }
+        .stmt-tab-btn.active {
+          background: var(--bg-tertiary);
+          color: var(--text-main);
+          border-color: var(--accent-blue);
+          box-shadow: 0 0 0 1px var(--accent-blue);
+          font-weight: 600;
+        }
+        .stmt-tab-btn.tab-error {
+          border-color: rgba(239, 68, 68, 0.4);
+        }
+        .stmt-tab-btn.tab-error.active {
+          border-color: #ef4444;
+          box-shadow: 0 0 0 1px #ef4444;
+        }
+        .tab-icon-ok {
+          color: var(--accent-green);
+        }
+        .tab-icon-err {
+          color: #f87171;
+        }
+        .stmt-tab-num {
+          font-weight: 600;
+          color: var(--text-muted);
+        }
+        .stmt-tab-btn.active .stmt-tab-num {
+          color: var(--accent-blue);
+        }
+        .stmt-tab-title {
+          font-size: 10.5px;
+          color: var(--text-main);
+          max-width: 150px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .stmt-tab-badge {
+          font-size: 9.5px;
+          padding: 1px 4px;
+          border-radius: 3px;
+          background: var(--bg-app);
+          color: var(--text-muted);
+          font-family: var(--font-mono);
+        }
+        .stmt-tab-btn.active .stmt-tab-badge {
+          background: var(--bg-card);
+          color: var(--text-sub);
+        }
+        .tabs-summary {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 10px;
+          color: var(--text-muted);
+          white-space: nowrap;
         }
 
         .results-pane {
