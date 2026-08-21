@@ -11,6 +11,10 @@ The name **dodb** comes from the Thai pronunciation of “do,” meaning **“to
 
 It represents what dodb is about: **See the data. See the structure. See what is happening.**
 
+<p align="center">
+  <img src="docs/screenshot/inline_editor.png" alt="dodb Data Explorer and Inline Editor" width="100%" />
+</p>
+
 ---
 
 ## Why dodb?
@@ -29,9 +33,18 @@ dodb focuses on the core tasks developers actually do with databases:
 
 ---
 
-## Features
+## Features & Screenshots
 
-### Interactive Data Explorer
+### Connection Management & Profiles
+Save and organize database connections with encrypted credentials (AES-256-GCM), group profiles, and single-click connect.
+
+<p align="center">
+  <img src="docs/screenshot/connection_group.png" alt="Connection Management" width="100%" />
+</p>
+
+---
+
+### Interactive Data Explorer & Inline Editing
 * **Virtual Data Grid** — Smooth scrolling across thousands of records with pagination support.
 * **Database-Aware Cell Badges** — Distinct badges for DateTime, Booleans, JSON, Binary/BLOB, Enums, UUIDs, Primary Keys, and Spatial GIS geometries.
 * **Inline Cell Editing** — Edit values directly with double-click and review changes before committing.
@@ -39,33 +52,63 @@ dodb focuses on the core tasks developers actually do with databases:
 * **Advanced Filters & Sorting** — Multi-column sorting with rich operators (`equals`, `contains`, `startsWith`, `endsWith`, `gt`, `gte`, `lt`, `lte`, `isNull`, `isNotNull`).
 * **Search & Export** — Export table data to CSV, JSON, and SQL `INSERT` statements.
 
-### Searchable Detailed Inspector & Context Menu
-* Right-click any row to inspect fields in full-screen modal with instant search and JSON view.
-* Modal record editor with NULL toggles and auto-increment handling.
-* 1-click duplicate row and fast clipboard export.
-* View spatial geometry directly on the interactive map.
+<p align="center">
+  <img src="docs/screenshot/inline_editor.png" alt="Interactive Data Explorer" width="100%" />
+</p>
+
+---
 
 ### GIS & Spatial Data Support (MapLibre GL)
 * **Engines Supported** — PostGIS (`geometry`, `geography`), MySQL Spatial (`GEOMETRY`, `POINT`, `POLYGON`, etc.), and SpatiaLite.
-* **Formats Supported** — Automatically parses WKT (Well-Known Text), GeoJSON, and EWKB/WKB Hex binary formats.
+* **Universal Format Parser** — Automatically recognizes and decodes WKT (Well-Known Text), GeoJSON, and EWKB/WKB Hex binary formats.
 * **Interactive Map Viewer**:
   * Vector & raster map rendering with Dark Matter, Positron Light, OpenStreetMap, and Satellite basemaps.
   * Spatial feature inspector & table-wide multi-feature rendering.
   * Interactive coordinate picker for inserting or editing geometries.
   * Export spatial layers to standard `.geojson` files.
 
-### Monaco SQL Console
+<p align="center">
+  <img src="docs/screenshot/gis_viewer.png" alt="GIS and Spatial Map Viewer" width="100%" />
+</p>
+
+---
+
+### Monaco SQL Console & Auto-Completion
 * **Monaco Editor** with intelligent auto-completion for tables, columns, keywords, and SQL functions.
 * **Run Selection (Highlight to Run)** — Highlight any SQL query and run only the selected text with `Cmd + Enter`.
 * **Multi-Statement Engine** — Sequentially execute multi-statement SQL scripts with separate result tabs.
 * **Draggable Resizer** — Adjust editor pane height dynamically.
 * **Execution Metrics** — Real-time execution duration, returned rows, and affected rows indicators.
 
+<p align="center">
+  <img src="docs/screenshot/autocomplete.png" alt="Monaco SQL Console and Autocomplete" width="100%" />
+</p>
+
+---
+
 ### Visual Schema & ER Diagram
 * **Interactive Node Graph** powered by `@xyflow/react` to visualize tables, column types, and foreign key relationships.
 * **Multi-directional Handles** for clean edge routing and relationship alignment.
 * **Interactive Search & Relation Highlighting** — Highlight connected tables and foreign keys on click.
 * **Auto Layout** — Organizes tables into clean topology columns.
+
+<p align="center">
+  <img src="docs/screenshot/erd.png" alt="Visual Schema and ER Diagram" width="100%" />
+</p>
+
+---
+
+### Searchable Detailed Inspector & JSON View / Export
+* Right-click any row to inspect fields in full-screen modal with instant search and formatted JSON view.
+* Modal record editor with NULL toggles and auto-increment handling.
+* 1-click duplicate row and fast clipboard export (JSON, CSV, SQL INSERT).
+* View spatial geometry directly on the interactive map.
+
+<p align="center">
+  <img src="docs/screenshot/json_view_export.png" alt="Detailed Record Inspector and JSON View" width="100%" />
+</p>
+
+---
 
 ### Table Structure & Visual Designer
 * Create new tables or alter existing schemas visually.
