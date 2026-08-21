@@ -22,13 +22,14 @@ import { apiClient } from "../utils/apiClient";
 import { auditLogger } from "../utils/auditLogger";
 import { dumpManager, DumpProgress } from "../utils/dumpManager";
 
-const APP_VERSION = "1.0.0";
+const DEFAULT_APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION || "0.1.0";
 const SESSION_ID_PREFIX = "session-";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:5820/api";
 
 
 export default function Home() {
+  const [appVersion, setAppVersion] = useState<string>(DEFAULT_APP_VERSION);
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [activeView, setActiveView] = useState<"explorer" | "sql" | "admin" | "diagram">("explorer");
 
@@ -90,6 +91,20 @@ export default function Home() {
 
     mediaQuery.addEventListener("change", handleChange);
     return () => mediaQuery.removeEventListener("change", handleChange);
+  }, []);
+
+  // Dynamically load Tauri version at runtime if running in desktop app
+  useEffect(() => {
+    const loadVersion = async () => {
+      try {
+        const { getVersion } = await import("@tauri-apps/api/app");
+        const v = await getVersion();
+        if (v) setAppVersion(v);
+      } catch {
+        // Fallback to build-time process.env.NEXT_PUBLIC_APP_VERSION
+      }
+    };
+    loadVersion();
   }, []);
 
   // Subscribe to background dump progress & notify
@@ -1024,7 +1039,7 @@ export default function Home() {
 
         <footer className="app-footer">
           <div className="footer-left">
-            <span className="footer-version">dodb v{APP_VERSION}</span>
+            <span className="footer-version">dodb v{appVersion}</span>
             <span className="footer-dot">•</span>
             <span className="footer-status">
               DB Engine: {activeProfile ? activeProfile.type.toUpperCase() : "Offline"}
