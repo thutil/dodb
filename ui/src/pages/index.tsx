@@ -862,6 +862,7 @@ export default function Home() {
                 columns={columns}
                 theme={theme}
                 onExecuteSql={handleExecuteSql}
+                onCommitChanges={handleCommitChanges}
               />
 
             ) : activeView === "diagram" ? (
