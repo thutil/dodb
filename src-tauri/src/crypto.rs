@@ -9,6 +9,7 @@ use sha2::Sha256;
 use std::env;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use dirs::home_dir;
 
 #[cfg(unix)]
@@ -18,6 +19,10 @@ const SALT: &[u8] = b"dodb-per-device-salt-v2";
 const LEGACY_SALT: &[u8] = b"dodb-salt-salt-v1";
 const ITERATIONS: u32 = 100000;
 const KEY_LENGTH: usize = 32;
+
+static CACHED_SECRET: OnceLock<String> = OnceLock::new();
+static CACHED_CURRENT_KEY: OnceLock<[u8; KEY_LENGTH]> = OnceLock::new();
+static CACHED_LEGACY_KEY: OnceLock<[u8; KEY_LENGTH]> = OnceLock::new();
 
 /// Resolves the storage path for the per-device master key
 fn get_master_key_path() -> PathBuf {
@@ -29,55 +34,59 @@ fn get_master_key_path() -> PathBuf {
 }
 
 /// Retrieves or securely generates a unique per-device 256-bit master secret key.
-/// Never hardcoded in source code or committed to GitHub.
+/// Cached in memory via OnceLock for thread-safety, speed, and consistency.
 fn get_secret() -> String {
-    // 1. Check if an environment variable override is set (useful for CI / tests / custom deployments)
-    if let Ok(env_key) = env::var("DODB_ENCRYPTION_KEY") {
-        if !env_key.trim().is_empty() {
-            return env_key.trim().to_string();
-        }
-    }
-    if let Ok(env_key) = env::var("ENCRYPTION_KEY") {
-        if !env_key.trim().is_empty() {
-            return env_key.trim().to_string();
-        }
-    }
-
-    // 2. Read existing per-device master key file
-    let key_path = get_master_key_path();
-    if key_path.exists() {
-        if let Ok(content) = fs::read_to_string(&key_path) {
-            let trimmed = content.trim();
-            if !trimmed.is_empty() {
-                return trimmed.to_string();
+    CACHED_SECRET
+        .get_or_init(|| {
+            // 1. Check if an environment variable override is set (useful for CI / tests / custom deployments)
+            if let Ok(env_key) = env::var("DODB_ENCRYPTION_KEY") {
+                if !env_key.trim().is_empty() {
+                    return env_key.trim().to_string();
+                }
             }
-        }
-    }
-
-    // 3. Generate a new high-entropy 256-bit cryptographically secure random key
-    let mut raw_bytes = [0u8; 32];
-    rand::rng().fill(&mut raw_bytes);
-    let new_key_hex = hex::encode(raw_bytes);
-
-    // Ensure parent directory exists (~/.dodb)
-    if let Some(parent) = key_path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-
-    // Write key file
-    if let Ok(()) = fs::write(&key_path, &new_key_hex) {
-        // Set strict file permissions (chmod 600 - Owner Read/Write only) on macOS/Linux
-        #[cfg(unix)]
-        {
-            if let Ok(metadata) = fs::metadata(&key_path) {
-                let mut perms = metadata.permissions();
-                perms.set_mode(0o600);
-                let _ = fs::set_permissions(&key_path, perms);
+            if let Ok(env_key) = env::var("ENCRYPTION_KEY") {
+                if !env_key.trim().is_empty() {
+                    return env_key.trim().to_string();
+                }
             }
-        }
-    }
 
-    new_key_hex
+            // 2. Read existing per-device master key file
+            let key_path = get_master_key_path();
+            if key_path.exists() {
+                if let Ok(content) = fs::read_to_string(&key_path) {
+                    let trimmed = content.trim();
+                    if !trimmed.is_empty() {
+                        return trimmed.to_string();
+                    }
+                }
+            }
+
+            // 3. Generate a new high-entropy 256-bit cryptographically secure random key
+            let mut raw_bytes = [0u8; 32];
+            rand::rng().fill(&mut raw_bytes);
+            let new_key_hex = hex::encode(raw_bytes);
+
+            // Ensure parent directory exists (~/.dodb)
+            if let Some(parent) = key_path.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+
+            // Write key file
+            if let Ok(()) = fs::write(&key_path, &new_key_hex) {
+                // Set strict file permissions (chmod 600 - Owner Read/Write only) on macOS/Linux
+                #[cfg(unix)]
+                {
+                    if let Ok(metadata) = fs::metadata(&key_path) {
+                        let mut perms = metadata.permissions();
+                        perms.set_mode(0o600);
+                        let _ = fs::set_permissions(&key_path, perms);
+                    }
+                }
+            }
+
+            new_key_hex
+        })
+        .clone()
 }
 
 /// Derives a 32-byte AES-256 key from a secret string and salt using PBKDF2-HMAC-SHA256
@@ -87,15 +96,19 @@ fn derive_key(secret: &str, salt: &[u8]) -> [u8; KEY_LENGTH] {
     key
 }
 
-/// Derives the current device's active encryption key
+/// Derives the current device's active encryption key (cached in memory)
 fn get_current_key() -> [u8; KEY_LENGTH] {
-    let secret = get_secret();
-    derive_key(&secret, SALT)
+    *CACHED_CURRENT_KEY.get_or_init(|| {
+        let secret = get_secret();
+        derive_key(&secret, SALT)
+    })
 }
 
-/// Derives the legacy static key for backward-compatibility auto-migration
+/// Derives the legacy static key for backward-compatibility auto-migration (cached in memory)
 fn get_legacy_key() -> [u8; KEY_LENGTH] {
-    derive_key("dodb-mac-secure-master-key-v1", LEGACY_SALT)
+    *CACHED_LEGACY_KEY.get_or_init(|| {
+        derive_key("dodb-mac-secure-master-key-v1", LEGACY_SALT)
+    })
 }
 
 /// Encrypts plain text password using AES-256-GCM with a unique 12-byte CSPRNG IV
@@ -205,6 +218,13 @@ mod tests {
 
         let decrypted = decrypt_password(&encrypted);
         assert_eq!(decrypted, password);
+    }
+
+    #[test]
+    fn test_empty_and_passthrough() {
+        assert_eq!(encrypt_password(""), "");
+        assert_eq!(decrypt_password(""), "");
+        assert_eq!(decrypt_password("plain_password_not_enc"), "plain_password_not_enc");
     }
 
     #[test]
