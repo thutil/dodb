@@ -1,71 +1,67 @@
 # dodb
 
-**A native database manager for macOS.**
-
-> **dodb — “ดู DB”**
-> *See your data. Understand your database.*
-
-dodb is a modern, native macOS database manager built around a simple idea: **working with a database should start with seeing it clearly.**
-
-The name **dodb** comes from the Thai pronunciation of “do,” meaning **“to see”**, combined with **DB** for database.
-
-It represents what dodb is about: **See the data. See the structure. See what is happening.**
+<p align="center">
+  <img src="docs/screenshot/visual-query.png" alt="dodb Visual SQL Query Builder" width="100%" />
+</p>
 
 <p align="center">
-  <img src="docs/screenshot/inline_editor.png" alt="dodb Data Explorer and Inline Editor" width="100%" />
+  <strong>A modern, native database manager for macOS with Visual Query Builder, PostGIS Maps, and ER Diagrams.</strong>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Platform-macOS%20(Apple%20Silicon%20%26%20Intel)-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Platform macOS" />
+  <img src="https://img.shields.io/badge/Tauri-v2-24C8D8?style=for-the-badge&logo=tauri&logoColor=white" alt="Tauri 2" />
+  <img src="https://img.shields.io/badge/Rust-SQLx-DEA584?style=for-the-badge&logo=rust&logoColor=white" alt="Rust" />
+  <img src="https://img.shields.io/badge/Next.js-16%20Turbopack-000000?style=for-the-badge&logo=next.js&logoColor=white" alt="Next.js" />
+  <img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="License MIT" />
+</p>
+
+> **dodb — “ดู DB”** _(Doo DB)_  
+> _See your data. Understand your database. Build queries visually._
+
+**dodb** is a blazing-fast, lightweight native macOS database client built around a core philosophy: **working with a database should start with seeing it clearly.**
+
+No bloated Java runtimes, no slow Electron shells, and no hidden cloud proxies. Just pure Rust performance, crisp macOS aesthetics, and modern visual workflow tools.
+
+---
+
+## ✨ Key Highlights
+
+- 🎨 **Visual SQL Query Builder** — Compose complex SQL queries visually on an interactive canvas with table cards, drag-and-drop JOIN connections, and smart WHERE filter blocks.
+- 🗺️ **GIS & Spatial Map Viewer** — Native PostGIS, MySQL Spatial, and SpatiaLite viewer powered by MapLibre GL with offline tile caching and coordinate picker.
+- 🕸️ **Visual ER Diagrams** — Auto-generated entity relationship diagrams with foreign key topology and relationship highlighting.
+- ⚡ **Monaco SQL Console** — Full-featured code editor with smart autocomplete, highlight-to-run (`Cmd + Enter`), and multi-tab results.
+- 📝 **Virtual DataGrid & Inline Editing** — Instant double-click edits, staged transactional mutation bar, multi-select rows (`Cmd + Click`), and batch actions.
+- 🔒 **Local & Direct Connection** — Direct socket connection with local AES-256-GCM encryption for stored credentials. Zero telemetry.
+
+---
+
+## 📸 Features & Walkthrough
+
+### 1. Visual SQL Query Builder (Interactive Canvas)
+
+Design complex SQL queries visually without writing raw SQL by hand.
+
+- **Canvas Table Cards** — Drag & drop tables onto the canvas, select/deselect columns in `SELECT`, and inspect types.
+- **Visual JOIN Cables** — Connect columns between tables with interactive animated cables supporting `INNER`, `LEFT`, `RIGHT`, and `FULL OUTER` joins.
+- **Smart Auto-Join Suggestion** — Automatically detects matching primary and foreign keys to suggest joins.
+- **Connected WHERE Filter Blocks** — Docked filter nodes linked directly to table columns with rich operators (`=`, `!=`, `>`, `<`, `LIKE`, `IN`, `IS NULL`).
+- **Bi-directional SQL Synchronization** — Generates clean, formatted SQL in real time. Execute directly or send to Monaco Console with 1-click.
+
+<p align="center">
+  <img src="docs/screenshot/visual-query.png" alt="dodb Visual SQL Query Builder" width="100%" />
 </p>
 
 ---
 
-## Why dodb?
+### 2. GIS & Spatial Data Explorer (MapLibre GL)
 
-Database tools often become complicated as more features are added.
+First-class support for spatial databases with zero external GIS software required.
 
-dodb focuses on the core tasks developers actually do with databases:
-
-* Connect & Inspect
-* Explore & Inline Edit
-* Query with Monaco Editor & Run Selected Text
-* Visualize Schemas (ER Diagram) & Spatial GIS Data (MapLibre GL)
-* Audit, Dump & Commit Transactions
-
-**No unnecessary clutter. No artificial complexity. Just your database.**
-
----
-
-## Features & Screenshots
-
-### Connection Management & Profiles
-Save and organize database connections with encrypted credentials (AES-256-GCM), group profiles, and single-click connect.
-
-<p align="center">
-  <img src="docs/screenshot/connection_group.png" alt="Connection Management" width="100%" />
-</p>
-
----
-
-### Interactive Data Explorer & Inline Editing
-* **Virtual Data Grid** — Smooth scrolling across thousands of records with pagination support.
-* **Database-Aware Cell Badges** — Distinct badges for DateTime, Booleans, JSON, Binary/BLOB, Enums, UUIDs, Primary Keys, and Spatial GIS geometries.
-* **Inline Cell Editing** — Edit values directly with double-click and review changes before committing.
-* **Transactional Staging Bar** — Staged mutations (Insert, Update, Delete) with diff review and atomic rollback.
-* **Advanced Filters & Sorting** — Multi-column sorting with rich operators (`equals`, `contains`, `startsWith`, `endsWith`, `gt`, `gte`, `lt`, `lte`, `isNull`, `isNotNull`).
-* **Search & Export** — Export table data to CSV, JSON, and SQL `INSERT` statements.
-
-<p align="center">
-  <img src="docs/screenshot/inline_editor.png" alt="Interactive Data Explorer" width="100%" />
-</p>
-
----
-
-### GIS & Spatial Data Support (MapLibre GL)
-* **Engines Supported** — PostGIS (`geometry`, `geography`), MySQL Spatial (`GEOMETRY`, `POINT`, `POLYGON`, etc.), and SpatiaLite.
-* **Universal Format Parser** — Automatically recognizes and decodes WKT (Well-Known Text), GeoJSON, and EWKB/WKB Hex binary formats.
-* **Interactive Map Viewer**:
-  * Vector & raster map rendering with Dark Matter, Positron Light, OpenStreetMap, and Satellite basemaps.
-  * Spatial feature inspector & table-wide multi-feature rendering.
-  * Interactive coordinate picker for inserting or editing geometries.
-  * Export spatial layers to standard `.geojson` files.
+- **Engines Supported** — PostgreSQL/PostGIS (`geometry`, `geography`), MySQL Spatial (`POINT`, `POLYGON`, etc.), and SpatiaLite.
+- **Universal Decoding** — Automatically parses WKT, GeoJSON, and EWKB/WKB Hex binary geometries.
+- **Multi-Basemap & Tile Caching** — Fast offline raster tile caching with Dark Matter, Light Positron, OpenStreetMap, and Esri Satellite layers.
+- **Coordinate Picker & Export** — Click anywhere on the map to pick coordinates or export features to standard `.geojson` files.
 
 <p align="center">
   <img src="docs/screenshot/gis_viewer.png" alt="GIS and Spatial Map Viewer" width="100%" />
@@ -73,24 +69,13 @@ Save and organize database connections with encrypted credentials (AES-256-GCM),
 
 ---
 
-### Monaco SQL Console & Auto-Completion
-* **Monaco Editor** with intelligent auto-completion for tables, columns, keywords, and SQL functions.
-* **Run Selection (Highlight to Run)** — Highlight any SQL query and run only the selected text with `Cmd + Enter`.
-* **Multi-Statement Engine** — Sequentially execute multi-statement SQL scripts with separate result tabs.
-* **Draggable Resizer** — Adjust editor pane height dynamically.
-* **Execution Metrics** — Real-time execution duration, returned rows, and affected rows indicators.
+### 3. Visual Schema & ER Diagram
 
-<p align="center">
-  <img src="docs/screenshot/autocomplete.png" alt="Monaco SQL Console and Autocomplete" width="100%" />
-</p>
+Understand relationships across your entire database instantly.
 
----
-
-### Visual Schema & ER Diagram
-* **Interactive Node Graph** powered by `@xyflow/react` to visualize tables, column types, and foreign key relationships.
-* **Multi-directional Handles** for clean edge routing and relationship alignment.
-* **Interactive Search & Relation Highlighting** — Highlight connected tables and foreign keys on click.
-* **Auto Layout** — Organizes tables into clean topology columns.
+- **Interactive Node Graph** — Powered by `@xyflow/react` to render tables, columns, and foreign key relationships.
+- **Multi-directional Routing** — Clean, collision-free edge paths.
+- **Search & Highlight** — Search tables and highlight connected foreign key links on click.
 
 <p align="center">
   <img src="docs/screenshot/erd.png" alt="Visual Schema and ER Diagram" width="100%" />
@@ -98,11 +83,41 @@ Save and organize database connections with encrypted credentials (AES-256-GCM),
 
 ---
 
-### Searchable Detailed Inspector & JSON View / Export
-* Right-click any row to inspect fields in full-screen modal with instant search and formatted JSON view.
-* Modal record editor with NULL toggles and auto-increment handling.
-* 1-click duplicate row and fast clipboard export (JSON, CSV, SQL INSERT).
-* View spatial geometry directly on the interactive map.
+### 4. Monaco SQL Console & Intelligent Autocomplete
+
+Write and execute raw SQL with IDE-grade tools.
+
+- **Monaco Editor** — Powered by VS Code's editor engine with schema-aware autocompletion for tables, columns, keywords, and SQL functions.
+- **Highlight to Run** — Highlight any SQL query segment and execute only that text with `Cmd + Enter`.
+- **Multi-Statement Engine** — Sequentially execute multi-statement SQL scripts with separate result tabs.
+- **Execution Metrics** — Real-time query execution duration and affected row indicators.
+
+<p align="center">
+  <img src="docs/screenshot/autocomplete.png" alt="Monaco SQL Console and Autocomplete" width="100%" />
+</p>
+
+---
+
+### 5. Interactive DataGrid & Transactional Staging
+
+Explore and edit database records with safety and speed.
+
+- **Virtual Data Grid** — Smooth 60fps scrolling across large datasets.
+- **Cell Badges** — Distinct badges for DateTime, Booleans, JSON, Binary/BLOB, Enums, UUIDs, Primary Keys, and Spatial Geometries.
+- **Transactional Staging Bar** — Review staged mutations (Insert, Update, Delete) with diff review and atomic rollback before committing.
+- **Multi-Select & Batch Operations** — Select multiple rows or index ranges with `Cmd/Ctrl + Click` or `Shift + Click` for batch deletion or clipboard export.
+
+<p align="center">
+  <img src="docs/screenshot/inline_editor.png" alt="Interactive Data Explorer" width="100%" />
+</p>
+
+---
+
+### 6. Detailed Inspector & JSON View / Export
+
+- Right-click any row to inspect fields in full-screen modal with instant search and formatted JSON view.
+- Modal record editor with NULL toggles and auto-increment handling.
+- Fast export to JSON, CSV, and SQL `INSERT` statements.
 
 <p align="center">
   <img src="docs/screenshot/json_view_export.png" alt="Detailed Record Inspector and JSON View" width="100%" />
@@ -110,142 +125,112 @@ Save and organize database connections with encrypted credentials (AES-256-GCM),
 
 ---
 
-### Table Structure & Visual Designer
-* Create new tables or alter existing schemas visually.
-* Column editor with type suggestions, nullability, defaults, primary keys, and auto-increment.
-* DDL Preview & Verification before executing destructive schema changes.
+### 7. Profile & Connection Management
 
-### Database Administration & Monitoring
-* Server engine info, uptime, and connection metrics.
-* Process & connection monitor with rogue query termination (`Kill Process`).
-* Database and table storage metrics.
+- Save and organize database connections with color tags and environment groups.
+- Direct socket connections with local AES-256-GCM encryption for stored credentials.
 
-### Audit Log & Action Trail
-* Comprehensive local audit logging for all queries, mutations, DDL executions, and connection events.
-* Filter by status, profile, action type, and date range.
+<p align="center">
+  <img src="docs/screenshot/connection_group.png" alt="Connection Management" width="100%" />
+</p>
 
 ---
 
-## Supported Database Engines
+## 🗄️ Supported Database Engines
 
-| Engine | Version | Spatial / GIS Support |
-| :--- | :--- | :--- |
-| **PostgreSQL** | 10+ / 14 / 15 / 16 / 17 | PostGIS (`geometry`, `geography`, WKT, EWKB) |
-| **MySQL** | 5.7 / 8.0+ | MySQL Spatial (`GEOMETRY`, `POINT`, `POLYGON`, etc.) |
-| **MariaDB** | 10.3+ | MariaDB Spatial |
-| **SQLite** | 3.x | SpatiaLite & WKT / GeoJSON |
-
----
-
-## Architecture
-
-| Layer | Technology |
-| :--- | :--- |
-| Desktop Shell | Tauri 2 |
-| Frontend | Next.js 16 · React 19 |
-| Map Engine | MapLibre GL |
-| Diagram Engine | React Flow (xyflow) |
-| Editor | Monaco Editor |
-| Application Core | Rust · Tokio |
-| Database Access | SQLx |
-| Communication | Tauri IPC |
-| Platform | macOS (Apple Silicon & Intel) |
-
-### Privacy & Security
-* **Direct Socket Connections** — Connections are established directly from your machine to your database.
-* **Zero Telemetry / No Cloud Proxy** — Credentials, schemas, and records are never transmitted to third-party servers.
-* **Encrypted Storage** — Connection passwords and sensitive metadata are encrypted locally using AES-256-GCM.
+| Engine         | Supported Versions              | Spatial / GIS Capabilities                           |
+| :------------- | :------------------------------ | :--------------------------------------------------- |
+| **PostgreSQL** | 10, 11, 12, 13, 14, 15, 16, 17+ | PostGIS (`geometry`, `geography`, WKT, EWKB)         |
+| **MySQL**      | 5.7, 8.0, 8.4, 9.0+             | MySQL Spatial (`GEOMETRY`, `POINT`, `POLYGON`, etc.) |
+| **MariaDB**    | 10.3, 10.5, 10.11, 11.x+        | MariaDB Spatial Types                                |
+| **SQLite**     | 3.x                             | SpatiaLite & WKT / GeoJSON                           |
 
 ---
 
-## macOS Installation & Security Notice (Unsigned App Fix)
+## 🛠️ Architecture & Tech Stack
 
-When downloading pre-built `.dmg` or `.app` releases from GitHub without Apple Developer ID notarization, macOS Gatekeeper may display security warnings:
+```
+dodb/
+├── src-tauri/          # High-performance native Rust core
+│   ├── src/            # Database drivers (SQLx), encrypted storage, IPC
+│   └── Cargo.toml
+└── ui/                 # Modern Next.js frontend
+    ├── src/components/ # Visual Query Builder, MapLibre GIS, Monaco Console, DataGrid
+    └── src/pages/
+```
 
-* *“dodb is damaged and can’t be opened. You should move it to the Trash.”*
-* *“dodb cannot be opened because the developer cannot be verified.”*
-* *“Apple could not verify that dodb is free of malware.”*
+- **Desktop Shell**: Tauri 2 (Lightweight, low memory footprint, native WebKit)
+- **Application Core**: Rust · Tokio · SQLx (Direct async pooling)
+- **Visual Canvas**: `@xyflow/react` (React Flow)
+- **Map Engine**: MapLibre GL + Custom Offline Tile Cache Protocol
+- **Editor**: Monaco Editor
+- **UI Framework**: Next.js 16 (Turbopack) · React 19 · CSS Design System
 
-### วิธีแก้ไข / How to open unsigned app on macOS:
+---
 
-#### Method 1: Terminal (Recommended / แนะนำ)
-After moving `dodb.app` to `/Applications`, open **Terminal** (`Terminal.app`) and run:
+## 🍏 macOS Installation & Gatekeeper Fix
+
+When opening downloaded `.dmg` or `.app` releases on macOS without Apple Developer ID notarization, Gatekeeper may display a security prompt:
+
+### วิธีแก้ไข / Quick Fix:
+
+**Method 1: Terminal (Recommended / แนะนำ)**  
+After copying `dodb.app` into `/Applications`, open **Terminal** and run:
 
 ```bash
 xattr -cr /Applications/dodb.app
 ```
 
-Or remove the quarantine attribute specifically:
-
-```bash
-xattr -d com.apple.quarantine /Applications/dodb.app
-```
-
 Then launch **dodb** normally from Applications or Spotlight (`Cmd + Space`).
 
----
+**Method 2: Right-Click Open**
 
-#### Method 2: Right-Click Open (คลิกขวาเพื่อเปิด)
-1. Open **Finder** and navigate to `/Applications`.
+1. Open **Finder** → `/Applications`.
 2. **Right-click** (or `Control + Click`) on **dodb.app**.
-3. Click **Open** from the context menu.
-4. Click **Open** in the confirmation dialog.
+3. Click **Open** and confirm in the dialog.
 
 ---
 
-#### Method 3: System Settings (การตั้งค่าระบบ)
-1. Open **System Settings** (การตั้งค่าระบบ).
-2. Go to **Privacy & Security** (ความเป็นส่วนตัวและความปลอดภัย).
-3. Scroll down to the **Security** (ความปลอดภัย) section.
-4. Click **Open Anyway** (เปิดต่อไป) next to the message stating *“dodb was blocked from use because it is not from an identified developer”*.
-
----
-
-## Getting Started (Development)
+## 💻 Development & Building
 
 ### Prerequisites
-* macOS 11.0 or later (Apple Silicon or Intel)
-* Rust toolchain (`rustc`, `cargo`): `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
-* Node.js 18+ and pnpm 8+: `npm install -g pnpm`
 
-### Clone & Install
+- macOS 11.0+ (Apple Silicon `aarch64` or Intel `x86_64`)
+- Rust Toolchain: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
+- Node.js 18+ and `pnpm`: `npm install -g pnpm`
+
+### Start Development Server
 
 ```bash
+# Clone the repository
 git clone https://github.com/bankjirapan/dodb.git
 cd dodb
+
+# Install dependencies
 pnpm install
-```
 
-### Start Development Mode
-
-```bash
+# Start development app (UI + Tauri)
 pnpm dev
 ```
 
----
-
-## Production Build
-
-To build the optimized `.app` bundle and `.dmg` installer:
+### Build Production Release (.dmg & .app)
 
 ```bash
-pnpm tauri build
+pnpm build
 ```
 
-Generated artifacts:
-* `src-tauri/target/release/bundle/macos/dodb.app`
-* `src-tauri/target/release/bundle/dmg/dodb_<version>_<arch>.dmg`
+The compiled bundles will be generated under `src-tauri/target/release/bundle/dmg/` and `src-tauri/target/release/bundle/macos/`.
 
 ---
 
-## License
+## 📄 License
 
-dodb is open source software distributed under the [MIT License](LICENSE).
+dodb is open-source software licensed under the [MIT License](LICENSE).
 
 ---
 
-## Made by thutil
-
-Designed and developed by **thutil**.
-
-**dodb — See your data. Understand your database.**
+<p align="center">
+  Crafted with ❤️ by <strong>thutil</strong>
+  <br />
+  <strong>dodb — See your data. Understand your database.</strong>
+</p>
