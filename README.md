@@ -1,8 +1,8 @@
-# dodb
-
 <p align="center">
-  <img src="docs/screenshot/visual-query.png" alt="dodb Visual SQL Query Builder" width="100%" />
+  <img src="assets/icon.png" alt="dodb Icon" width="96" />
 </p>
+
+<h1 align="center">dodb</h1>
 
 <p align="center">
   <strong>A modern, native database manager for macOS with Visual Query Builder, PostGIS Maps, and ER Diagrams.</strong>
@@ -14,6 +14,10 @@
   <img src="https://img.shields.io/badge/Rust-SQLx-DEA584?style=for-the-badge&logo=rust&logoColor=white" alt="Rust" />
   <img src="https://img.shields.io/badge/Next.js-16%20Turbopack-000000?style=for-the-badge&logo=next.js&logoColor=white" alt="Next.js" />
   <img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="License MIT" />
+</p>
+
+<p align="center">
+  <img src="docs/screenshot/visual-query.png" alt="dodb Visual SQL Query Builder" width="100%" />
 </p>
 
 > **dodb — “ดู DB”** _(Doo DB)_  

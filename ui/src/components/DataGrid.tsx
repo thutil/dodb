@@ -100,7 +100,7 @@ interface DataGridProps {
   page: number;
   pageSize: number;
   onPageChange: (newPage: number) => void;
-  onRefresh: () => void;
+  onRefresh: (isSilent?: boolean) => void;
   onCommitChanges: (changes: PendingChanges) => Promise<CommitResult>;
   sortColumn?: string | null;
   sortOrder?: "ASC" | "DESC";
@@ -485,7 +485,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
             )}
             <button
               className="btn btn-secondary refresh-btn"
-              onClick={onRefresh}
+              onClick={() => onRefresh()}
               title="Refresh database tables"
             >
               <RefreshCw size={13} />
@@ -828,9 +828,8 @@ export const DataGrid: React.FC<DataGridProps> = ({
         setNewRows([]);
         setDeletedRowKeys(new Set());
 
-        // Always re-read from the database. Patching rows locally used to hide a
-        // commit that matched nothing until the user hit refresh themselves.
-        onRefresh();
+        // Perform silent background refresh so the entire table does NOT flicker or reset
+        onRefresh(true);
       } else {
         setCommitMsg({ success: false, text: res.error || "Commit failed, transaction rolled back" });
       }
@@ -1149,7 +1148,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
           </div>
           <button
             className="btn btn-secondary refresh-table-btn"
-            onClick={onRefresh}
+            onClick={() => onRefresh()}
             disabled={loading}
             title="Reload table records from database"
           >
@@ -1447,7 +1446,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                         <AlertCircle size={22} />
                         <span style={{ fontSize: "12px", fontWeight: 600 }}>Database Query Error</span>
                         <span style={{ fontSize: "11px", color: "var(--text-muted)", maxWidth: "480px" }}>{errorMessage}</span>
-                        <button className="btn btn-secondary btn-sm" onClick={onRefresh} style={{ marginTop: "4px" }}>
+                        <button className="btn btn-secondary btn-sm" onClick={() => onRefresh()} style={{ marginTop: "4px" }}>
                           <RefreshCw size={11} />
                           <span>Retry</span>
                         </button>

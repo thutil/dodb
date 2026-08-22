@@ -65,6 +65,7 @@ import {
 } from "../types";
 import { apiClient } from "../utils/apiClient";
 import { buildVisualSql, VisualTableSelection, findSmartJoinMatch, parseSqlToVisual } from "../utils/visualSqlBuilder";
+import { quoteIdent, quoteTableIdent } from "../utils/ddlBuilder";
 import { isGeometryColumn } from "../utils/gisUtils";
 import { PendingChanges, CommitResult } from "./DataGrid";
 
@@ -875,10 +876,10 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
   const [limit, setLimit] = useState<number>(50);
   const [page, setPage] = useState<number>(0);
 
-  // Bottom drawer state (resizable up to 85% of window)
+  // Bottom drawer state (starts collapsed by default, expands on Run Query or tab click)
   const [bottomTab, setBottomTab] = useState<"results" | "sql" | "filters" | "sort">("results");
   const [drawerHeight, setDrawerHeight] = useState<number>(360);
-  const [isDrawerCollapsed, setIsDrawerCollapsed] = useState(false);
+  const [isDrawerCollapsed, setIsDrawerCollapsed] = useState(true);
   const [isDraggingResize, setIsDraggingResize] = useState<boolean>(false);
 
   // Query Execution State
@@ -1859,6 +1860,42 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
     setCommitMessage(null);
   };
 
+  // Helper to resolve the primary key value for a given table from a query result row
+  const resolveTablePkValue = (
+    targetTable: string,
+    pkCol: string,
+    origRow: Record<string, unknown>,
+    joinsList: VisualJoinInfo[],
+    baseTable: string
+  ): unknown => {
+    // 1. If this is the base table, direct pkCol in origRow is the primary key
+    if (targetTable === baseTable && origRow[pkCol] !== undefined && origRow[pkCol] !== null) {
+      return origRow[pkCol];
+    }
+    // 2. Check if this table is joined via a foreign key on another table
+    for (const j of joinsList) {
+      if (j.toTable === targetTable && j.toColumn === pkCol) {
+        if (origRow[j.fromColumn] !== undefined && origRow[j.fromColumn] !== null) {
+          return origRow[j.fromColumn];
+        }
+      }
+      if (j.fromTable === targetTable && j.fromColumn === pkCol) {
+        if (origRow[j.toColumn] !== undefined && origRow[j.toColumn] !== null) {
+          return origRow[j.toColumn];
+        }
+      }
+    }
+    // 3. Check aliased table_column key (e.g. provinces_id)
+    if (origRow[`${targetTable}_${pkCol}`] !== undefined && origRow[`${targetTable}_${pkCol}`] !== null) {
+      return origRow[`${targetTable}_${pkCol}`];
+    }
+    // 4. Fallback to direct pkCol in origRow
+    if (origRow[pkCol] !== undefined && origRow[pkCol] !== null) {
+      return origRow[pkCol];
+    }
+    return undefined;
+  };
+
   // Save / Commit pending changes
   const handleSaveCommitChanges = async () => {
     if (!queryResult?.rows || totalPending === 0) return;
@@ -1866,106 +1903,179 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
     setCommitMessage(null);
 
     try {
-      const targetTable = canvasTableNames[0] || tables[0] || "";
-      const tableCols = tableSchemas[targetTable] || [];
-      const pkCols = tableCols.filter((c) => c.primaryKey).map((c) => c.name);
+      const dialect: DBType =
+        activeProfile?.type === "mariadb"
+          ? "mariadb"
+          : activeProfile?.type === "sqlite"
+          ? "sqlite"
+          : "postgres";
 
-      const updates: Array<{ keys: Record<string, unknown>; data: Record<string, unknown> }> = [];
-      const deletes: Array<{ keys: Record<string, unknown> }> = [];
+      const baseTable = canvasTableNames[0] || tables[0] || "";
+      const updateStatements: string[] = [];
 
-      // Process updates
+      // Process updates grouped by owner table
       for (const [rIdxStr, fields] of Object.entries(editedCells)) {
         const rIdx = Number(rIdxStr);
         if (deletedRowIndices.has(rIdx)) continue; // Deleted rows take precedence
         const origRow = queryResult.rows[rIdx];
         if (!origRow) continue;
 
-        const keys: Record<string, unknown> = {};
-        if (pkCols.length > 0) {
-          pkCols.forEach((pk) => {
-            keys[pk] = origRow[pk];
-          });
-        } else {
-          // Fallback: use all original row columns as identity
-          Object.assign(keys, origRow);
+        // Group edited fields for this row by their owner table
+        const editsByTable: Record<string, Record<string, unknown>> = {};
+
+        for (const [colName, val] of Object.entries(fields)) {
+          // Check which table on canvas owns this column
+          let ownerTable = canvasTableNames.find((t) =>
+            tableSchemas[t]?.some((c) => c.name === colName)
+          );
+          if (!ownerTable) {
+            // Search all database tables
+            ownerTable =
+              tables.find((t) => tableSchemas[t]?.some((c) => c.name === colName)) ||
+              baseTable;
+          }
+
+          if (!editsByTable[ownerTable]) {
+            editsByTable[ownerTable] = {};
+          }
+          editsByTable[ownerTable][colName] = val;
         }
 
-        updates.push({ keys, data: fields });
+        // Generate targeted UPDATE statement for each owner table
+        for (const [tblName, tblFields] of Object.entries(editsByTable)) {
+          if (!tblName || Object.keys(tblFields).length === 0) continue;
+          const tableCols = tableSchemas[tblName] || [];
+          const pkCols = tableCols.filter((c) => c.primaryKey).map((c) => c.name);
+
+          const whereConditions: string[] = [];
+
+          // Find primary key value(s) for tblName
+          if (pkCols.length > 0) {
+            for (const pk of pkCols) {
+              const pkVal = resolveTablePkValue(tblName, pk, origRow, joins, baseTable);
+              if (pkVal !== undefined && pkVal !== null) {
+                const qCol = quoteIdent(pk, dialect);
+                if (typeof pkVal === "number") {
+                  whereConditions.push(`${qCol} = ${pkVal}`);
+                } else if (typeof pkVal === "boolean") {
+                  whereConditions.push(`${qCol} = ${pkVal ? "TRUE" : "FALSE"}`);
+                } else {
+                  whereConditions.push(`${qCol} = '${String(pkVal).replace(/'/g, "''")}'`);
+                }
+              }
+            }
+          }
+
+          // Fallback if no PK could be resolved: match all available original columns belonging to this table
+          if (whereConditions.length === 0) {
+            const matchingCols = tableCols.filter(
+              (c) => origRow[c.name] !== undefined && origRow[c.name] !== null
+            );
+            if (matchingCols.length > 0) {
+              matchingCols.forEach((c) => {
+                const v = origRow[c.name];
+                const qCol = quoteIdent(c.name, dialect);
+                if (typeof v === "number") {
+                  whereConditions.push(`${qCol} = ${v}`);
+                } else if (typeof v === "boolean") {
+                  whereConditions.push(`${qCol} = ${v ? "TRUE" : "FALSE"}`);
+                } else {
+                  whereConditions.push(`${qCol} = '${String(v).replace(/'/g, "''")}'`);
+                }
+              });
+            } else if (origRow["id"] !== undefined && origRow["id"] !== null) {
+              whereConditions.push(`${quoteIdent("id", dialect)} = ${origRow["id"]}`);
+            }
+          }
+
+          if (whereConditions.length === 0) {
+            throw new Error(
+              `Cannot identify matching row for table "${tblName}". Please include its primary key column in the query.`
+            );
+          }
+
+          const setClauses = Object.entries(tblFields).map(([k, v]) => {
+            const qCol = quoteIdent(k, dialect);
+            const colInfo = tableCols.find((c) => c.name === k);
+            const colType = colInfo?.type?.toLowerCase() || "";
+            const isNumeric = /int|float|double|decimal|numeric|real|serial/i.test(colType);
+            const isBool = /bool/i.test(colType);
+
+            if (v === null || v === undefined) return `${qCol} = NULL`;
+            if (typeof v === "boolean" || (isBool && (v === "true" || v === "false" || v === true || v === false))) {
+              return `${qCol} = ${v === true || v === "true" ? "TRUE" : "FALSE"}`;
+            }
+            if (typeof v === "number" || (isNumeric && !isNaN(Number(v)) && String(v).trim() !== "")) {
+              return `${qCol} = ${Number(v)}`;
+            }
+            return `${qCol} = '${String(v).replace(/'/g, "''")}'`;
+          });
+
+          const qTable = quoteTableIdent(tblName, dialect);
+          updateStatements.push(
+            `UPDATE ${qTable} SET ${setClauses.join(", ")} WHERE ${whereConditions.join(" AND ")};`
+          );
+        }
       }
 
       // Process deletes
       for (const rIdx of deletedRowIndices) {
         const origRow = queryResult.rows[rIdx];
         if (!origRow) continue;
+        const targetTable = baseTable;
+        const tableCols = tableSchemas[targetTable] || [];
+        const pkCols = tableCols.filter((c) => c.primaryKey).map((c) => c.name);
 
-        const keys: Record<string, unknown> = {};
+        const whereConditions: string[] = [];
         if (pkCols.length > 0) {
-          pkCols.forEach((pk) => {
-            keys[pk] = origRow[pk];
-          });
-        } else {
-          Object.assign(keys, origRow);
+          for (const pk of pkCols) {
+            const pkVal = resolveTablePkValue(targetTable, pk, origRow, joins, baseTable);
+            if (pkVal !== undefined && pkVal !== null) {
+              const qCol = quoteIdent(pk, dialect);
+              if (typeof pkVal === "number") {
+                whereConditions.push(`${qCol} = ${pkVal}`);
+              } else {
+                whereConditions.push(`${qCol} = '${String(pkVal).replace(/'/g, "''")}'`);
+              }
+            }
+          }
+        } else if (origRow["id"] !== undefined) {
+          whereConditions.push(`${quoteIdent("id", dialect)} = ${origRow["id"]}`);
         }
 
-        deletes.push({ keys });
+        if (whereConditions.length > 0) {
+          const qTable = quoteTableIdent(targetTable, dialect);
+          updateStatements.push(`DELETE FROM ${qTable} WHERE ${whereConditions.join(" AND ")};`);
+        }
       }
 
-      if (onCommitChanges) {
-        const res = await onCommitChanges({
-          inserts: [],
-          updates,
-          deletes,
-        });
-
-        if (res.success) {
-          setCommitMessage({
-            success: true,
-            text: `Successfully committed ${totalPending} change(s).`,
-          });
-          setEditedCells({});
-          setDeletedRowIndices(new Set());
-          // Auto refresh query
-          await handleRunQuery();
-        } else {
-          setCommitMessage({
-            success: false,
-            text: res.error || "Failed to commit changes",
-          });
-        }
-      } else {
-        // Direct SQL update execution fallback
-        const updateStatements: string[] = [];
-        const dialect = activeProfile?.type || "mariadb";
-
-        for (const u of updates) {
-          const setPairs = Object.entries(u.data)
-            .map(([k, v]) => `${k} = ${v === null ? "NULL" : `'${String(v).replace(/'/g, "''")}'`}`)
-            .join(", ");
-          const wherePairs = Object.entries(u.keys)
-            .map(([k, v]) => `${k} = ${v === null ? "NULL" : `'${String(v).replace(/'/g, "''")}'`}`)
-            .join(" AND ");
-          updateStatements.push(`UPDATE ${targetTable} SET ${setPairs} WHERE ${wherePairs};`);
-        }
-
-        for (const d of deletes) {
-          const wherePairs = Object.entries(d.keys)
-            .map(([k, v]) => `${k} = ${v === null ? "NULL" : `'${String(v).replace(/'/g, "''")}'`}`)
-            .join(" AND ");
-          updateStatements.push(`DELETE FROM ${targetTable} WHERE ${wherePairs};`);
-        }
-
-        for (const stmt of updateStatements) {
-          await onExecuteSql(stmt);
-        }
-
-        setCommitMessage({
-          success: true,
-          text: `Successfully applied ${totalPending} change(s).`,
-        });
-        setEditedCells({});
-        setDeletedRowIndices(new Set());
-        await handleRunQuery();
+      // Execute each statement sequentially
+      for (const stmt of updateStatements) {
+        await onExecuteSql(stmt);
       }
+
+      // Optimistically update memory rows so UI reflects values immediately
+      const updatedRows = queryResult.rows
+        .map((row, idx) => {
+          if (editedCells[idx]) {
+            return { ...row, ...editedCells[idx] };
+          }
+          return row;
+        })
+        .filter((_, idx) => !deletedRowIndices.has(idx));
+
+      setQueryResult({
+        ...queryResult,
+        rows: updatedRows,
+      });
+
+      setCommitMessage({
+        success: true,
+        text: `Successfully applied ${totalPending} change(s).`,
+      });
+      setEditedCells({});
+      setDeletedRowIndices(new Set());
+      setTimeout(() => setCommitMessage(null), 3500);
     } catch (err: any) {
       setCommitMessage({
         success: false,
@@ -2297,6 +2407,7 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
             onConnect={onConnect}
             onEdgeClick={handleEdgeClick}
             nodeTypes={nodeTypes}
+            colorMode={theme}
             fitView
             minZoom={0.2}
             maxZoom={2.0}
