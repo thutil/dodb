@@ -313,14 +313,16 @@ export default function Home() {
     setTableError(null);
   }, [activeProfile?.id, activeDatabase, activeTable]);
 
-  const fetchTableData = useCallback(async () => {
+  const fetchTableData = useCallback(async (isSilent = false) => {
     if (!activeProfile || !activeDatabase || !activeTable) return;
     const currentReqSeq = ++fetchSeqRef.current;
     const reqProfileId = activeProfile.id;
     const reqDatabase = activeDatabase;
     const reqTable = activeTable;
 
-    setLoadingData(true);
+    if (!isSilent) {
+      setLoadingData(true);
+    }
     setTableError(null);
     try {
       // 1. Fetch columns metadata
@@ -330,10 +332,16 @@ export default function Home() {
       const fetchedCols = colData.columns || [];
       setColumns(fetchedCols);
 
-      // Validate sortColumn belongs to current table
-      const effectiveSortCol = sortColumn && fetchedCols.some((c: any) => c.name === sortColumn) ? sortColumn : null;
-      if (sortColumn && !effectiveSortCol) {
-        setSortColumn(null);
+      // Validate sortColumn belongs to current table or default to Primary Key / id to guarantee stable row order
+      const pkCol =
+        fetchedCols.find((c: any) => c.primaryKey)?.name ||
+        (fetchedCols.some((c: any) => c.name === "id") ? "id" : fetchedCols[0]?.name || null);
+      const effectiveSortCol =
+        sortColumn && fetchedCols.some((c: any) => c.name === sortColumn)
+          ? sortColumn
+          : pkCol;
+      if (sortColumn && !fetchedCols.some((c: any) => c.name === sortColumn)) {
+        setSortColumn(pkCol);
       }
 
       // 2. Fetch paginated rows with sorting, search, and filtering
@@ -983,7 +991,7 @@ export default function Home() {
                   page={page}
                   pageSize={pageSize}
                   onPageChange={setPage}
-                  onRefresh={fetchTableData}
+                  onRefresh={(silent) => fetchTableData(silent === true)}
                   onCommitChanges={handleCommitChanges}
                   sortColumn={sortColumn}
                   sortOrder={sortOrder}

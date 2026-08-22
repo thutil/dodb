@@ -2075,9 +2075,7 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
       });
       setEditedCells({});
       setDeletedRowIndices(new Set());
-
-      // Refresh from database in background
-      await handleRunQuery();
+      setTimeout(() => setCommitMessage(null), 3500);
     } catch (err: any) {
       setCommitMessage({
         success: false,

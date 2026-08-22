@@ -182,7 +182,7 @@ export function buildVisualSql({
     whereClause = "\nWHERE " + filterClauses.join("\n  ");
   }
 
-  // 4. ORDER BY clause
+  // 4. ORDER BY clause (deterministic stable sort by default to prevent updated rows jumping to the bottom)
   const validSorts = (sorts || []).filter((s) => s.table && s.column);
   let orderByClause = "";
   if (validSorts.length > 0) {
@@ -193,6 +193,17 @@ export function buildVisualSql({
       return `${qCol} ${s.direction}`;
     });
     orderByClause = "\nORDER BY " + sortItems.join(", ");
+  } else if (tables.length > 0 && tables[0]?.tableName) {
+    const baseTable = tables[0].tableName;
+    const baseCols = tables[0].selectedColumns || [];
+    // Default to sorting by "id" or first column to guarantee stable row positions
+    const idCol = baseCols.includes("id") ? "id" : baseCols[0];
+    if (idCol) {
+      const qCol = hasMultipleTables
+        ? `${quoteIdent(baseTable, dbType)}.${quoteIdent(idCol, dbType)}`
+        : quoteIdent(idCol, dbType);
+      orderByClause = `\nORDER BY ${qCol} ASC`;
+    }
   }
 
   // 5. LIMIT and OFFSET clause
