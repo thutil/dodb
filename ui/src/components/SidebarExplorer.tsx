@@ -64,13 +64,30 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
     setMounted(true);
   }, []);
 
+  // Prune selectedTables whenever the tables list changes (e.g., after drop or database switch)
+  useEffect(() => {
+    setSelectedTables((prev) => {
+      const valid = new Set<string>();
+      prev.forEach((t) => {
+        if (tables.includes(t)) {
+          valid.add(t);
+        }
+      });
+      // If activeTable exists in tables and nothing else is valid, keep activeTable selected
+      if (valid.size === 0 && activeTable && tables.includes(activeTable)) {
+        valid.add(activeTable);
+      }
+      return valid;
+    });
+  }, [tables, activeTable]);
+
   // Synchronize activeTable with selectedTables if not multi-selecting
   useEffect(() => {
-    if (activeTable && selectedTables.size <= 1 && !selectedTables.has(activeTable)) {
+    if (activeTable && selectedTables.size <= 1 && !selectedTables.has(activeTable) && tables.includes(activeTable)) {
       setSelectedTables(new Set([activeTable]));
       setLastSelectedTable(activeTable);
     }
-  }, [activeTable]);
+  }, [activeTable, tables]);
 
   // Structure editing is unavailable on SQLite (its ALTER TABLE cannot express it).
   const isSqlite = dbType === "sqlite";
