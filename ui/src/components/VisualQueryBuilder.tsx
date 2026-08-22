@@ -2407,6 +2407,7 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
             onConnect={onConnect}
             onEdgeClick={handleEdgeClick}
             nodeTypes={nodeTypes}
+            colorMode={theme}
             fitView
             minZoom={0.2}
             maxZoom={2.0}
