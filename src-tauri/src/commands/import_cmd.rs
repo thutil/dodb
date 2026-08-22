@@ -3808,4 +3808,170 @@ mod tests {
         exec(&pool, &format!("DROP DATABASE {d}")).await;
     }
 
+
+    /// A `.sql` file carrying raw bytes cannot be replayed as text: a query
+    /// string has to be UTF-8, and replacing the bad bytes with U+FFFD would
+    /// write something that merely looks like the original.
+    #[tokio::test]
+    async fn raw_binary_in_a_sql_file_is_refused_rather_than_replaced() {
+        let pool = empty_sqlite().await;
+
+        // 0xFF is what `mysqldump` writes for a BLOB without --hex-blob.
+        let mut dump: Vec<u8> = b"CREATE TABLE b (v BLOB);\nINSERT INTO b VALUES ('".to_vec();
+        dump.extend_from_slice(&[0x00, 0xFF, 0x10]);
+        dump.extend_from_slice(b"');\n");
+        let file = TempFile::new("rawbytes.sql", &dump);
+
+        let mut src = SqlFileSource::open(&file.path(), SupportedDB::Mariadb, 10).expect("open");
+        let cancel = AtomicBool::new(false);
+        let mut tick = |_: ImportTick| {};
+        let err = execute_import_stream(
+            &pool,
+            &mut src,
+            ImportExecOptions {
+                tx_mode: TxMode::AtomicBatch,
+                on_error: OnError::SkipRow,
+                max_errors: 10,
+            },
+            &cancel,
+            &mut tick,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(err.contains("not valid UTF-8"), "{err}");
+        assert!(err.contains("--hex-blob"), "{err}");
+        assert!(err.contains("Line 2"), "{err}");
+    }
+
+    /// Postgres dumps set `search_path` and then name tables unqualified. That
+    /// only works if every statement runs on the same connection.
+    #[tokio::test]
+    async fn pg_a_dump_that_sets_search_path_then_uses_bare_names_replays() {
+        let Some(pool) = pg().await else { return };
+        let s = fresh_schema(&pool, "dodb_it_path").await;
+
+        // One statement per batch, so a pool that handed out a different
+        // connection each time would lose the search_path immediately.
+        let dump = format!(
+            "SET search_path TO {s};\n\
+             CREATE TABLE bare (id int, v text);\n\
+             INSERT INTO bare VALUES (1, 'first');\n\
+             INSERT INTO bare VALUES (2, 'second');\n"
+        );
+        let file = TempFile::new("pg-searchpath.sql", dump.as_bytes());
+        let mut src =
+            SqlFileSource::open(&file.path(), SupportedDB::Postgres, 1).expect("open dump");
+        let out = drain_with(&pool, &mut src, TxMode::PerStatement, OnError::SkipRow).await;
+
+        assert!(out.failures.is_empty(), "{:?}", out.failures);
+        assert_eq!(count_of(&pool, &format!("{s}.bare")).await, 2);
+
+        exec(&pool, &format!("DROP SCHEMA {s} CASCADE")).await;
+    }
+
+    /// The same, per batch rather than per statement, because a transaction is
+    /// also tied to the connection that opened it.
+    #[tokio::test]
+    async fn pg_search_path_survives_across_atomic_batches() {
+        let Some(pool) = pg().await else { return };
+        let s = fresh_schema(&pool, "dodb_it_path2").await;
+        exec(&pool, &format!("CREATE TABLE {s}.bare (id int)")).await;
+
+        let mut dump = format!("SET search_path TO {s};\n");
+        for i in 1..=25 {
+            dump.push_str(&format!("INSERT INTO bare VALUES ({});\n", i));
+        }
+        let file = TempFile::new("pg-searchpath2.sql", dump.as_bytes());
+        let mut src =
+            SqlFileSource::open(&file.path(), SupportedDB::Postgres, 3).expect("open dump");
+        let out = drain_with(&pool, &mut src, TxMode::AtomicBatch, OnError::SkipRow).await;
+
+        assert!(out.failures.is_empty(), "{:?}", out.failures);
+        assert_eq!(count_of(&pool, &format!("{s}.bare")).await, 25);
+
+        exec(&pool, &format!("DROP SCHEMA {s} CASCADE")).await;
+    }
+
+    /// `USE db` is session state too, and a mysqldump made with `--databases`
+    /// relies on it for every statement that follows.
+    #[tokio::test]
+    async fn my_a_use_statement_applies_to_everything_after_it() {
+        let Some(pool) = my().await else { return };
+        let d = fresh_database(&pool, "dodb_it_use").await;
+
+        let mut dump = format!("USE `{d}`;\nCREATE TABLE `bare` (id INT) ENGINE=InnoDB;\n");
+        for i in 1..=25 {
+            dump.push_str(&format!("INSERT INTO `bare` VALUES ({});\n", i));
+        }
+        let file = TempFile::new("my-use.sql", dump.as_bytes());
+        let mut src = SqlFileSource::open(&file.path(), SupportedDB::Mariadb, 1).expect("open");
+        let out = drain_with(&pool, &mut src, TxMode::PerStatement, OnError::SkipRow).await;
+
+        assert!(out.failures.is_empty(), "{:?}", out.failures);
+        assert_eq!(count_of(&pool, &format!("`{d}`.`bare`")).await, 25);
+
+        exec(&pool, &format!("DROP DATABASE {d}")).await;
+    }
+
+    /// A hex BLOB literal has to reach the column byte for byte, which is the
+    /// shape `mysqldump --hex-blob` writes.
+    #[tokio::test]
+    async fn my_a_hex_blob_literal_round_trips_byte_for_byte() {
+        let Some(pool) = my().await else { return };
+        let d = fresh_database(&pool, "dodb_it_blob").await;
+
+        let dump = format!(
+            "USE `{d}`;\n\
+             CREATE TABLE `b` (id INT, v BLOB) ENGINE=InnoDB;\n\
+             INSERT INTO `b` VALUES (1,0x00FF10),(2,X''),(3,NULL);\n"
+        );
+        let file = TempFile::new("my-blob.sql", dump.as_bytes());
+        let mut src = SqlFileSource::open(&file.path(), SupportedDB::Mariadb, 10).expect("open");
+        let out = drain_with(&pool, &mut src, TxMode::PerStatement, OnError::SkipRow).await;
+
+        assert!(out.failures.is_empty(), "{:?}", out.failures);
+        assert_eq!(
+            one(&pool, &format!("SELECT HEX(v) AS v FROM `{d}`.`b` WHERE id = 1")).await,
+            serde_json::json!("00FF10")
+        );
+        assert_eq!(
+            one(&pool, &format!("SELECT HEX(v) AS v FROM `{d}`.`b` WHERE id = 2")).await,
+            serde_json::json!("")
+        );
+        assert_eq!(
+            one(&pool, &format!("SELECT v AS v FROM `{d}`.`b` WHERE id = 3")).await,
+            serde_json::Value::Null
+        );
+
+        exec(&pool, &format!("DROP DATABASE {d}")).await;
+    }
+
+    /// The MariaDB-flavoured conditional comment. `/*M!…*/` is the same idea as
+    /// `/*!…*/` and appears at the top of every modern mariadb-dump.
+    #[tokio::test]
+    async fn my_mariadb_flavoured_conditional_comments_are_skipped() {
+        let Some(pool) = my().await else { return };
+        let d = fresh_database(&pool, "dodb_it_mcomment").await;
+
+        let dump = format!(
+            "/*M!999999\\- enable the sandbox mode */ \n\
+             /*!40101 SET NAMES utf8mb4 */;\n\
+             /*M!100616 SET @OLD_NOTE_VERBOSITY=@@NOTE_VERBOSITY, NOTE_VERBOSITY=0 */;\n\
+             USE `{d}`;\n\
+             CREATE TABLE `t` (id INT) ENGINE=InnoDB;\n\
+             INSERT INTO `t` VALUES (1);\n"
+        );
+        let file = TempFile::new("my-mcomment.sql", dump.as_bytes());
+        let mut src = SqlFileSource::open(&file.path(), SupportedDB::Mariadb, 10).expect("open");
+        let out = drain_with(&pool, &mut src, TxMode::PerStatement, OnError::SkipRow).await;
+
+        assert!(out.failures.is_empty(), "{:?}", out.failures);
+        assert_eq!(count_of(&pool, &format!("`{d}`.`t`")).await, 1);
+        // Both flavours counted, so the report can say what was skipped.
+        assert_eq!(src.skipped_version_comments(), 3);
+
+        exec(&pool, &format!("DROP DATABASE {d}")).await;
+    }
+
 }

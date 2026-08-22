@@ -1413,10 +1413,14 @@ impl SqlSplitter {
                                 mark!();
                                 pos += 1;
                             } else if b[pos + 1] == b'*' {
-                                if pos + 2 >= n && !eof {
+                                if pos + 3 >= n && !eof {
                                     break 'scan;
                                 }
-                                let gated = pos + 2 < n && b[pos + 2] == b'!';
+                                // `/*!…*/` is MySQL's conditional-execution
+                                // comment and `/*M!…*/` MariaDB's; both open
+                                // every modern dump and are skipped, not run.
+                                let gated = (pos + 2 < n && b[pos + 2] == b'!')
+                                    || (pos + 3 < n && b[pos + 2] == b'M' && b[pos + 3] == b'!');
                                 state = ScanState::BlockComment { gated };
                                 pos += 2;
                             } else {
@@ -1849,13 +1853,14 @@ mod tests {
 
     #[test]
     fn version_gated_mysqldump_comments_are_skipped_and_counted() {
-        let script = "/*!40101 SET NAMES utf8 */;\n/*!40014 SET FOREIGN_KEY_CHECKS=0 */;\nSELECT 1;";
+        // MariaDB's `/*M!…*/` flavour opens every modern mariadb-dump.
+        let script = "/*M!999999\\- enable the sandbox mode */ \n/*!40101 SET NAMES utf8 */;\n/*!40014 SET FOREIGN_KEY_CHECKS=0 */;\nSELECT 1;";
         let mut s = SqlSplitter::new(true);
         let mut out = s.feed(script);
         out.extend(s.finish());
         let stmts: Vec<String> = out.into_iter().map(|s| s.sql).collect();
         assert_eq!(stmts, vec!["SELECT 1"]);
-        assert_eq!(s.skipped_version_comments(), 2);
+        assert_eq!(s.skipped_version_comments(), 3);
     }
 
     #[test]
