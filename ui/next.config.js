@@ -22,13 +22,20 @@ function resolveAppVersion() {
   }
 
   // 3. GitHub Actions Ref (e.g. GITHUB_REF="refs/tags/v0.1.1")
-  if (process.env.GITHUB_REF && process.env.GITHUB_REF.startsWith("refs/tags/")) {
-    return process.env.GITHUB_REF.replace(/^refs\/tags\//, "").replace(/^v/, "").trim();
+  if (
+    process.env.GITHUB_REF &&
+    process.env.GITHUB_REF.startsWith("refs/tags/")
+  ) {
+    return process.env.GITHUB_REF.replace(/^refs\/tags\//, "")
+      .replace(/^v/, "")
+      .trim();
   }
 
   // 4. Check exact git tag if git repository is available
   try {
-    const exactTag = execSync("git describe --tags --exact-match 2>/dev/null", { encoding: "utf8" }).trim();
+    const exactTag = execSync("git describe --tags --exact-match 2>/dev/null", {
+      encoding: "utf8",
+    }).trim();
     if (exactTag) {
       return exactTag.replace(/^v/, "").trim();
     }
@@ -47,7 +54,10 @@ function resolveAppVersion() {
 
   // 6. Read from src-tauri/tauri.conf.json
   try {
-    const tauriConfPath = path.resolve(__dirname, "../src-tauri/tauri.conf.json");
+    const tauriConfPath = path.resolve(
+      __dirname,
+      "../src-tauri/tauri.conf.json",
+    );
     if (fs.existsSync(tauriConfPath)) {
       const tauriConf = JSON.parse(fs.readFileSync(tauriConfPath, "utf8"));
       if (tauriConf.version) return tauriConf.version.trim();
@@ -60,7 +70,7 @@ function resolveAppVersion() {
     if (uiPkg.version) return uiPkg.version.trim();
   } catch (e) {}
 
-  return "0.1.0";
+  return "0.2.1";
 }
 
 const appVersion = resolveAppVersion();
