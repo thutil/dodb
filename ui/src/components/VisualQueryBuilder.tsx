@@ -84,6 +84,7 @@ interface TableNodeData {
   tableName: string;
   columns: ColumnInfo[];
   selectedColumns: Set<string>;
+  filteredColumns?: Set<string>;
   onToggleColumn: (colName: string) => void;
   onSelectAllColumns: () => void;
   onClearColumns: () => void;
@@ -111,6 +112,7 @@ const VisualTableNode: React.FC<NodeProps> = ({ data, selected }) => {
     tableName,
     columns = [],
     selectedColumns = new Set<string>(),
+    filteredColumns = new Set<string>(),
     onToggleColumn,
     onSelectAllColumns,
     onClearColumns,
@@ -171,12 +173,13 @@ const VisualTableNode: React.FC<NodeProps> = ({ data, selected }) => {
       <div className="table-columns-list">
         {columns.map((col) => {
           const isChecked = selectedColumns.has(col.name);
+          const isFiltered = filteredColumns.has(col.name);
           const isGeom = isGeometryColumn(col.type, col.name);
 
           return (
             <div
               key={col.name}
-              className={`column-row ${isChecked ? "is-checked" : ""} ${col.primaryKey ? "is-pk" : ""}`}
+              className={`column-row ${isChecked ? "is-checked" : ""} ${isFiltered ? "is-filtered" : ""} ${col.primaryKey ? "is-pk" : ""}`}
               onClick={() => onToggleColumn(col.name)}
               title="Click to toggle column in SELECT, or drag handle to create JOIN or filter"
             >
@@ -215,6 +218,11 @@ const VisualTableNode: React.FC<NodeProps> = ({ data, selected }) => {
                   <span className="col-name font-mono" title={col.name}>
                     {col.name}
                   </span>
+                  {isFiltered && (
+                    <span className="col-where-badge font-mono" title="Active WHERE filter connected">
+                      <Filter size={8} /> WHERE
+                    </span>
+                  )}
                 </div>
                 <span className="col-type font-mono">{col.type}</span>
               </div>
@@ -222,13 +230,13 @@ const VisualTableNode: React.FC<NodeProps> = ({ data, selected }) => {
               {/* Quick Filter Button */}
               <button
                 type="button"
-                className="quick-col-filter-btn nodrag"
+                className={`quick-col-filter-btn nodrag ${isFiltered ? "is-active" : ""}`}
                 onClick={(e) => {
                   e.stopPropagation();
                   onAddFilterFromColumn(col.name);
                 }}
                 onMouseDown={(e) => e.stopPropagation()}
-                title="Create a WHERE filter for this column"
+                title="Create or connect a WHERE filter for this column"
               >
                 <Filter size={10} />
               </button>
@@ -363,7 +371,28 @@ const VisualTableNode: React.FC<NodeProps> = ({ data, selected }) => {
         }
 
         .column-row.is-checked {
-          background: rgba(59, 130, 246, 0.07);
+          background: rgba(59, 130, 246, 0.05);
+        }
+
+        .column-row.is-filtered {
+          background: rgba(59, 130, 246, 0.12);
+        }
+
+        .col-where-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 3px;
+          padding: 1px 4px;
+          border-radius: var(--radius-xs);
+          background: rgba(59, 130, 246, 0.2);
+          color: var(--accent-blue);
+          font-size: 8.5px;
+          font-weight: 700;
+        }
+
+        .quick-col-filter-btn.is-active {
+          color: var(--accent-blue);
+          opacity: 1;
         }
 
         .col-checkbox-wrapper {
@@ -512,7 +541,12 @@ const FilterBlockNode: React.FC<NodeProps> = ({ data, selected }) => {
       <div className="filter-card-header">
         <div className="filter-title-group">
           <Filter size={12} className="filter-header-icon" />
-          <span className="filter-title font-mono">WHERE FILTER</span>
+          <span className="filter-title font-mono">WHERE</span>
+          {table && (
+            <span className="filter-header-table-badge font-mono" title={`Filtering ${table}.${column}`}>
+              <Table2 size={10} /> {table}.{column}
+            </span>
+          )}
         </div>
         <div className="filter-header-actions nodrag" onMouseDown={(e) => e.stopPropagation()}>
           <button
@@ -669,6 +703,22 @@ const FilterBlockNode: React.FC<NodeProps> = ({ data, selected }) => {
           font-weight: 700;
           letter-spacing: 0.5px;
           color: var(--text-sub);
+        }
+
+        .filter-header-table-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 3px;
+          padding: 1px 5px;
+          border-radius: var(--radius-xs);
+          background: rgba(59, 130, 246, 0.15);
+          color: var(--accent-blue);
+          font-size: 9.5px;
+          font-weight: 600;
+          max-width: 140px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
         }
 
         .filter-header-actions {
@@ -995,12 +1045,42 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
     [setNodes]
   );
 
+  // Synchronize filteredColumns on table nodes whenever filters list changes
+  useEffect(() => {
+    const filterMap: Record<string, Set<string>> = {};
+    filters.forEach((f) => {
+      if (f.table && f.column) {
+        if (!filterMap[f.table]) filterMap[f.table] = new Set();
+        filterMap[f.table].add(f.column);
+      }
+    });
+
+    setNodes((nds) =>
+      nds.map((n) => {
+        if (n.type === "visualTable") {
+          const tName = (n.data as any).tableName;
+          const currentFiltered = filterMap[tName] || new Set();
+          return {
+            ...n,
+            data: {
+              ...n.data,
+              filteredColumns: currentFiltered,
+            },
+          };
+        }
+        return n;
+      })
+    );
+  }, [filters, setNodes]);
+
   // Filter conditions handlers
   const updateFilter = useCallback(
     (id: string, updates: Partial<VisualFilterCondition>) => {
-      setFilters((prev) =>
-        prev.map((f) => (f.id === id ? { ...f, ...updates } : f))
-      );
+      setFilters((prev) => {
+        const next = prev.map((f) => (f.id === id ? { ...f, ...updates } : f));
+        return next;
+      });
+
       setNodes((nds) =>
         nds.map((n) => {
           if (n.id === id) {
@@ -1015,8 +1095,33 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
           return n;
         })
       );
+
+      // Re-link edge whenever table or column is changed in the filter block
+      setEdges((eds) => {
+        const otherEdges = eds.filter((e) => e.target !== id);
+        const targetTable = updates.table;
+        const targetCol = updates.column;
+        if (targetTable && targetCol) {
+          const edgeId = `edge-filter-${targetTable}-${targetCol}-${id}`;
+          const newEdge: Edge = {
+            id: edgeId,
+            source: `table-${targetTable}`,
+            sourceHandle: `${targetCol}-source`,
+            target: id,
+            targetHandle: "filter-input-handle",
+            animated: true,
+            style: { stroke: "var(--accent-blue)", strokeWidth: 2, strokeDasharray: "4,4" },
+            label: "WHERE",
+            labelStyle: { fill: "var(--text-main)", fontWeight: 700, fontSize: 9 },
+            labelBgStyle: { fill: "var(--bg-card)", stroke: "var(--border-light)", strokeWidth: 1, rx: 3 },
+            markerEnd: { type: MarkerType.ArrowClosed, color: "var(--accent-blue)" },
+          };
+          return [...otherEdges, newEdge];
+        }
+        return eds;
+      });
     },
-    [setNodes]
+    [setNodes, setEdges]
   );
 
   const removeFilter = useCallback(
@@ -1047,43 +1152,51 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
 
       setFilters((prev) => [...prev, newFilter]);
 
-      const position = pos || {
-        x: 420 + Math.random() * 60,
-        y: 100 + filters.length * 60,
-      };
+      // Calculate position neatly aligned next to the parent table node
+      setNodes((nds) => {
+        const parentNode = nds.find((n) => n.id === `table-${defaultTable}`);
+        const sameTableFilters = filters.filter((f) => f.table === defaultTable);
+        const position = pos || (parentNode ? {
+          x: parentNode.position.x + 320,
+          y: parentNode.position.y + 30 + sameTableFilters.length * 135,
+        } : {
+          x: 420 + Math.random() * 40,
+          y: 100 + filters.length * 135,
+        });
 
-      const filterNode: Node = {
-        id: filterId,
-        type: "visualFilter",
-        position,
-        data: {
-          filterId,
-          table: defaultTable,
-          column: defaultCol,
-          operator: "=",
-          value: "",
-          logic: "AND",
-          tablesList: canvasTableNames.length > 0 ? canvasTableNames : tables,
-          tableSchemas,
-          onUpdateFilter: updateFilter,
-          onRemoveFilter: removeFilter,
-        },
-      };
+        const filterNode: Node = {
+          id: filterId,
+          type: "visualFilter",
+          position,
+          data: {
+            filterId,
+            table: defaultTable,
+            column: defaultCol,
+            operator: "=",
+            value: "",
+            logic: "AND",
+            tablesList: canvasTableNames.length > 0 ? canvasTableNames : tables,
+            tableSchemas,
+            onUpdateFilter: updateFilter,
+            onRemoveFilter: removeFilter,
+          },
+        };
 
-      setNodes((nds) => [...nds, filterNode]);
+        return [...nds, filterNode];
+      });
 
-      // If created with specific table and column, create connection edge
-      if (targetTable && targetColumn) {
-        const edgeId = `edge-filter-${targetTable}-${targetColumn}-${filterId}`;
+      // Always create connected edge from table column to filter block!
+      if (defaultTable && defaultCol) {
+        const edgeId = `edge-filter-${defaultTable}-${defaultCol}-${filterId}`;
         const newEdge: Edge = {
           id: edgeId,
-          source: `table-${targetTable}`,
-          sourceHandle: `${targetColumn}-source`,
+          source: `table-${defaultTable}`,
+          sourceHandle: `${defaultCol}-source`,
           target: filterId,
           targetHandle: "filter-input-handle",
           animated: true,
           style: { stroke: "var(--accent-blue)", strokeWidth: 2, strokeDasharray: "4,4" },
-          label: "FILTER",
+          label: "WHERE",
           labelStyle: { fill: "var(--text-main)", fontWeight: 700, fontSize: 9 },
           labelBgStyle: { fill: "var(--bg-card)", stroke: "var(--border-light)", strokeWidth: 1, rx: 3 },
           markerEnd: { type: MarkerType.ArrowClosed, color: "var(--accent-blue)" },
@@ -1095,7 +1208,7 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
       canvasTableNames,
       tables,
       tableSchemas,
-      filters.length,
+      filters,
       updateFilter,
       removeFilter,
       setNodes,
@@ -1509,12 +1622,22 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
         });
       });
 
-      // 3. Rebuild Filter Block Nodes and Edges
+      // 3. Rebuild Filter Block Nodes and Edges directly linked to parent table
+      const sameTableCount: Record<string, number> = {};
       parsed.filters.forEach((f, idx) => {
-        const filterPos = {
-          x: 420 + (idx % 3) * 280,
-          y: 340 + Math.floor(idx / 3) * 160,
-        };
+        const parentTableNode = newNodes.find((n) => n.id === `table-${f.table}`);
+        const count = sameTableCount[f.table] || 0;
+        sameTableCount[f.table] = count + 1;
+
+        const filterPos = parentTableNode
+          ? {
+              x: parentTableNode.position.x + 320,
+              y: parentTableNode.position.y + 30 + count * 135,
+            }
+          : {
+              x: 420 + (idx % 3) * 280,
+              y: 340 + Math.floor(idx / 3) * 160,
+            };
 
         const filterNode: Node = {
           id: f.id,
@@ -1544,7 +1667,7 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
             targetHandle: "filter-input-handle",
             animated: true,
             style: { stroke: "var(--accent-blue)", strokeWidth: 2, strokeDasharray: "4,4" },
-            label: "FILTER",
+            label: "WHERE",
             labelStyle: { fill: "var(--text-main)", fontWeight: 700, fontSize: 9 },
             labelBgStyle: { fill: "var(--bg-card)", stroke: "var(--border-light)", strokeWidth: 1, rx: 3 },
             markerEnd: { type: MarkerType.ArrowClosed, color: "var(--accent-blue)" },

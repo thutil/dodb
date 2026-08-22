@@ -216,7 +216,7 @@ export const GisMapViewer: React.FC<GisMapViewerProps> = ({
           type: "raster",
           source: "raster-tiles",
           minzoom: 0,
-          maxzoom: 22,
+          maxzoom: bm.maxzoom,
         },
       ],
     };
@@ -226,15 +226,15 @@ export const GisMapViewer: React.FC<GisMapViewerProps> = ({
   useEffect(() => {
     if (!mapContainerRef.current) return;
 
-    // Determine initial center and zoom
+    // Determine initial center and zoom (comfortable scale without over-zooming/pixelation)
     let center: [number, number] = [100.5018, 13.7563]; // Default Bangkok
-    let zoom = 11;
+    let zoom = 10;
 
     if (features.length > 0) {
       const firstBounds = getGisBounds(features[0].geometry);
       if (firstBounds) {
         center = getGisCenter(features[0].geometry);
-        zoom = features[0].geometry.type === "Point" ? 14 : 11;
+        zoom = features[0].geometry.type === "Point" ? 11 : 9;
       }
     }
 
@@ -442,12 +442,12 @@ export const GisMapViewer: React.FC<GisMapViewerProps> = ({
       });
     }
 
-    // Auto fit bounds
+    // Auto fit bounds with comfortable max zoom (prevent tile pixelation)
     if (hasCoords) {
       map.fitBounds(bounds, {
-        padding: 50,
-        maxZoom: 16,
-        duration: 800,
+        padding: 60,
+        maxZoom: 12.5,
+        duration: 600,
       });
     }
   };
@@ -468,7 +468,7 @@ export const GisMapViewer: React.FC<GisMapViewerProps> = ({
       }
     });
     if (hasCoords) {
-      mapInstanceRef.current.fitBounds(bounds, { padding: 50, maxZoom: 16, duration: 800 });
+      mapInstanceRef.current.fitBounds(bounds, { padding: 60, maxZoom: 12.5, duration: 600 });
     }
   };
 
