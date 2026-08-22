@@ -16,6 +16,7 @@ import {
   X,
   Layers,
   Workflow,
+  Upload,
 } from "lucide-react";
 import { ConnectionProfile } from "../types";
 
@@ -42,6 +43,7 @@ interface CommandPaletteProps {
   onOpenConnections: () => void;
   onOpenCreateTable?: () => void;
   onOpenAuditLogs?: () => void;
+  onOpenImport?: () => void;
   onToggleTheme: () => void;
   theme: "dark" | "light";
   activeProfile: ConnectionProfile | null;
@@ -60,6 +62,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   onOpenConnections,
   onOpenCreateTable,
   onOpenAuditLogs,
+  onOpenImport,
   onToggleTheme,
   theme,
   activeProfile,
@@ -216,6 +219,20 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       }
     );
 
+    if (onOpenImport && activeProfile) {
+      items.push({
+        id: "action-import-data",
+        title: "Import Data (SQL / CSV / JSON)",
+        category: "Actions",
+        icon: <Upload size={14} className="cmd-icon-action" />,
+        hint: "Load a file into this database",
+        action: () => {
+          onOpenImport();
+          onClose();
+        },
+      });
+    }
+
     if (onOpenAuditLogs) {
       items.push({
         id: "action-audit",
@@ -245,6 +262,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     onOpenConnections,
     onToggleTheme,
     onOpenAuditLogs,
+    onOpenImport,
     onClose,
   ]);
 

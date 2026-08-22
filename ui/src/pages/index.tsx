@@ -15,13 +15,15 @@ import { AdminPanel } from "../components/AdminPanel";
 import { SchemaDiagram } from "../components/SchemaDiagram";
 import { VisualQueryBuilder } from "../components/VisualQueryBuilder";
 import { CommandPalette } from "../components/CommandPalette";
-import { AlertCircle, X, CheckCircle2, Download } from "lucide-react";
+import { ImportModal } from "../components/ImportModal";
+import { AlertCircle, X, CheckCircle2, Download, Upload, XCircle } from "lucide-react";
 import { ConnectionProfile, ColumnInfo, TableRowData, QueryExecutionResult, ColumnFilter, DBType } from "../types";
 import { DdlResult } from "../components/tableDesign/draft";
 import { quoteTableIdent } from "../utils/ddlBuilder";
 import { apiClient } from "../utils/apiClient";
 import { auditLogger } from "../utils/auditLogger";
 import { dumpManager, DumpProgress } from "../utils/dumpManager";
+import { importManager, ImportProgress, ImportReport } from "../utils/importManager";
 
 const DEFAULT_APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION || "0.1.0";
 const SESSION_ID_PREFIX = "session-";
@@ -82,6 +84,10 @@ export default function Home() {
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [dumpProgress, setDumpProgress] = useState<DumpProgress>(dumpManager.getProgress());
   const [showDumpToast, setShowDumpToast] = useState(false);
+  // `null` closed; `{ table }` open, with the table preselected from the sidebar.
+  const [importTarget, setImportTarget] = useState<{ table: string | null } | null>(null);
+  const [importProgress, setImportProgress] = useState<ImportProgress>(importManager.getProgress());
+  const [importToast, setImportToast] = useState<ImportReport | null>(null);
   const [structureModalTable, setStructureModalTable] = useState<string | null>(null);
   const [isCreateTableOpen, setIsCreateTableOpen] = useState(false);
   const [editTableModalTable, setEditTableModalTable] = useState<string | null>(null);
@@ -147,6 +153,12 @@ export default function Home() {
       }
     };
     loadVersion();
+  }, []);
+
+  // Subscribe to background import progress so it shows in the footer even
+  // after the wizard is closed.
+  useEffect(() => {
+    return importManager.subscribe(setImportProgress);
   }, []);
 
   // Subscribe to background dump progress & notify
@@ -717,6 +729,25 @@ export default function Home() {
     fetchTableData();
   };
 
+  const handleImported = (report: ImportReport) => {
+    auditLogger.addLog({
+      profileId: activeProfile?.id,
+      profileName: activeProfile?.name,
+      dbType: activeProfile?.type,
+      database: activeDatabase,
+      actionType: "IMPORT",
+      sql: `-- Imported into ${report.tablesTouched.join(", ") || activeDatabase}`,
+      status: report.success ? "SUCCESS" : "ERROR",
+      errorMessage: report.failures[0]?.message,
+      executionTimeMs: report.elapsedMs,
+      affectedRows: report.rowsImported || report.statementsRun,
+    });
+    setImportToast(report);
+    // A dump can have created tables, so refresh the tree as well as the grid.
+    fetchTables();
+    fetchTableData();
+  };
+
   const handleRequestTruncate = (tbl: string) => {
     const dialect: DBType = activeProfile?.type === "mariadb" ? "mariadb" : activeProfile?.type === "sqlite" ? "sqlite" : "postgres";
     const sql = dialect === "sqlite"
@@ -806,6 +837,7 @@ export default function Home() {
           onOpenConnections={() => setIsConnModalOpen(true)}
           onDisconnect={handleDisconnect}
           onOpenAuditLogs={() => setIsAuditLogOpen(true)}
+          onOpenImport={() => setImportTarget({ table: activeTable })}
           onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
           onViewStructure={(tbl) => setStructureModalTable(tbl)}
           onOpenInSql={(sql) => {
@@ -855,6 +887,8 @@ export default function Home() {
               onEditStructure={(tbl) => setEditTableModalTable(tbl)}
               onTruncateTable={(tbl) => handleRequestTruncate(tbl)}
               onDropTable={(tbl) => handleRequestDrop(tbl)}
+              onImportIntoDatabase={() => setImportTarget({ table: null })}
+              onImportIntoTable={(tbl) => setImportTarget({ table: tbl })}
               onOpenInSql={(sql) => {
                 setActiveView("sql");
                 handleExecuteSql(sql);
@@ -1060,10 +1094,67 @@ export default function Home() {
           onOpenConnections={() => setIsConnModalOpen(true)}
           onOpenCreateTable={() => setIsCreateTableOpen(true)}
           onOpenAuditLogs={() => setIsAuditLogOpen(true)}
+          onOpenImport={() => setImportTarget({ table: activeTable })}
           onToggleTheme={toggleTheme}
           theme={theme}
           activeProfile={activeProfile}
         />
+
+        <ImportModal
+          isOpen={!!importTarget}
+          onClose={() => setImportTarget(null)}
+          activeProfile={activeProfile}
+          activeDatabase={activeDatabase}
+          tables={tables}
+          initialTable={importTarget?.table ?? null}
+          onImported={handleImported}
+        />
+
+        {/* Import completion toast, so a background import still reports back */}
+        {importToast && (
+          <div className={`global-dump-toast ${importToast.success ? "success" : "failure"}`}>
+            <div className="toast-left">
+              {importToast.success ? (
+                <CheckCircle2 size={16} className="toast-icon success" />
+              ) : (
+                <XCircle size={16} className="toast-icon failure" />
+              )}
+              <div className="toast-body">
+                <span className="toast-title">
+                  {importToast.dryRun
+                    ? "Dry run finished"
+                    : importToast.success
+                      ? "Import complete"
+                      : importToast.cancelled
+                        ? "Import cancelled"
+                        : "Import finished with errors"}
+                </span>
+                <span className="toast-sub font-mono">
+                  {importToast.rowsImported.toLocaleString()} rows ·{" "}
+                  {importToast.statementsRun.toLocaleString()} statements
+                  {importToast.failures.length > 0 && ` · ${importToast.failures.length} errors`}
+                </span>
+              </div>
+            </div>
+            <div className="toast-actions">
+              {importToast.failures.length > 0 && (
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    setImportTarget(null);
+                    setIsAuditLogOpen(true);
+                    setImportToast(null);
+                  }}
+                >
+                  <span>View log</span>
+                </button>
+              )}
+              <button className="toast-dismiss-btn" onClick={() => setImportToast(null)} title="Dismiss">
+                <X size={12} />
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Global Floating Background Dump Notification Toast */}
         {showDumpToast && dumpProgress.status === "completed" && (
@@ -1107,6 +1198,15 @@ export default function Home() {
                 <span className="footer-dot">•</span>
                 <span className="footer-unsaved" title="This connection was not saved and disappears when the app closes">
                   Unsaved connection
+                </span>
+              </>
+            )}
+            {importProgress.status === "running" && (
+              <>
+                <span className="footer-dot">•</span>
+                <span className="footer-dump-running font-mono">
+                  <Upload size={10} /> Importing {importProgress.fileName} (
+                  {importProgress.percentage}% · {importProgress.rowsImported.toLocaleString()} rows)
                 </span>
               </>
             )}
@@ -1176,6 +1276,9 @@ export default function Home() {
         }
 
         .footer-dump-running {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
           color: var(--accent-blue);
           font-weight: 600;
           animation: pulse 1.5s infinite;
@@ -1201,8 +1304,15 @@ export default function Home() {
           align-items: center;
           gap: 10px;
         }
+        .global-dump-toast.failure {
+          box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(239, 68, 68, 0.35);
+        }
         .toast-icon.success {
           color: var(--accent-green);
+          flex-shrink: 0;
+        }
+        .toast-icon.failure {
+          color: var(--accent-red);
           flex-shrink: 0;
         }
         .toast-body {

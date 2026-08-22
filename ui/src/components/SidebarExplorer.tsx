@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { Database, Table2, RefreshCw, Search, HardDrive, X, Layers, Terminal, Copy, Check, Plus, Pencil, Trash2, Eraser } from "lucide-react";
+import { Database, Table2, RefreshCw, Search, HardDrive, X, Layers, Terminal, Copy, Check, Plus, Pencil, Trash2, Eraser, Upload } from "lucide-react";
 import { DBType } from "../types";
 import { quoteTableIdent } from "../utils/ddlBuilder";
 
@@ -17,6 +17,8 @@ interface SidebarExplorerProps {
   onEditStructure?: (table: string) => void;
   onTruncateTable?: (table: string) => void;
   onDropTable?: (table: string) => void;
+  onImportIntoDatabase?: () => void;
+  onImportIntoTable?: (table: string) => void;
   onRefresh: () => void;
   loading: boolean;
   dbType?: string;
@@ -40,6 +42,8 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
   onEditStructure,
   onTruncateTable,
   onDropTable,
+  onImportIntoDatabase,
+  onImportIntoTable,
   onRefresh,
   loading,
   dbType,
@@ -248,6 +252,20 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
                 </button>
               )}
 
+              {onImportIntoDatabase && (
+                <button
+                  className="context-menu-item"
+                  disabled={!activeDatabase}
+                  onClick={() => {
+                    onImportIntoDatabase();
+                    setContextMenu(null);
+                  }}
+                >
+                  <Upload size={13} />
+                  <span>Import Data…</span>
+                </button>
+              )}
+
               <button
                 className="context-menu-item"
                 onClick={() => {
@@ -315,6 +333,19 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
                 >
                   <Terminal size={13} />
                   <span>Select Top 100 Rows</span>
+                </button>
+              )}
+
+              {onImportIntoTable && (
+                <button
+                  className="context-menu-item"
+                  onClick={() => {
+                    onImportIntoTable(contextMenu.table);
+                    setContextMenu(null);
+                  }}
+                >
+                  <Upload size={13} />
+                  <span>Import into this Table…</span>
                 </button>
               )}
 

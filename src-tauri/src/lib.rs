@@ -1,17 +1,20 @@
 pub mod crypto;
 pub mod models;
 pub mod db_core;
+pub mod import;
 pub mod profiles;
 pub mod commands;
 
-use db_core::DbState;
+use commands::import_cmd::ImportState;
 use commands::*;
+use db_core::DbState;
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   let app = tauri::Builder::default()
     .manage(DbState::default())
+    .manage(ImportState::default())
     .invoke_handler(tauri::generate_handler![
         // Profile Management
         get_profiles,
@@ -36,6 +39,12 @@ pub fn run() {
         get_schema_diagram,
         // File Dialog
         select_file,
+        // Data Import
+        pick_import_file,
+        describe_import_file,
+        preview_import_file,
+        run_import,
+        cancel_import,
         // Server Administration
         admin_get_users,
         admin_get_processes,

@@ -225,6 +225,15 @@ html, body {
   font-family: var(--font-mono);
 }
 
+/* Small uppercase section label, used above grouped controls */
+.micro-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+
 /* ==========================================================================
    GIS Map Viewer & Spatial UI Styles
    ========================================================================== */

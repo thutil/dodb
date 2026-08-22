@@ -6,7 +6,7 @@ use crate::db_core::{get_pool, execute_query, execute_command_raw, execute_trans
 // Dialect Helpers (Postgres / MariaDB / SQLite)
 // ==========================================
 
-fn quote_table_ident(db_type: SupportedDB, table: &str) -> String {
+pub(crate) fn quote_table_ident(db_type: SupportedDB, table: &str) -> String {
     match db_type {
         SupportedDB::Postgres => {
             if table.contains('.') {
@@ -28,14 +28,14 @@ fn quote_table_ident(db_type: SupportedDB, table: &str) -> String {
     }
 }
 
-fn quote_column_ident(db_type: SupportedDB, col: &str) -> String {
+pub(crate) fn quote_column_ident(db_type: SupportedDB, col: &str) -> String {
     match db_type {
         SupportedDB::Postgres | SupportedDB::Sqlite => format!("\"{}\"", col.replace('"', "")),
         SupportedDB::Mariadb => format!("`{}`", col.replace('`', "")),
     }
 }
 
-fn format_sql_value(db_type: SupportedDB, val: &serde_json::Value) -> String {
+pub(crate) fn format_sql_value(db_type: SupportedDB, val: &serde_json::Value) -> String {
     if val.is_null() {
         "NULL".to_string()
     } else if let Some(n) = val.as_number() {

@@ -21,6 +21,7 @@ import {
   ExternalLink,
   Plus,
   Workflow,
+  Upload,
 } from "lucide-react";
 import { ConnectionProfile, DBType } from "../types";
 import { quoteTableIdent } from "../utils/ddlBuilder";
@@ -40,6 +41,7 @@ interface HeaderProps {
   onOpenConnections: () => void;
   onDisconnect?: () => void;
   onOpenAuditLogs?: () => void;
+  onOpenImport?: () => void;
   onOpenCommandPalette?: () => void;
   onViewStructure?: (table: string) => void;
   onOpenInSql?: (sql: string) => void;
@@ -64,6 +66,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenConnections,
   onDisconnect,
   onOpenAuditLogs,
+  onOpenImport,
   onOpenCommandPalette,
   onViewStructure,
   onOpenInSql,
@@ -516,6 +519,13 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="header-divider" />
 
         <div className="action-buttons-group">
+          {onOpenImport && (
+            <button className="btn btn-secondary header-btn" onClick={onOpenImport} title="Import data from a SQL dump, CSV or JSON file">
+              <Upload size={12} />
+              <span className="btn-text-responsive">Import</span>
+            </button>
+          )}
+
           {onOpenAuditLogs && (
             <button className="btn btn-secondary header-btn" onClick={onOpenAuditLogs} title="View Audit Logs & History">
               <FileText size={12} />
