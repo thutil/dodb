@@ -54,13 +54,53 @@ interface GisMapViewerProps {
 
 type BasemapStyle = "dark" | "light" | "osm" | "satellite";
 
+const BASEMAP_STORAGE_KEY = "dodb_gis_selected_basemap";
+const TILE_CACHE_NAME = "dodb-map-tiles-v1";
+let isProtocolRegistered = false;
+
+// Register custom cached-tile protocol for MapLibre
+function initTileCacheProtocol() {
+  if (typeof window === "undefined" || isProtocolRegistered) return;
+  try {
+    maplibregl.addProtocol("cached-tile", async (params, abortController) => {
+      const rawUrl = params.url.replace(/^cached-tile:\/\//, "");
+      try {
+        if ("caches" in window) {
+          const cache = await caches.open(TILE_CACHE_NAME);
+          const cached = await cache.match(rawUrl);
+          if (cached) {
+            const buffer = await cached.arrayBuffer();
+            return { data: buffer };
+          }
+          const resp = await fetch(rawUrl, { signal: abortController.signal });
+          if (resp.ok) {
+            cache.put(rawUrl, resp.clone()).catch(() => {});
+            const buffer = await resp.arrayBuffer();
+            return { data: buffer };
+          }
+        }
+      } catch (err: unknown) {
+        if ((err as Error)?.name === "AbortError") {
+          throw err;
+        }
+      }
+      const resp = await fetch(rawUrl, { signal: abortController.signal });
+      const buffer = await resp.arrayBuffer();
+      return { data: buffer };
+    });
+    isProtocolRegistered = true;
+  } catch {
+    isProtocolRegistered = true;
+  }
+}
+
 const BASEMAP_TILES: Record<BasemapStyle, { name: string; tiles: string[]; maxzoom: number; attribution: string }> = {
   dark: {
     name: "Dark Matter",
     tiles: [
-      "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
-      "https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
-      "https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
+      "cached-tile://https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
+      "cached-tile://https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
+      "cached-tile://https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
     ],
     maxzoom: 19,
     attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; OpenStreetMap',
@@ -68,9 +108,9 @@ const BASEMAP_TILES: Record<BasemapStyle, { name: string; tiles: string[]; maxzo
   light: {
     name: "Light Positron",
     tiles: [
-      "https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png",
-      "https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png",
-      "https://c.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png",
+      "cached-tile://https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png",
+      "cached-tile://https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png",
+      "cached-tile://https://c.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png",
     ],
     maxzoom: 19,
     attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; OpenStreetMap',
@@ -78,9 +118,9 @@ const BASEMAP_TILES: Record<BasemapStyle, { name: string; tiles: string[]; maxzo
   osm: {
     name: "OpenStreetMap",
     tiles: [
-      "https://a.tile.openstreetmap.org/{z}/{x}/{y}.png",
-      "https://b.tile.openstreetmap.org/{z}/{x}/{y}.png",
-      "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      "cached-tile://https://a.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      "cached-tile://https://b.tile.openstreetmap.org/{z}/{x}/{y}.png",
+      "cached-tile://https://c.tile.openstreetmap.org/{z}/{x}/{y}.png",
     ],
     maxzoom: 19,
     attribution: '&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a> contributors',
@@ -88,7 +128,7 @@ const BASEMAP_TILES: Record<BasemapStyle, { name: string; tiles: string[]; maxzo
   satellite: {
     name: "Esri Satellite",
     tiles: [
-      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      "cached-tile://https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
     ],
     maxzoom: 18,
     attribution: '&copy; Esri &mdash; Earthstar Geographics',
@@ -105,12 +145,24 @@ export const GisMapViewer: React.FC<GisMapViewerProps> = ({
   onClose,
   isInline = false,
 }) => {
+  // Ensure caching protocol is initialized
+  initTileCacheProtocol();
+
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
   const pickerMarkerRef = useRef<maplibregl.Marker | null>(null);
 
-  const [basemap, setBasemap] = useState<BasemapStyle>("dark");
+  // Restore user's saved basemap selection from localStorage
+  const [basemap, setBasemap] = useState<BasemapStyle>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem(BASEMAP_STORAGE_KEY) as BasemapStyle;
+        if (saved && BASEMAP_TILES[saved]) return saved;
+      } catch {}
+    }
+    return "dark";
+  });
   const [copiedFormat, setCopiedFormat] = useState<string | null>(null);
   const [activeFeature, setActiveFeature] = useState<GisFeatureRecord | null>(null);
   const [cursorCoords, setCursorCoords] = useState<{ lng: number; lat: number } | null>(null);
@@ -246,6 +298,11 @@ export const GisMapViewer: React.FC<GisMapViewerProps> = ({
   // Update basemap style
   const handleSwitchBasemap = (newStyle: BasemapStyle) => {
     setBasemap(newStyle);
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem(BASEMAP_STORAGE_KEY, newStyle);
+      } catch {}
+    }
     if (mapInstanceRef.current) {
       mapInstanceRef.current.setStyle(getStyleForBasemap(newStyle));
       mapInstanceRef.current.once("style.load", () => {
