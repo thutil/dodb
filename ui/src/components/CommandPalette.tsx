@@ -15,6 +15,8 @@ import {
   CornerDownLeft,
   X,
   Layers,
+  Workflow,
+  Upload,
 } from "lucide-react";
 import { ConnectionProfile } from "../types";
 
@@ -36,11 +38,12 @@ interface CommandPaletteProps {
   databases: string[];
   activeDatabase: string;
   onSelectDatabase: (db: string) => void;
-  activeView: "explorer" | "sql" | "admin" | "diagram";
-  onChangeView: (view: "explorer" | "sql" | "admin" | "diagram") => void;
+  activeView: "explorer" | "sql" | "admin" | "diagram" | "visual-query";
+  onChangeView: (view: "explorer" | "sql" | "admin" | "diagram" | "visual-query") => void;
   onOpenConnections: () => void;
   onOpenCreateTable?: () => void;
   onOpenAuditLogs?: () => void;
+  onOpenImport?: () => void;
   onToggleTheme: () => void;
   theme: "dark" | "light";
   activeProfile: ConnectionProfile | null;
@@ -59,6 +62,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   onOpenConnections,
   onOpenCreateTable,
   onOpenAuditLogs,
+  onOpenImport,
   onToggleTheme,
   theme,
   activeProfile,
@@ -120,6 +124,17 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         hint: "Run custom SQL scripts",
         action: () => {
           onChangeView("sql");
+          onClose();
+        },
+      },
+      {
+        id: "nav-visual-query",
+        title: "Visual Query Builder (JOIN & Filters)",
+        category: "Navigation",
+        icon: <Workflow size={14} className="cmd-icon-nav" />,
+        hint: "Visual drag-and-drop query builder",
+        action: () => {
+          onChangeView("visual-query");
           onClose();
         },
       },
@@ -204,6 +219,20 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       }
     );
 
+    if (onOpenImport && activeProfile) {
+      items.push({
+        id: "action-import-data",
+        title: "Import Data (SQL / CSV / JSON)",
+        category: "Actions",
+        icon: <Upload size={14} className="cmd-icon-action" />,
+        hint: "Load a file into this database",
+        action: () => {
+          onOpenImport();
+          onClose();
+        },
+      });
+    }
+
     if (onOpenAuditLogs) {
       items.push({
         id: "action-audit",
@@ -233,6 +262,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     onOpenConnections,
     onToggleTheme,
     onOpenAuditLogs,
+    onOpenImport,
     onClose,
   ]);
 

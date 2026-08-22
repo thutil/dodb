@@ -1,6 +1,6 @@
 {
   "name": "dodb",
-  "version": "0.1.2",
+  "version": "0.1.5",
   "productName": "dodb",
   "description": "dodb - Modern Multi-Platform Database Manager for Postgres, MySQL, MariaDB & SQLite",
   "author": {

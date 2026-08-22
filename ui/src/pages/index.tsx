@@ -13,14 +13,17 @@ import { DataGrid, PendingChanges, CommitResult } from "../components/DataGrid";
 import { SqlConsole } from "../components/SqlConsole";
 import { AdminPanel } from "../components/AdminPanel";
 import { SchemaDiagram } from "../components/SchemaDiagram";
+import { VisualQueryBuilder } from "../components/VisualQueryBuilder";
 import { CommandPalette } from "../components/CommandPalette";
-import { AlertCircle, X, CheckCircle2, Download } from "lucide-react";
+import { ImportModal } from "../components/ImportModal";
+import { AlertCircle, X, CheckCircle2, Download, Upload, XCircle } from "lucide-react";
 import { ConnectionProfile, ColumnInfo, TableRowData, QueryExecutionResult, ColumnFilter, DBType } from "../types";
 import { DdlResult } from "../components/tableDesign/draft";
-import { quoteTableIdent } from "../utils/ddlBuilder";
+import { quoteTableIdent, buildDropTable, buildTruncateTable } from "../utils/ddlBuilder";
 import { apiClient } from "../utils/apiClient";
 import { auditLogger } from "../utils/auditLogger";
 import { dumpManager, DumpProgress } from "../utils/dumpManager";
+import { importManager, ImportProgress, ImportReport } from "../utils/importManager";
 
 const DEFAULT_APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION || "0.1.0";
 const SESSION_ID_PREFIX = "session-";
@@ -28,10 +31,51 @@ const SESSION_ID_PREFIX = "session-";
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:5820/api";
 
 
+interface ErrorBoundaryState {
+  hasError: boolean;
+  errorMsg: string;
+}
+
+class ViewErrorBoundary extends React.Component<{ children: React.ReactNode }, ErrorBoundaryState> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, errorMsg: "" };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, errorMsg: error?.message || String(error) };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error("View ErrorBoundary caught error:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", padding: 32, gap: 12, color: "var(--text-main)" }}>
+          <div style={{ fontWeight: 700, fontSize: 14 }}>Something went wrong loading this view</div>
+          <div style={{ fontSize: 11, color: "var(--accent-red)", fontFamily: "monospace" }}>{this.state.errorMsg}</div>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => this.setState({ hasError: false, errorMsg: "" })}
+            style={{ marginTop: 8 }}
+          >
+            Reload View
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function Home() {
   const [appVersion, setAppVersion] = useState<string>(DEFAULT_APP_VERSION);
   const [theme, setTheme] = useState<"dark" | "light">("dark");
-  const [activeView, setActiveView] = useState<"explorer" | "sql" | "admin" | "diagram">("explorer");
+  const [activeView, setActiveView] = useState<"explorer" | "sql" | "admin" | "diagram" | "visual-query">("explorer");
+  const [sqlConsoleInitialQuery, setSqlConsoleInitialQuery] = useState<string>("");
 
   const [profiles, setProfiles] = useState<ConnectionProfile[]>([]);
   const [activeProfile, setActiveProfile] = useState<ConnectionProfile | null>(null);
@@ -40,6 +84,10 @@ export default function Home() {
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [dumpProgress, setDumpProgress] = useState<DumpProgress>(dumpManager.getProgress());
   const [showDumpToast, setShowDumpToast] = useState(false);
+  // `null` closed; `{ table }` open, with the table preselected from the sidebar.
+  const [importTarget, setImportTarget] = useState<{ table: string | null } | null>(null);
+  const [importProgress, setImportProgress] = useState<ImportProgress>(importManager.getProgress());
+  const [importToast, setImportToast] = useState<ImportReport | null>(null);
   const [structureModalTable, setStructureModalTable] = useState<string | null>(null);
   const [isCreateTableOpen, setIsCreateTableOpen] = useState(false);
   const [editTableModalTable, setEditTableModalTable] = useState<string | null>(null);
@@ -105,6 +153,12 @@ export default function Home() {
       }
     };
     loadVersion();
+  }, []);
+
+  // Subscribe to background import progress so it shows in the footer even
+  // after the wizard is closed.
+  useEffect(() => {
+    return importManager.subscribe(setImportProgress);
   }, []);
 
   // Subscribe to background dump progress & notify
@@ -675,15 +729,35 @@ export default function Home() {
     fetchTableData();
   };
 
+  const handleImported = (report: ImportReport) => {
+    auditLogger.addLog({
+      profileId: activeProfile?.id,
+      profileName: activeProfile?.name,
+      dbType: activeProfile?.type,
+      database: activeDatabase,
+      actionType: "IMPORT",
+      sql: `-- Imported into ${report.tablesTouched.join(", ") || activeDatabase}`,
+      status: report.success ? "SUCCESS" : "ERROR",
+      errorMessage: report.failures[0]?.message,
+      executionTimeMs: report.elapsedMs,
+      affectedRows: report.rowsImported || report.statementsRun,
+    });
+    setImportToast(report);
+    // A dump can have created tables, so refresh the tree as well as the grid.
+    fetchTables();
+    fetchTableData();
+  };
+
   const handleRequestTruncate = (tbl: string) => {
     const dialect: DBType = activeProfile?.type === "mariadb" ? "mariadb" : activeProfile?.type === "sqlite" ? "sqlite" : "postgres";
-    const sql = dialect === "sqlite"
-      ? `DELETE FROM ${quoteTableIdent(tbl, "sqlite")};`
-      : `TRUNCATE TABLE ${quoteTableIdent(tbl, dialect)};`;
+    const sql = buildTruncateTable(tbl, dialect, false);
+    const cascadeSql = buildTruncateTable(tbl, dialect, true);
     setConfirmDdlRequest({
       title: `Truncate Table "${tbl}"`,
       description: `Are you sure you want to delete all rows in table "${tbl}"? This action cannot be undone.`,
       statements: [sql],
+      cascadeStatements: [cascadeSql],
+      allowCascade: dialect === "postgres",
       confirmLabel: "Truncate Table",
       typeToConfirm: tbl,
     });
@@ -691,13 +765,56 @@ export default function Home() {
 
   const handleRequestDrop = (tbl: string) => {
     const dialect: DBType = activeProfile?.type === "mariadb" ? "mariadb" : activeProfile?.type === "sqlite" ? "sqlite" : "postgres";
-    const sql = `DROP TABLE ${quoteTableIdent(tbl, dialect)};`;
+    const sql = buildDropTable(tbl, dialect, false);
+    const cascadeSql = buildDropTable(tbl, dialect, true);
     setConfirmDdlRequest({
       title: `Drop Table "${tbl}"`,
       description: `Are you sure you want to permanently DROP table "${tbl}" and all of its schema, indexes, and data? This action cannot be undone.`,
       statements: [sql],
+      cascadeStatements: [cascadeSql],
+      allowCascade: dialect !== "sqlite",
       confirmLabel: "Drop Table",
       typeToConfirm: tbl,
+    });
+  };
+
+  const handleRequestTruncateMultiple = (tbls: string[]) => {
+    if (tbls.length === 0) return;
+    if (tbls.length === 1) {
+      handleRequestTruncate(tbls[0]);
+      return;
+    }
+    const dialect: DBType = activeProfile?.type === "mariadb" ? "mariadb" : activeProfile?.type === "sqlite" ? "sqlite" : "postgres";
+    const stmts = tbls.map((t) => buildTruncateTable(t, dialect, false));
+    const cascadeStmts = tbls.map((t) => buildTruncateTable(t, dialect, true));
+    setConfirmDdlRequest({
+      title: `Truncate ${tbls.length} Tables`,
+      description: `Are you sure you want to delete all rows in ${tbls.length} tables (${tbls.slice(0, 3).join(", ")}${tbls.length > 3 ? "..." : ""})? This action cannot be undone.`,
+      statements: stmts,
+      cascadeStatements: cascadeStmts,
+      allowCascade: dialect === "postgres",
+      confirmLabel: `Truncate ${tbls.length} Tables`,
+      typeToConfirm: "TRUNCATE",
+    });
+  };
+
+  const handleRequestDropMultiple = (tbls: string[]) => {
+    if (tbls.length === 0) return;
+    if (tbls.length === 1) {
+      handleRequestDrop(tbls[0]);
+      return;
+    }
+    const dialect: DBType = activeProfile?.type === "mariadb" ? "mariadb" : activeProfile?.type === "sqlite" ? "sqlite" : "postgres";
+    const stmts = tbls.map((t) => buildDropTable(t, dialect, false));
+    const cascadeStmts = tbls.map((t) => buildDropTable(t, dialect, true));
+    setConfirmDdlRequest({
+      title: `Drop ${tbls.length} Tables`,
+      description: `Are you sure you want to permanently DROP ${tbls.length} tables (${tbls.slice(0, 3).join(", ")}${tbls.length > 3 ? "..." : ""}) and all their data? This action cannot be undone.`,
+      statements: stmts,
+      cascadeStatements: cascadeStmts,
+      allowCascade: dialect !== "sqlite",
+      confirmLabel: `Drop ${tbls.length} Tables`,
+      typeToConfirm: "DROP",
     });
   };
 
@@ -705,11 +822,18 @@ export default function Home() {
     const req = confirmDdlRequest;
     setConfirmDdlRequest(null);
     await fetchTables();
-    if (req?.typeToConfirm && req.typeToConfirm === activeTable && req.title.startsWith("Drop")) {
-      setActiveTable(null);
-      setRows([]);
-      setColumns([]);
-      setTotalRows(0);
+    if (req && req.title.startsWith("Drop")) {
+      const droppedCurrent =
+        (req.typeToConfirm && req.typeToConfirm === activeTable) ||
+        (activeTable && req.statements.some((s) => s.includes(quoteTableIdent(activeTable, activeProfile?.type === "mariadb" ? "mariadb" : activeProfile?.type === "sqlite" ? "sqlite" : "postgres"))));
+      if (droppedCurrent) {
+        setActiveTable(null);
+        setRows([]);
+        setColumns([]);
+        setTotalRows(0);
+      } else {
+        fetchTableData();
+      }
     } else {
       fetchTableData();
     }
@@ -764,6 +888,7 @@ export default function Home() {
           onOpenConnections={() => setIsConnModalOpen(true)}
           onDisconnect={handleDisconnect}
           onOpenAuditLogs={() => setIsAuditLogOpen(true)}
+          onOpenImport={() => setImportTarget({ table: activeTable })}
           onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
           onViewStructure={(tbl) => setStructureModalTable(tbl)}
           onOpenInSql={(sql) => {
@@ -777,7 +902,7 @@ export default function Home() {
         />
 
         <div className="app-main-body">
-          {activeView !== "admin" && activeView !== "diagram" && (
+          {activeView !== "admin" && activeView !== "diagram" && activeView !== "visual-query" && (
             <SidebarExplorer
               databases={databases}
               activeDatabase={activeDatabase}
@@ -813,6 +938,10 @@ export default function Home() {
               onEditStructure={(tbl) => setEditTableModalTable(tbl)}
               onTruncateTable={(tbl) => handleRequestTruncate(tbl)}
               onDropTable={(tbl) => handleRequestDrop(tbl)}
+              onTruncateTables={(tbls) => handleRequestTruncateMultiple(tbls)}
+              onDropTables={(tbls) => handleRequestDropMultiple(tbls)}
+              onImportIntoDatabase={() => setImportTarget({ table: null })}
+              onImportIntoTable={(tbl) => setImportTarget({ table: tbl })}
               onOpenInSql={(sql) => {
                 setActiveView("sql");
                 handleExecuteSql(sql);
@@ -841,61 +970,77 @@ export default function Home() {
                 </button>
               </div>
             )}
-            {activeView === "explorer" ? (
-              <DataGrid
-                activeProfile={activeProfile}
-                activeDatabase={activeDatabase}
-                tableName={activeTable}
-                columns={columns}
-                rows={rows}
-                totalRows={totalRows}
-                loading={loadingData}
-                page={page}
-                pageSize={pageSize}
-                onPageChange={setPage}
-                onRefresh={fetchTableData}
-                onCommitChanges={handleCommitChanges}
-                sortColumn={sortColumn}
-                sortOrder={sortOrder}
-                onSortChange={(col, order) => {
-                  setSortColumn(col);
-                  setSortOrder(order);
-                }}
-                searchQuery={searchQuery}
-                onSearchChange={setSearchQuery}
-                filters={filters}
-                onFiltersChange={setFilters}
-                theme={theme}
-                errorMessage={tableError}
-                onCreateTable={() => setIsCreateTableOpen(true)}
-              />
-            ) : activeView === "sql" ? (
-              <SqlConsole
-                activeDatabase={activeDatabase}
-                activeTable={activeTable}
-                tables={tables}
-                columns={columns}
-                theme={theme}
-                onExecuteSql={handleExecuteSql}
-                onCommitChanges={handleCommitChanges}
-              />
-
-            ) : activeView === "diagram" ? (
-              <SchemaDiagram
-                activeProfile={activeProfile}
-                activeDatabase={activeDatabase}
-                apiBase={API_BASE}
-                theme={theme}
-              />
-            ) : (
-              <AdminPanel
-                activeProfile={activeProfile}
-                activeDatabase={activeDatabase}
-                databases={databases}
-                tables={tables}
-                onRefreshDatabases={fetchDatabases}
-              />
-            )}
+            <ViewErrorBoundary key={activeView}>
+              {activeView === "explorer" ? (
+                <DataGrid
+                  activeProfile={activeProfile}
+                  activeDatabase={activeDatabase}
+                  tableName={activeTable}
+                  columns={columns}
+                  rows={rows}
+                  totalRows={totalRows}
+                  loading={loadingData}
+                  page={page}
+                  pageSize={pageSize}
+                  onPageChange={setPage}
+                  onRefresh={fetchTableData}
+                  onCommitChanges={handleCommitChanges}
+                  sortColumn={sortColumn}
+                  sortOrder={sortOrder}
+                  onSortChange={(col, order) => {
+                    setSortColumn(col);
+                    setSortOrder(order);
+                  }}
+                  searchQuery={searchQuery}
+                  onSearchChange={setSearchQuery}
+                  filters={filters}
+                  onFiltersChange={setFilters}
+                  theme={theme}
+                  errorMessage={tableError}
+                  onCreateTable={() => setIsCreateTableOpen(true)}
+                />
+              ) : activeView === "sql" ? (
+                <SqlConsole
+                  activeDatabase={activeDatabase}
+                  activeTable={activeTable}
+                  tables={tables}
+                  columns={columns}
+                  theme={theme}
+                  initialSql={sqlConsoleInitialQuery}
+                  onExecuteSql={handleExecuteSql}
+                  onCommitChanges={handleCommitChanges}
+                />
+              ) : activeView === "visual-query" ? (
+                <VisualQueryBuilder
+                  activeProfile={activeProfile}
+                  activeDatabase={activeDatabase}
+                  tables={tables}
+                  theme={theme}
+                  initialSql={sqlConsoleInitialQuery}
+                  onExecuteSql={handleExecuteSql}
+                  onCommitChanges={handleCommitChanges}
+                  onOpenInSqlConsole={(sql) => {
+                    setSqlConsoleInitialQuery(sql);
+                    setActiveView("sql");
+                  }}
+                />
+              ) : activeView === "diagram" ? (
+                <SchemaDiagram
+                  activeProfile={activeProfile}
+                  activeDatabase={activeDatabase}
+                  apiBase={API_BASE}
+                  theme={theme}
+                />
+              ) : (
+                <AdminPanel
+                  activeProfile={activeProfile}
+                  activeDatabase={activeDatabase}
+                  databases={databases}
+                  tables={tables}
+                  onRefreshDatabases={fetchDatabases}
+                />
+              )}
+            </ViewErrorBoundary>
           </main>
         </div>
 
@@ -1002,10 +1147,67 @@ export default function Home() {
           onOpenConnections={() => setIsConnModalOpen(true)}
           onOpenCreateTable={() => setIsCreateTableOpen(true)}
           onOpenAuditLogs={() => setIsAuditLogOpen(true)}
+          onOpenImport={() => setImportTarget({ table: activeTable })}
           onToggleTheme={toggleTheme}
           theme={theme}
           activeProfile={activeProfile}
         />
+
+        <ImportModal
+          isOpen={!!importTarget}
+          onClose={() => setImportTarget(null)}
+          activeProfile={activeProfile}
+          activeDatabase={activeDatabase}
+          tables={tables}
+          initialTable={importTarget?.table ?? null}
+          onImported={handleImported}
+        />
+
+        {/* Import completion toast, so a background import still reports back */}
+        {importToast && (
+          <div className={`global-dump-toast ${importToast.success ? "success" : "failure"}`}>
+            <div className="toast-left">
+              {importToast.success ? (
+                <CheckCircle2 size={16} className="toast-icon success" />
+              ) : (
+                <XCircle size={16} className="toast-icon failure" />
+              )}
+              <div className="toast-body">
+                <span className="toast-title">
+                  {importToast.dryRun
+                    ? "Dry run finished"
+                    : importToast.success
+                      ? "Import complete"
+                      : importToast.cancelled
+                        ? "Import cancelled"
+                        : "Import finished with errors"}
+                </span>
+                <span className="toast-sub font-mono">
+                  {importToast.rowsImported.toLocaleString()} rows ·{" "}
+                  {importToast.statementsRun.toLocaleString()} statements
+                  {importToast.failures.length > 0 && ` · ${importToast.failures.length} errors`}
+                </span>
+              </div>
+            </div>
+            <div className="toast-actions">
+              {importToast.failures.length > 0 && (
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    setImportTarget(null);
+                    setIsAuditLogOpen(true);
+                    setImportToast(null);
+                  }}
+                >
+                  <span>View log</span>
+                </button>
+              )}
+              <button className="toast-dismiss-btn" onClick={() => setImportToast(null)} title="Dismiss">
+                <X size={12} />
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Global Floating Background Dump Notification Toast */}
         {showDumpToast && dumpProgress.status === "completed" && (
@@ -1049,6 +1251,15 @@ export default function Home() {
                 <span className="footer-dot">•</span>
                 <span className="footer-unsaved" title="This connection was not saved and disappears when the app closes">
                   Unsaved connection
+                </span>
+              </>
+            )}
+            {importProgress.status === "running" && (
+              <>
+                <span className="footer-dot">•</span>
+                <span className="footer-dump-running font-mono">
+                  <Upload size={10} /> Importing {importProgress.fileName} (
+                  {importProgress.percentage}% · {importProgress.rowsImported.toLocaleString()} rows)
                 </span>
               </>
             )}
@@ -1118,6 +1329,9 @@ export default function Home() {
         }
 
         .footer-dump-running {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
           color: var(--accent-blue);
           font-weight: 600;
           animation: pulse 1.5s infinite;
@@ -1143,8 +1357,15 @@ export default function Home() {
           align-items: center;
           gap: 10px;
         }
+        .global-dump-toast.failure {
+          box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(239, 68, 68, 0.35);
+        }
         .toast-icon.success {
           color: var(--accent-green);
+          flex-shrink: 0;
+        }
+        .toast-icon.failure {
+          color: var(--accent-red);
           flex-shrink: 0;
         }
         .toast-body {

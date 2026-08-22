@@ -20,6 +20,8 @@ import {
   RefreshCw,
   ExternalLink,
   Plus,
+  Workflow,
+  Upload,
 } from "lucide-react";
 import { ConnectionProfile, DBType } from "../types";
 import { quoteTableIdent } from "../utils/ddlBuilder";
@@ -34,11 +36,12 @@ interface HeaderProps {
   tables?: string[];
   activeTable?: string | null;
   onSelectTable?: (table: string) => void;
-  activeView: "explorer" | "sql" | "admin" | "diagram";
-  onChangeView: (view: "explorer" | "sql" | "admin" | "diagram") => void;
+  activeView: "explorer" | "sql" | "admin" | "diagram" | "visual-query";
+  onChangeView: (view: "explorer" | "sql" | "admin" | "diagram" | "visual-query") => void;
   onOpenConnections: () => void;
   onDisconnect?: () => void;
   onOpenAuditLogs?: () => void;
+  onOpenImport?: () => void;
   onOpenCommandPalette?: () => void;
   onViewStructure?: (table: string) => void;
   onOpenInSql?: (sql: string) => void;
@@ -63,6 +66,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenConnections,
   onDisconnect,
   onOpenAuditLogs,
+  onOpenImport,
   onOpenCommandPalette,
   onViewStructure,
   onOpenInSql,
@@ -111,8 +115,8 @@ export const Header: React.FC<HeaderProps> = ({
       activeProfile?.type === "mariadb"
         ? "mariadb"
         : activeProfile?.type === "sqlite"
-        ? "sqlite"
-        : "postgres";
+          ? "sqlite"
+          : "postgres";
     const quoted = quoteTableIdent(tbl, dialect);
     const sql = `SELECT * FROM ${quoted} LIMIT 100;`;
     if (onOpenInSql) {
@@ -449,7 +453,6 @@ export const Header: React.FC<HeaderProps> = ({
           onClick={onOpenCommandPalette}
           title="Global Quick Search & Command Palette (⌘K / Ctrl+K)"
         >
-          <Search size={12} className="search-icon" />
           <span className="search-text">
             {activeTable ? `Jump to table or command in ${activeTable}...` : "Quick Search tables, commands, actions..."}
           </span>
@@ -487,6 +490,14 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="tab-label">SQL</span>
           </button>
           <button
+            className={`tab-btn ${activeView === "visual-query" ? "active" : ""}`}
+            onClick={() => onChangeView("visual-query")}
+            title="Visual Query Builder (Drag-and-Drop JOIN & Filters)"
+          >
+            <Workflow size={12} className="tab-icon" />
+            <span className="tab-label">Visual Query</span>
+          </button>
+          <button
             className={`tab-btn ${activeView === "diagram" ? "active" : ""}`}
             onClick={() => onChangeView("diagram")}
             title="Entity-Relationship Diagram"
@@ -507,6 +518,13 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="header-divider" />
 
         <div className="action-buttons-group">
+          {onOpenImport && (
+            <button className="btn btn-secondary header-btn" onClick={onOpenImport} title="Import data from a SQL dump, CSV or JSON file">
+              <Upload size={12} />
+              <span className="btn-text-responsive">Import</span>
+            </button>
+          )}
+
           {onOpenAuditLogs && (
             <button className="btn btn-secondary header-btn" onClick={onOpenAuditLogs} title="View Audit Logs & History">
               <FileText size={12} />

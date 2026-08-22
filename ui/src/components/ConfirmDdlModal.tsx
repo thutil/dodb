@@ -11,6 +11,10 @@ export interface ConfirmDdlRequest {
   confirmLabel: string;
   /** Require the user to type the table name for the truly irreversible ones. */
   typeToConfirm?: string;
+  /** Optional statements to execute if CASCADE is toggled. */
+  cascadeStatements?: string[];
+  /** Whether CASCADE toggle is permitted (defaults to auto-detect for DROP/TRUNCATE). */
+  allowCascade?: boolean;
 }
 
 interface ConfirmDdlModalProps {
@@ -31,6 +35,7 @@ export const ConfirmDdlModal: React.FC<ConfirmDdlModalProps> = ({
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copiedError, setCopiedError] = useState(false);
+  const [useCascade, setUseCascade] = useState(false);
 
   useEffect(() => setMounted(true), []);
 
@@ -39,6 +44,7 @@ export const ConfirmDdlModal: React.FC<ConfirmDdlModalProps> = ({
     setError(null);
     setRunning(false);
     setCopiedError(false);
+    setUseCascade(false);
   }, [request]);
 
   const handleCancel = useCallback(() => {
@@ -48,15 +54,34 @@ export const ConfirmDdlModal: React.FC<ConfirmDdlModalProps> = ({
 
   if (!request || !mounted || typeof document === "undefined") return null;
 
+  const isCascadeEligible =
+    request.allowCascade !== false &&
+    ((request.cascadeStatements && request.cascadeStatements.length > 0) ||
+      request.statements.some((s) => /^\s*(DROP|TRUNCATE)\s+TABLE/i.test(s)));
+
+  const effectiveCascadeStatements =
+    request.cascadeStatements ??
+    request.statements.map((s) => {
+      if (/^\s*DROP\s+TABLE/i.test(s) && !/CASCADE/i.test(s)) {
+        return s.replace(/;?\s*$/, " CASCADE;");
+      }
+      if (/^\s*TRUNCATE(\s+TABLE)?/i.test(s) && !/CASCADE/i.test(s)) {
+        return s.replace(/;?\s*$/, " CASCADE;");
+      }
+      return s;
+    });
+
+  const activeStatements = useCascade && isCascadeEligible ? effectiveCascadeStatements : request.statements;
+
   const needsTyping = !!request.typeToConfirm;
   const canRun = !running && (!needsTyping || typed.trim() === request.typeToConfirm);
 
-  const handleRun = async () => {
+  const executeStatements = async (stmts: string[]) => {
     if (!canRun) return;
     setRunning(true);
     setError(null);
     try {
-      const result = await onApplyDdl(request.statements);
+      const result = await onApplyDdl(stmts);
       if (result.success) {
         onDone();
       } else {
@@ -69,12 +94,23 @@ export const ConfirmDdlModal: React.FC<ConfirmDdlModalProps> = ({
     }
   };
 
+  const handleRun = () => executeStatements(activeStatements);
+
+  const handleRetryWithCascade = () => {
+    setUseCascade(true);
+    executeStatements(effectiveCascadeStatements);
+  };
+
   const handleCopyError = () => {
     if (!error) return;
     navigator.clipboard.writeText(error);
     setCopiedError(true);
     setTimeout(() => setCopiedError(false), 2000);
   };
+
+  const isDependencyError =
+    !!error &&
+    /depend|cascade|constraint|foreign key|referenced/i.test(error);
 
   const content = (
     <div className="confirm-ddl-portal-root">
@@ -89,10 +125,25 @@ export const ConfirmDdlModal: React.FC<ConfirmDdlModalProps> = ({
             <p className="submodal-desc">{request.description}</p>
 
             <div className="sql-block font-mono">
-              {request.statements.map((s, i) => (
+              {activeStatements.map((s, i) => (
                 <div key={i}>{s}</div>
               ))}
             </div>
+
+            {isCascadeEligible && (
+              <label className="cascade-option">
+                <input
+                  type="checkbox"
+                  checked={useCascade}
+                  onChange={(e) => setUseCascade(e.target.checked)}
+                  disabled={running}
+                />
+                <div className="cascade-text">
+                  <span className="cascade-label">Cascade (Drop dependent objects)</span>
+                  <span className="cascade-desc">Automatically drop referencing foreign keys, views, or triggers.</span>
+                </div>
+              </label>
+            )}
 
             {needsTyping && (
               <div className="type-field">
@@ -124,6 +175,22 @@ export const ConfirmDdlModal: React.FC<ConfirmDdlModalProps> = ({
                   </button>
                 </div>
                 <div className="error-box font-mono">{error}</div>
+                {isDependencyError && isCascadeEligible && !useCascade && (
+                  <div className="cascade-hint-box">
+                    <div className="hint-text">
+                      Other objects depend on this table. You can retry with <strong>CASCADE</strong> to drop dependent constraints and views.
+                    </div>
+                    <button
+                      type="button"
+                      className="btn-retry-cascade"
+                      onClick={handleRetryWithCascade}
+                      disabled={running || !canRun}
+                    >
+                      {running ? <Loader2 size={11} className="spin" /> : null}
+                      <span>Retry with CASCADE</span>
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -161,7 +228,7 @@ export const ConfirmDdlModal: React.FC<ConfirmDdlModalProps> = ({
           to { opacity: 1; }
         }
         .submodal-card {
-          width: 460px;
+          width: 480px;
           max-width: 92vw;
           background: var(--bg-card);
           border: 1px solid var(--border-medium);
@@ -213,6 +280,36 @@ export const ConfirmDdlModal: React.FC<ConfirmDdlModalProps> = ({
           user-select: text;
           word-break: break-word;
         }
+        .cascade-option {
+          display: flex;
+          align-items: flex-start;
+          gap: 8px;
+          padding: 8px 10px;
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-light);
+          border-radius: var(--radius-xs);
+          cursor: pointer;
+          user-select: none;
+        }
+        .cascade-option input {
+          margin-top: 2px;
+          cursor: pointer;
+        }
+        .cascade-text {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+        .cascade-label {
+          font-size: 11.5px;
+          font-weight: 500;
+          color: var(--text-main);
+        }
+        .cascade-desc {
+          font-size: 10px;
+          color: var(--text-muted);
+          line-height: 1.35;
+        }
         .type-field {
           display: flex;
           flex-direction: column;
@@ -232,7 +329,7 @@ export const ConfirmDdlModal: React.FC<ConfirmDdlModalProps> = ({
         .error-wrap {
           display: flex;
           flex-direction: column;
-          gap: 4px;
+          gap: 6px;
         }
         .error-head {
           display: flex;
@@ -273,6 +370,43 @@ export const ConfirmDdlModal: React.FC<ConfirmDdlModalProps> = ({
           user-select: text;
           word-break: break-word;
           line-height: 1.45;
+        }
+        .cascade-hint-box {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 10px;
+          padding: 8px 10px;
+          background: rgba(244, 63, 94, 0.08);
+          border: 1px solid rgba(244, 63, 94, 0.25);
+          border-radius: var(--radius-xs);
+        }
+        .hint-text {
+          font-size: 11px;
+          color: var(--text-main);
+          line-height: 1.4;
+        }
+        .btn-retry-cascade {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          padding: 4px 10px;
+          background: var(--accent-red);
+          color: #fff;
+          border: none;
+          border-radius: var(--radius-xs);
+          font-size: 11px;
+          font-weight: 500;
+          cursor: pointer;
+          white-space: nowrap;
+          transition: opacity 0.15s ease;
+        }
+        .btn-retry-cascade:hover:not(:disabled) {
+          opacity: 0.9;
+        }
+        .btn-retry-cascade:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
         }
         .submodal-actions {
           display: flex;

@@ -1,6 +1,8 @@
+use crate::import::{ImportFailure, OnError, TxMode};
 use crate::models::{ConnectionProfile, SupportedDB};
-use sqlx::{Row, Column, ValueRef};
+use sqlx::{Acquire, Column, Row, TypeInfo, ValueRef};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use tauri::State;
 
@@ -328,6 +330,20 @@ pub fn decode_bytes_or_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{:02X}", b)).collect()
 }
 
+/// Whether a column should be presented as a JSON boolean.
+///
+/// sqlx declares `bool` compatible with *every* integer width on MySQL
+/// (TINYINT..BIGINT and BIT) and with SQLite's INTEGER affinity, so a plain
+/// `try_get::<bool>()` first in the decode chain silently claims ordinary
+/// integer columns and renders them as `true`/`false` - an auto-increment
+/// `BIGINT(20)` id or a `COUNT(*)` would come back as `true`. Only a column
+/// the driver actually names a boolean is decoded as one: MySQL `TINYINT(1)`
+/// (reported as `BOOLEAN`) and a SQLite column declared `BOOLEAN`/`BOOL`.
+/// Everything else - `BIT`, `YEAR`, all integer widths - stays numeric.
+fn is_boolean_column<C: Column>(column: &C) -> bool {
+    column.type_info().name().eq_ignore_ascii_case("BOOLEAN")
+}
+
 pub async fn execute_query(pool: &DbPool, query: &str) -> Result<Vec<serde_json::Value>, String> {
     match pool {
         DbPool::Postgres(p) => {
@@ -420,10 +436,18 @@ pub async fn execute_query(pool: &DbPool, query: &str) -> Result<Vec<serde_json:
                         }
                     }
 
+                    // Booleans are decoded only for columns the driver calls a
+                    // boolean; see `is_boolean_column`. A failure here still
+                    // falls through to the generic chain below.
+                    if is_boolean_column(column) {
+                        if let Ok(v) = row.try_get::<bool, _>(i) {
+                            map.insert(column.name().to_string(), serde_json::Value::Bool(v));
+                            continue;
+                        }
+                    }
+
                     if let Ok(v) = row.try_get::<String, _>(i) {
                         map.insert(column.name().to_string(), serde_json::Value::String(v));
-                    } else if let Ok(v) = row.try_get::<bool, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::Bool(v));
                     } else if let Ok(v) = row.try_get::<i64, _>(i) {
                         map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
                     } else if let Ok(v) = row.try_get::<u64, _>(i) {
@@ -497,10 +521,18 @@ pub async fn execute_query(pool: &DbPool, query: &str) -> Result<Vec<serde_json:
                         }
                     }
 
+                    // Booleans are decoded only for columns the driver calls a
+                    // boolean; see `is_boolean_column`. A failure here still
+                    // falls through to the generic chain below.
+                    if is_boolean_column(column) {
+                        if let Ok(v) = row.try_get::<bool, _>(i) {
+                            map.insert(column.name().to_string(), serde_json::Value::Bool(v));
+                            continue;
+                        }
+                    }
+
                     if let Ok(v) = row.try_get::<String, _>(i) {
                         map.insert(column.name().to_string(), serde_json::Value::String(v));
-                    } else if let Ok(v) = row.try_get::<bool, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::Bool(v));
                     } else if let Ok(v) = row.try_get::<i64, _>(i) {
                         map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
                     } else if let Ok(v) = row.try_get::<i32, _>(i) {
@@ -642,6 +674,275 @@ pub async fn execute_transaction(pool: &DbPool, steps: &[TxStep]) -> Result<Vec<
     }
 }
 
+
+// ==========================================
+// Streaming import executor
+// ==========================================
+
+/// One statement handed to the import executor.
+///
+/// `rows` is how many source rows the statement carries, so a multi-row INSERT
+/// reports 500 rows imported rather than 1 statement run.
+#[derive(Debug, Clone)]
+pub struct BatchItem {
+    pub sql: String,
+    pub rows: u64,
+    /// Source line, when the format has one (SQL scripts do, CSV rows do too).
+    pub line: Option<u64>,
+    /// 1-based sequence number, used to point the user at the failure.
+    pub index: u64,
+}
+
+/// Feeds the executor without ever holding the whole file in memory.
+///
+/// `next_batch` is deliberately synchronous: the readers are buffered file I/O,
+/// and keeping them sync is what lets a single transaction stay open across
+/// batches without fighting `Transaction`'s lifetime.
+pub trait BatchSource: Send {
+    fn next_batch(&mut self) -> Result<Option<Vec<BatchItem>>, String>;
+    fn bytes_read(&self) -> u64;
+    fn total_bytes(&self) -> u64;
+    /// Rows the source rejected while building the batch — a value that could
+    /// not be coerced never becomes SQL, so the executor would never see it.
+    /// Drained once per batch.
+    fn take_failures(&mut self) -> Vec<ImportFailure> {
+        Vec::new()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ImportExecOptions {
+    pub tx_mode: TxMode,
+    pub on_error: OnError,
+    pub max_errors: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ImportTick {
+    pub bytes_read: u64,
+    pub total_bytes: u64,
+    pub statements_run: u64,
+    pub rows_imported: u64,
+    pub errors: u64,
+}
+
+#[derive(Debug, Default)]
+pub struct ImportOutcome {
+    pub statements_run: u64,
+    pub rows_imported: u64,
+    pub failures: Vec<ImportFailure>,
+    pub failures_truncated: bool,
+    pub cancelled: bool,
+}
+
+macro_rules! run_import {
+    ($pool:expr, $src:expr, $opts:expr, $cancel:expr, $tick:expr) => {{
+        let mut out = ImportOutcome::default();
+
+        // Replaying a script is one session, not a series of unrelated
+        // statements: `USE db`, `SET`, `LOCK TABLES` and Postgres' `search_path`
+        // all apply only to the connection that ran them. Taking a fresh
+        // connection per statement makes a mysqldump fail with "no database
+        // selected" as soon as the pool hands out a different one, so the whole
+        // import is pinned to one connection.
+        //
+        // `SingleTransaction` gets its connection by owning a transaction for
+        // the whole file; the other modes hold the connection directly. They are
+        // separate bindings so neither borrows the other.
+        let mut outer_tx = match $opts.tx_mode {
+            TxMode::SingleTransaction => Some($pool.begin().await.map_err(|e| e.to_string())?),
+            _ => None,
+        };
+        let mut pinned = match $opts.tx_mode {
+            TxMode::SingleTransaction => None,
+            _ => Some($pool.acquire().await.map_err(|e| e.to_string())?),
+        };
+
+        'outer: loop {
+            if $cancel.load(Ordering::Relaxed) {
+                out.cancelled = true;
+                break 'outer;
+            }
+
+            let batch = match $src.next_batch() {
+                Ok(Some(b)) => b,
+                Ok(None) => {
+                    // The source can reject the last thing it read and then
+                    // report end-of-file; those failures still have to surface.
+                    for f in $src.take_failures() {
+                        if out.failures.len() < $opts.max_errors {
+                            out.failures.push(f);
+                        } else {
+                            out.failures_truncated = true;
+                        }
+                    }
+                    break 'outer;
+                }
+                Err(e) => {
+                    if let Some(tx) = outer_tx.take() {
+                        let _ = tx.rollback().await;
+                    }
+                    return Err(e);
+                }
+            };
+            for f in $src.take_failures() {
+                if out.failures.len() < $opts.max_errors {
+                    out.failures.push(f);
+                } else {
+                    out.failures_truncated = true;
+                }
+            }
+            if !out.failures.is_empty()
+                && (matches!($opts.on_error, OnError::Abort) || out.failures_truncated)
+            {
+                break 'outer;
+            }
+
+            if batch.is_empty() {
+                continue;
+            }
+
+            match $opts.tx_mode {
+                TxMode::SingleTransaction => {
+                    for item in &batch {
+                        let tx = outer_tx.as_mut().expect("outer transaction is open");
+                        match sqlx::query(&item.sql).execute(&mut **tx).await {
+                            Ok(_) => {
+                                out.statements_run += 1;
+                                out.rows_imported += item.rows;
+                            }
+                            Err(e) => {
+                                // The transaction is poisoned, so there is no
+                                // "skip this row and continue" here: the only
+                                // honest outcome is to roll the whole file back.
+                                let tx = outer_tx.take().expect("outer transaction is open");
+                                let _ = tx.rollback().await;
+                                out.failures.push(ImportFailure::new(
+                                    item.index,
+                                    item.line,
+                                    &item.sql,
+                                    format!("{}\nThe whole import was rolled back.", e),
+                                ));
+                                // The transaction is gone, so the post-loop
+                                // cleanup will not reset these for us.
+                                out.statements_run = 0;
+                                out.rows_imported = 0;
+                                break 'outer;
+                            }
+                        }
+                    }
+                }
+
+                TxMode::AtomicBatch => {
+                    let conn = pinned.as_mut().expect("a connection is pinned");
+                    let mut tx = conn.begin().await.map_err(|e| e.to_string())?;
+                    let mut failed: Option<(&BatchItem, String)> = None;
+                    for item in &batch {
+                        if let Err(e) = sqlx::query(&item.sql).execute(&mut *tx).await {
+                            failed = Some((item, e.to_string()));
+                            break;
+                        }
+                    }
+                    match failed {
+                        None => {
+                            tx.commit().await.map_err(|e| e.to_string())?;
+                            for item in &batch {
+                                out.statements_run += 1;
+                                out.rows_imported += item.rows;
+                            }
+                        }
+                        Some((item, msg)) => {
+                            let _ = tx.rollback().await;
+                            if out.failures.len() < $opts.max_errors {
+                                out.failures.push(ImportFailure::new(
+                                    item.index,
+                                    item.line,
+                                    &item.sql,
+                                    msg,
+                                ));
+                            } else {
+                                out.failures_truncated = true;
+                            }
+                            if matches!($opts.on_error, OnError::Abort) || out.failures_truncated {
+                                break 'outer;
+                            }
+                        }
+                    }
+                }
+
+                TxMode::PerStatement => {
+                    let conn = pinned.as_mut().expect("a connection is pinned");
+                    for item in &batch {
+                        match sqlx::query(&item.sql).execute(&mut **conn).await {
+                            Ok(_) => {
+                                out.statements_run += 1;
+                                out.rows_imported += item.rows;
+                            }
+                            Err(e) => {
+                                if out.failures.len() < $opts.max_errors {
+                                    out.failures.push(ImportFailure::new(
+                                        item.index,
+                                        item.line,
+                                        &item.sql,
+                                        e.to_string(),
+                                    ));
+                                } else {
+                                    out.failures_truncated = true;
+                                }
+                                if matches!($opts.on_error, OnError::Abort)
+                                    || out.failures_truncated
+                                {
+                                    break 'outer;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            $tick(ImportTick {
+                bytes_read: $src.bytes_read(),
+                total_bytes: $src.total_bytes(),
+                statements_run: out.statements_run,
+                rows_imported: out.rows_imported,
+                errors: out.failures.len() as u64,
+            });
+        }
+
+        if let Some(tx) = outer_tx.take() {
+            if out.cancelled || !out.failures.is_empty() {
+                let _ = tx.rollback().await;
+                out.statements_run = 0;
+                out.rows_imported = 0;
+            } else {
+                tx.commit().await.map_err(|e| e.to_string())?;
+            }
+        }
+
+        Ok(out)
+    }};
+}
+
+/// Drains `src` into `pool`, reporting progress through `tick`.
+///
+/// Returns `Err` only for something that stopped the run outright (a read
+/// error, a transaction that would not begin). Statement-level failures come
+/// back inside `ImportOutcome::failures` so the UI can show a report instead of
+/// a single string.
+pub async fn execute_import_stream(
+    pool: &DbPool,
+    src: &mut dyn BatchSource,
+    opts: ImportExecOptions,
+    cancel: &AtomicBool,
+    tick: &mut (dyn FnMut(ImportTick) + Send),
+) -> Result<ImportOutcome, String> {
+    match pool {
+        DbPool::Postgres(p) => run_import!(p, src, opts, cancel, tick),
+        DbPool::MySql(p) => run_import!(p, src, opts, cancel, tick),
+        DbPool::Sqlite(p) => run_import!(p, src, opts, cancel, tick),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -673,6 +974,68 @@ mod tests {
             .await
             .unwrap()
             .flatten()
+    }
+
+    /// Guards the decode order in `execute_query`: sqlx treats `bool` as
+    /// compatible with every integer type, so without `is_boolean_column` an
+    /// integer primary key (MySQL `BIGINT(20) AUTO_INCREMENT`, SQLite
+    /// `INTEGER PRIMARY KEY`) came back as `true` instead of its value.
+    #[tokio::test]
+    async fn integer_columns_decode_as_numbers_not_booleans() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("in-memory sqlite");
+        sqlx::query(
+            "CREATE TABLE nums (id INTEGER PRIMARY KEY AUTOINCREMENT, big BIGINT, small TINYINT, zero INT)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO nums (big, small, zero) VALUES (9007199254740993, 7, 0)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let pool = DbPool::Sqlite(pool);
+        let rows = execute_query(&pool, "SELECT id, big, small, zero FROM nums").await.unwrap();
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+        assert_eq!(row["id"], serde_json::json!(1));
+        assert_eq!(row["big"], serde_json::json!(9007199254740993i64));
+        assert_eq!(row["small"], serde_json::json!(7));
+        assert_eq!(row["zero"], serde_json::json!(0));
+
+        // Aggregates are integers too - `COUNT(*)` used to render as `true`.
+        let rows = execute_query(&pool, "SELECT COUNT(*) AS c FROM nums").await.unwrap();
+        assert_eq!(rows[0]["c"], serde_json::json!(1));
+    }
+
+    /// The other half of the same rule: a column the driver really does call a
+    /// boolean must still arrive as a JSON boolean.
+    #[tokio::test]
+    async fn declared_boolean_columns_still_decode_as_booleans() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("in-memory sqlite");
+        sqlx::query("CREATE TABLE flags (on_flag BOOLEAN, off_flag BOOL, n INTEGER)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO flags (on_flag, off_flag, n) VALUES (1, 0, 5)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let rows = execute_query(&DbPool::Sqlite(pool), "SELECT on_flag, off_flag, n FROM flags")
+            .await
+            .unwrap();
+        assert_eq!(rows[0]["on_flag"], serde_json::json!(true));
+        assert_eq!(rows[0]["off_flag"], serde_json::json!(false));
+        assert_eq!(rows[0]["n"], serde_json::json!(5));
     }
 
     #[tokio::test]
@@ -817,4 +1180,347 @@ mod tests {
         close_profile_pools_in(&state, Some(&profile.id)).await.unwrap();
         let _ = std::fs::remove_file(&db_path);
     }
+
+    // ---------- streaming import executor ----------
+
+    /// Hands the executor a fixed script, and can be told to reject a row
+    /// before it ever becomes SQL (the coercion-failure path).
+    struct FakeSource {
+        batches: std::collections::VecDeque<Vec<BatchItem>>,
+        failures: Vec<ImportFailure>,
+        read: u64,
+    }
+
+    impl FakeSource {
+        /// Each inner slice becomes one batch; every statement counts as 1 row.
+        fn new(batches: &[&[&str]]) -> Self {
+            let mut queue = std::collections::VecDeque::new();
+            let mut index = 0u64;
+            for b in batches {
+                let items = b
+                    .iter()
+                    .map(|sql| {
+                        index += 1;
+                        BatchItem {
+                            sql: (*sql).to_string(),
+                            rows: 1,
+                            line: Some(index),
+                            index,
+                        }
+                    })
+                    .collect();
+                queue.push_back(items);
+            }
+            Self {
+                batches: queue,
+                failures: Vec::new(),
+                read: 0,
+            }
+        }
+
+        fn with_parse_failure(mut self) -> Self {
+            self.failures
+                .push(ImportFailure::new(1, Some(1), "bad,row", "not a number".into()));
+            self
+        }
+    }
+
+    impl BatchSource for FakeSource {
+        fn next_batch(&mut self) -> Result<Option<Vec<BatchItem>>, String> {
+            self.read += 1;
+            Ok(self.batches.pop_front())
+        }
+        fn bytes_read(&self) -> u64 {
+            self.read
+        }
+        fn total_bytes(&self) -> u64 {
+            10
+        }
+        fn take_failures(&mut self) -> Vec<ImportFailure> {
+            std::mem::take(&mut self.failures)
+        }
+    }
+
+    fn exec_opts(tx_mode: TxMode, on_error: OnError) -> ImportExecOptions {
+        ImportExecOptions {
+            tx_mode,
+            on_error,
+            max_errors: 100,
+        }
+    }
+
+    async fn count_rows(pool: &DbPool) -> i64 {
+        let DbPool::Sqlite(p) = pool else { unreachable!() };
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM t")
+            .fetch_one(p)
+            .await
+            .unwrap()
+    }
+
+    async fn run(
+        pool: &DbPool,
+        src: &mut FakeSource,
+        opts: ImportExecOptions,
+    ) -> Result<ImportOutcome, String> {
+        let cancel = AtomicBool::new(false);
+        let mut ticks = 0u32;
+        let mut tick = |_: ImportTick| ticks += 1;
+        execute_import_stream(pool, src, opts, &cancel, &mut tick).await
+    }
+
+    #[tokio::test]
+    async fn every_batch_is_applied_and_rows_are_counted() {
+        let pool = sqlite_pool().await;
+        let mut src = FakeSource::new(&[
+            &["INSERT INTO t (id, name) VALUES (3, 'c')"],
+            &[
+                "INSERT INTO t (id, name) VALUES (4, 'd')",
+                "UPDATE t SET name = 'D' WHERE id = 4",
+            ],
+        ]);
+        let out = run(&pool, &mut src, exec_opts(TxMode::AtomicBatch, OnError::Abort))
+            .await
+            .unwrap();
+
+        assert_eq!(out.statements_run, 3);
+        assert_eq!(out.rows_imported, 3);
+        assert!(out.failures.is_empty(), "{:?}", out.failures);
+        assert_eq!(name_of(&pool, 4).await.as_deref(), Some("D"));
+    }
+
+    /// A failing batch must take only its own rows down: the batch before it
+    /// is already committed, and the one after it never runs under Abort.
+    #[tokio::test]
+    async fn an_atomic_batch_rolls_back_only_itself() {
+        let pool = sqlite_pool().await;
+        let mut src = FakeSource::new(&[
+            &["INSERT INTO t (id, name) VALUES (3, 'c')"],
+            &[
+                "INSERT INTO t (id, name) VALUES (4, 'd')",
+                "INSERT INTO t (id, name) VALUES (1, 'dup')",
+            ],
+            &["INSERT INTO t (id, name) VALUES (5, 'e')"],
+        ]);
+        let out = run(&pool, &mut src, exec_opts(TxMode::AtomicBatch, OnError::Abort))
+            .await
+            .unwrap();
+
+        assert_eq!(out.failures.len(), 1, "{:?}", out.failures);
+        assert_eq!(out.statements_run, 1);
+        // Batch 1 stuck, batch 2 rolled back whole, batch 3 never ran.
+        assert_eq!(count_rows(&pool).await, 3);
+        assert!(name_of(&pool, 4).await.is_none());
+        assert!(name_of(&pool, 5).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn skip_row_carries_on_past_a_failing_batch() {
+        let pool = sqlite_pool().await;
+        let mut src = FakeSource::new(&[
+            &["INSERT INTO t (id, name) VALUES (1, 'dup')"],
+            &["INSERT INTO t (id, name) VALUES (5, 'e')"],
+        ]);
+        let out = run(
+            &pool,
+            &mut src,
+            exec_opts(TxMode::AtomicBatch, OnError::SkipRow),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(out.failures.len(), 1);
+        assert_eq!(out.statements_run, 1);
+        assert_eq!(name_of(&pool, 5).await.as_deref(), Some("e"));
+    }
+
+    /// The whole point of single-transaction mode: one bad statement anywhere
+    /// leaves the table exactly as it was.
+    #[tokio::test]
+    async fn a_single_transaction_import_is_all_or_nothing() {
+        let pool = sqlite_pool().await;
+        let mut src = FakeSource::new(&[
+            &["INSERT INTO t (id, name) VALUES (3, 'c')"],
+            &["INSERT INTO t (id, name) VALUES (1, 'dup')"],
+        ]);
+        let out = run(
+            &pool,
+            &mut src,
+            exec_opts(TxMode::SingleTransaction, OnError::SkipRow),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(out.failures.len(), 1, "{:?}", out.failures);
+        // Nothing is reported as written, because nothing was.
+        assert_eq!(out.statements_run, 0);
+        assert_eq!(out.rows_imported, 0);
+        assert_eq!(count_rows(&pool).await, 2);
+    }
+
+    #[tokio::test]
+    async fn per_statement_mode_keeps_the_statements_that_worked() {
+        let pool = sqlite_pool().await;
+        let mut src = FakeSource::new(&[&[
+            "INSERT INTO t (id, name) VALUES (3, 'c')",
+            "INSERT INTO t (id, name) VALUES (1, 'dup')",
+            "INSERT INTO t (id, name) VALUES (4, 'd')",
+        ]]);
+        let out = run(
+            &pool,
+            &mut src,
+            exec_opts(TxMode::PerStatement, OnError::SkipRow),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(out.failures.len(), 1);
+        assert_eq!(out.statements_run, 2);
+        assert_eq!(name_of(&pool, 3).await.as_deref(), Some("c"));
+        assert_eq!(name_of(&pool, 4).await.as_deref(), Some("d"));
+    }
+
+    /// A row rejected while parsing never reaches the database, so the
+    /// executor has to pick it up from the source instead of from an error.
+    #[tokio::test]
+    async fn parse_failures_reported_by_the_source_can_abort_the_run() {
+        let pool = sqlite_pool().await;
+        let mut src = FakeSource::new(&[
+            &["INSERT INTO t (id, name) VALUES (3, 'c')"],
+            &["INSERT INTO t (id, name) VALUES (4, 'd')"],
+        ])
+        .with_parse_failure();
+        let out = run(&pool, &mut src, exec_opts(TxMode::AtomicBatch, OnError::Abort))
+            .await
+            .unwrap();
+
+        assert_eq!(out.failures.len(), 1);
+        assert!(out.failures[0].message.contains("not a number"));
+        assert_eq!(out.statements_run, 0, "the batch must not run");
+        assert_eq!(count_rows(&pool).await, 2);
+    }
+
+    #[tokio::test]
+    async fn a_parse_failure_is_only_recorded_when_skipping_is_allowed() {
+        let pool = sqlite_pool().await;
+        let mut src = FakeSource::new(&[&["INSERT INTO t (id, name) VALUES (3, 'c')"]])
+            .with_parse_failure();
+        let out = run(
+            &pool,
+            &mut src,
+            exec_opts(TxMode::AtomicBatch, OnError::SkipRow),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(out.failures.len(), 1);
+        assert_eq!(out.statements_run, 1);
+        assert_eq!(name_of(&pool, 3).await.as_deref(), Some("c"));
+    }
+
+    #[tokio::test]
+    async fn max_errors_stops_the_run_and_flags_the_report_as_truncated() {
+        let pool = sqlite_pool().await;
+        let mut src = FakeSource::new(&[
+            &["INSERT INTO t (id, name) VALUES (1, 'dup')"],
+            &["INSERT INTO t (id, name) VALUES (2, 'dup')"],
+            &["INSERT INTO t (id, name) VALUES (9, 'ok')"],
+        ]);
+        let opts = ImportExecOptions {
+            tx_mode: TxMode::AtomicBatch,
+            on_error: OnError::SkipRow,
+            max_errors: 1,
+        };
+        let out = run(&pool, &mut src, opts).await.unwrap();
+
+        assert_eq!(out.failures.len(), 1);
+        assert!(out.failures_truncated);
+        assert!(name_of(&pool, 9).await.is_none(), "the run must stop");
+    }
+
+    #[tokio::test]
+    async fn cancelling_stops_at_the_next_batch_and_keeps_committed_batches() {
+        let pool = sqlite_pool().await;
+        let mut src = FakeSource::new(&[&["INSERT INTO t (id, name) VALUES (3, 'c')"]]);
+        let cancel = AtomicBool::new(true);
+        let mut tick = |_: ImportTick| {};
+        let out = execute_import_stream(
+            &pool,
+            &mut src,
+            exec_opts(TxMode::AtomicBatch, OnError::Abort),
+            &cancel,
+            &mut tick,
+        )
+        .await
+        .unwrap();
+
+        assert!(out.cancelled);
+        assert_eq!(out.statements_run, 0);
+        assert_eq!(count_rows(&pool).await, 2);
+    }
+
+    #[tokio::test]
+    async fn cancelling_a_single_transaction_import_writes_nothing() {
+        let pool = sqlite_pool().await;
+        // The first batch is applied, then the cancel flag is seen before the
+        // second — but the transaction still has to roll the first one back.
+        struct CancelAfterFirst<'a> {
+            inner: FakeSource,
+            cancel: &'a AtomicBool,
+        }
+        impl BatchSource for CancelAfterFirst<'_> {
+            fn next_batch(&mut self) -> Result<Option<Vec<BatchItem>>, String> {
+                let b = self.inner.next_batch()?;
+                self.cancel.store(true, Ordering::SeqCst);
+                Ok(b)
+            }
+            fn bytes_read(&self) -> u64 {
+                self.inner.bytes_read()
+            }
+            fn total_bytes(&self) -> u64 {
+                self.inner.total_bytes()
+            }
+        }
+
+        let cancel = AtomicBool::new(false);
+        let mut src = CancelAfterFirst {
+            inner: FakeSource::new(&[
+                &["INSERT INTO t (id, name) VALUES (3, 'c')"],
+                &["INSERT INTO t (id, name) VALUES (4, 'd')"],
+            ]),
+            cancel: &cancel,
+        };
+        let mut tick = |_: ImportTick| {};
+        let out = execute_import_stream(
+            &pool,
+            &mut src,
+            exec_opts(TxMode::SingleTransaction, OnError::Abort),
+            &cancel,
+            &mut tick,
+        )
+        .await
+        .unwrap();
+
+        assert!(out.cancelled);
+        assert_eq!(out.rows_imported, 0);
+        assert_eq!(count_rows(&pool).await, 2);
+    }
+
+    #[tokio::test]
+    async fn an_empty_batch_does_not_end_the_import_early() {
+        let pool = sqlite_pool().await;
+        // A tabular source emits an empty batch when every row in its window
+        // failed to coerce; the file is not finished.
+        let mut src = FakeSource::new(&[
+            &[],
+            &["INSERT INTO t (id, name) VALUES (3, 'c')"],
+        ]);
+        let out = run(&pool, &mut src, exec_opts(TxMode::AtomicBatch, OnError::Abort))
+            .await
+            .unwrap();
+
+        assert_eq!(out.statements_run, 1);
+        assert_eq!(name_of(&pool, 3).await.as_deref(), Some("c"));
+    }
+
 }
+

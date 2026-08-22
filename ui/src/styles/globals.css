@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Bai+Jamjuree:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500;1,600;1,700&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap');
+@import './fonts.css';
 
 :root {
   /* Minimal Dark Theme (Linear / macOS Native inspired) */
@@ -223,6 +223,15 @@ html, body {
 /* Code & Mono Text */
 .font-mono {
   font-family: var(--font-mono);
+}
+
+/* Small uppercase section label, used above grouped controls */
+.micro-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
 }
 
 /* ==========================================================================

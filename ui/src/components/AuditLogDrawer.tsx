@@ -149,6 +149,7 @@ export const AuditLogDrawer: React.FC<AuditLogDrawerProps> = ({
       case "UPDATE": return "badge-blue";
       case "DELETE": return "badge-red";
       case "DDL": return "badge-purple";
+      case "IMPORT": return "badge-green";
       case "CONNECT":
       case "TEST": return "badge-orange";
       default: return "badge-gray";
@@ -223,6 +224,7 @@ export const AuditLogDrawer: React.FC<AuditLogDrawerProps> = ({
             <option value="UPDATE">UPDATE</option>
             <option value="DELETE">DELETE</option>
             <option value="DDL">DDL (Schema)</option>
+            <option value="IMPORT">IMPORT (Data load)</option>
             <option value="TEST">TEST Connection</option>
           </select>
 

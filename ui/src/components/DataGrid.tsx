@@ -18,6 +18,7 @@ import {
   Edit3,
   Download,
   FileCode,
+  FileSpreadsheet,
   Filter,
   ArrowUp,
   ArrowDown,
@@ -183,7 +184,19 @@ export const DataGrid: React.FC<DataGridProps> = ({
   const [editedCells, setEditedCells] = useState<{ [pkKey: string]: TableRowData }>({});
   const [newRows, setNewRows] = useState<TableRowData[]>([]);
   const [deletedRowKeys, setDeletedRowKeys] = useState<Set<string>>(new Set());
+  // Full Row Insert/Edit Modal State
+  const [rowEditModal, setRowEditModal] = useState<{
+    pkKey: string;
+    rowIdx: number;
+    isNew: boolean;
+    data: TableRowData;
+  } | null>(null);
   const [confirmDeleteRow, setConfirmDeleteRow] = useState<{ pkKey: string; rowIdx: number; rowData: TableRowData } | null>(null);
+
+  // Multi-Row Selection State
+  const [selectedRowIndices, setSelectedRowIndices] = useState<Set<number>>(new Set());
+  const [lastSelectedRowIdx, setLastSelectedRowIdx] = useState<number | null>(null);
+  const [batchCopied, setBatchCopied] = useState<string | null>(null);
 
   // Close export dropdown and context menu on outside click
   useEffect(() => {
@@ -232,13 +245,110 @@ export const DataGrid: React.FC<DataGridProps> = ({
     return feats;
   }, [columns, rows, tableName, page, pageSize]);
 
-  // Full Row Insert/Edit Modal State
-  const [rowEditModal, setRowEditModal] = useState<{
-    pkKey: string;
-    rowIdx: number;
-    isNew: boolean;
-    data: TableRowData;
-  } | null>(null);
+  const handleRowClick = (e: React.MouseEvent, idx: number) => {
+    if (e.metaKey || e.ctrlKey) {
+      setSelectedRowIndices((prev) => {
+        const next = new Set(prev);
+        if (next.has(idx)) next.delete(idx);
+        else next.add(idx);
+        return next;
+      });
+      setLastSelectedRowIdx(idx);
+    } else if (e.shiftKey && lastSelectedRowIdx !== null) {
+      const [low, high] = lastSelectedRowIdx < idx ? [lastSelectedRowIdx, idx] : [idx, lastSelectedRowIdx];
+      const next = new Set(selectedRowIndices);
+      for (let i = low; i <= high; i++) next.add(i);
+      setSelectedRowIndices(next);
+    }
+  };
+
+  const handleIndexCellClick = (e: React.MouseEvent, idx: number) => {
+    e.stopPropagation();
+    if (e.metaKey || e.ctrlKey) {
+      setSelectedRowIndices((prev) => {
+        const next = new Set(prev);
+        if (next.has(idx)) next.delete(idx);
+        else next.add(idx);
+        return next;
+      });
+      setLastSelectedRowIdx(idx);
+    } else if (e.shiftKey && lastSelectedRowIdx !== null) {
+      const [low, high] = lastSelectedRowIdx < idx ? [lastSelectedRowIdx, idx] : [idx, lastSelectedRowIdx];
+      const next = new Set<number>();
+      for (let i = low; i <= high; i++) next.add(i);
+      setSelectedRowIndices(next);
+    } else {
+      setSelectedRowIndices((prev) => (prev.size === 1 && prev.has(idx) ? new Set() : new Set([idx])));
+      setLastSelectedRowIdx(idx);
+    }
+  };
+
+  const handleCopySelectedRows = (format: "json" | "csv" | "sql") => {
+    const selRows = Array.from(selectedRowIndices)
+      .sort((a, b) => a - b)
+      .map((i) => rows[i])
+      .filter(Boolean);
+    if (selRows.length === 0) return;
+
+    if (format === "json") {
+      navigator.clipboard.writeText(JSON.stringify(selRows, null, 2));
+      setBatchCopied("Copied JSON");
+    } else if (format === "csv") {
+      const colNames = columns.map((c) => c.name);
+      const header = colNames.map((c) => `"${c.replace(/"/g, '""')}"`).join(",");
+      const body = selRows
+        .map((r) =>
+          colNames
+            .map((c) => {
+              const val = r[c];
+              if (val === null || val === undefined) return "";
+              const str = typeof val === "object" ? JSON.stringify(val) : String(val);
+              return `"${str.replace(/"/g, '""')}"`;
+            })
+            .join(",")
+        )
+        .join("\n");
+      navigator.clipboard.writeText(`${header}\n${body}`);
+      setBatchCopied("Copied CSV");
+    } else if (format === "sql") {
+      const colList = columns.map((c) => `"${c.name}"`).join(", ");
+      const lines = selRows
+        .map((r) => {
+          const valList = columns
+            .map((c) => {
+              const v = r[c.name];
+              if (v === null || v === undefined) return "NULL";
+              if (typeof v === "number" || typeof v === "boolean") return String(v);
+              return `'${String(v).replace(/'/g, "''")}'`;
+            })
+            .join(", ");
+          return `INSERT INTO "${tableName}" (${colList}) VALUES (${valList});`;
+        })
+        .join("\n");
+      navigator.clipboard.writeText(lines);
+      setBatchCopied("Copied SQL");
+    }
+
+    setTimeout(() => setBatchCopied(null), 2000);
+  };
+
+  const handleBatchDeleteSelected = () => {
+    setDeletedRowKeys((prev) => {
+      const next = new Set(prev);
+      Array.from(selectedRowIndices).forEach((i) => {
+        const r = rows[i];
+        if (r) {
+          next.add(getRowKey(r, i));
+        }
+      });
+      return next;
+    });
+  };
+
+  const handleClearRowSelection = () => {
+    setSelectedRowIndices(new Set());
+    setLastSelectedRowIdx(null);
+  };
 
   // Status message for transactions
   const [commitMsg, setCommitMsg] = useState<{ success: boolean; text: string } | null>(null);
@@ -256,11 +366,20 @@ export const DataGrid: React.FC<DataGridProps> = ({
     setCommitMsg(null);
     setContextMenu(null);
     setInspectRowModal(null);
+    setSelectedRowIndices(new Set());
+    setLastSelectedRowIdx(null);
   }, [tableName, activeDatabase, page, sortColumn, sortOrder, searchQuery, filtersKey]);
 
-  // Handle ESC key to dismiss sub-modals (Inspector, Row Modal, Delete Confirm, Inline Edit, GIS)
+  // Handle ESC key to dismiss sub-modals or clear selection; Cmd+A to select all rows
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const isInput = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a" && !isInput && rows.length > 0) {
+        e.preventDefault();
+        setSelectedRowIndices(new Set(rows.map((_, i) => i)));
+        return;
+      }
+
       if (e.key === "Escape") {
         if (contextMenu) setContextMenu(null);
         else if (gisModalData) setGisModalData(null);
@@ -269,11 +388,12 @@ export const DataGrid: React.FC<DataGridProps> = ({
         else if (rowEditModal) setRowEditModal(null);
         else if (selectedCell) setSelectedCell(null);
         else if (editingCell) setEditingCell(null);
+        else if (selectedRowIndices.size > 0) setSelectedRowIndices(new Set());
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [contextMenu, gisModalData, inspectRowModal, confirmDeleteRow, rowEditModal, selectedCell, editingCell]);
+  }, [contextMenu, gisModalData, inspectRowModal, confirmDeleteRow, rowEditModal, selectedCell, editingCell, rows, selectedRowIndices]);
 
   if (!activeProfile) {
     return (
@@ -1343,42 +1463,71 @@ export const DataGrid: React.FC<DataGridProps> = ({
                   const isDeleted = deletedRowKeys.has(pkKey);
                   const rowEdits = editedCells[pkKey] || {};
                   const isRowEdited = Object.keys(rowEdits).length > 0;
+                  const isSelected = selectedRowIndices.has(idx);
 
                   return (
                     <tr
                       key={pkKey}
-                      className={`${isDeleted ? "row-deleted" : ""} ${isRowEdited ? "row-edited" : ""}`}
+                      className={`${isDeleted ? "row-deleted" : ""} ${isRowEdited ? "row-edited" : ""} ${isSelected ? "row-selected" : ""}`}
+                      onClick={(e) => handleRowClick(e, idx)}
                       onContextMenu={(e) => {
                         e.preventDefault();
-                        setContextMenu({
-                          x: e.clientX,
-                          y: e.clientY,
-                          rowIdx: idx,
-                          row,
-                          pkKey,
-                        });
+                        if (selectedRowIndices.has(idx) && selectedRowIndices.size > 1) {
+                          setContextMenu({
+                            x: e.clientX,
+                            y: e.clientY,
+                            rowIdx: idx,
+                            row,
+                            pkKey,
+                          });
+                        } else {
+                          setSelectedRowIndices(new Set([idx]));
+                          setLastSelectedRowIdx(idx);
+                          setContextMenu({
+                            x: e.clientX,
+                            y: e.clientY,
+                            rowIdx: idx,
+                            row,
+                            pkKey,
+                          });
+                        }
                       }}
                     >
-                      <td className="row-index">{page * pageSize + idx + 1}</td>
+                      <td
+                        className="row-index"
+                        onClick={(e) => handleIndexCellClick(e, idx)}
+                        title="Click to select row (⌘-click to multi-select, Shift-click for range)"
+                      >
+                        {page * pageSize + idx + 1}
+                      </td>
                       <td className="action-cell">
                         <div className="act-group">
                           <button
                             className="icon-edit-btn"
-                            onClick={() => openRowModal(idx, row, false)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openRowModal(idx, row, false);
+                            }}
                             title="Edit Entire Row Modal"
                           >
                             <Edit3 size={11} />
                           </button>
                           <button
                             className="icon-edit-btn"
-                            onClick={() => setSelectedCell({ row: idx, col: pkColName, val: row })}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedCell({ row: idx, col: pkColName, val: row });
+                            }}
                             title="Inspect Full Row Data"
                           >
                             <FileText size={11} />
                           </button>
                           <button
                             className={`icon-del-btn ${isDeleted ? "active is-deleted" : ""}`}
-                            onClick={() => handleRequestDeleteRow(pkKey, idx, row)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRequestDeleteRow(pkKey, idx, row);
+                            }}
                             title={isDeleted ? "Restore Row" : "Mark Row for Delete"}
                           >
                             <Trash2 size={11} />
@@ -1386,7 +1535,10 @@ export const DataGrid: React.FC<DataGridProps> = ({
                           {isDeleted && (
                             <button
                               className="icon-restore-btn"
-                              onClick={() => toggleDeleteRow(pkKey)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleDeleteRow(pkKey);
+                              }}
                               title="Restore Row"
                             >
                               <RotateCcw size={10} />
@@ -1459,6 +1611,70 @@ export const DataGrid: React.FC<DataGridProps> = ({
           </table>
         )}
       </div>
+
+      {/* Floating Multi-Row Selection Toolbar */}
+      {selectedRowIndices.size > 0 && viewMode === "table" && (
+        <div className="grid-floating-bar">
+          <div className="bar-info">
+            <span className="bar-count">{selectedRowIndices.size}</span>
+            <span>rows selected</span>
+          </div>
+
+          <div className="bar-actions">
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => handleCopySelectedRows("json")}
+              title="Copy selected rows as JSON array"
+            >
+              <Copy size={12} />
+              <span>Copy JSON</span>
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => handleCopySelectedRows("csv")}
+              title="Copy selected rows as CSV"
+            >
+              <FileSpreadsheet size={12} />
+              <span>Copy CSV</span>
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => handleCopySelectedRows("sql")}
+              title="Copy selected rows as SQL INSERT statements"
+            >
+              <FileCode size={12} />
+              <span>Copy SQL</span>
+            </button>
+            <button
+              type="button"
+              className="btn btn-danger btn-sm"
+              onClick={handleBatchDeleteSelected}
+              title="Mark selected rows for deletion"
+            >
+              <Trash2 size={12} />
+              <span>Delete {selectedRowIndices.size} Rows</span>
+            </button>
+            <button
+              type="button"
+              className="btn-icon-clear"
+              onClick={handleClearRowSelection}
+              title="Clear selection (Esc)"
+            >
+              <X size={13} />
+            </button>
+          </div>
+
+          {batchCopied && (
+            <div className="bar-toast">
+              <Check size={11} />
+              <span>{batchCopied}!</span>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="grid-footer">
         <span className="pagination-info font-mono">
@@ -1855,106 +2071,168 @@ export const DataGrid: React.FC<DataGridProps> = ({
           }}
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="context-menu-header">
-            Row #{page * pageSize + contextMenu.rowIdx + 1}
-          </div>
-          <button
-            className="context-menu-item"
-            onClick={() => {
-              setInspectRowModal({ rowIdx: contextMenu.rowIdx, row: contextMenu.row, pkKey: contextMenu.pkKey });
-              setInspectSearchTerm("");
-              setContextMenu(null);
-            }}
-          >
-            <Eye size={13} />
-            <span>Inspect Details</span>
-          </button>
-          <button
-            className="context-menu-item"
-            onClick={() => {
-              openRowModal(contextMenu.rowIdx, contextMenu.row, false);
-              setContextMenu(null);
-            }}
-          >
-            <Edit3 size={13} />
-            <span>Edit Record (แก้ไขข้อมูล)</span>
-          </button>
-          {columns.some((c) => isGeometryColumn(c.type, c.name) && isGisData(contextMenu.row[c.name])) && (
-            <button
-              className="context-menu-item"
-              onClick={() => {
-                const gCol = columns.find((c) => isGeometryColumn(c.type, c.name) && isGisData(contextMenu.row[c.name]));
-                if (gCol) {
-                  setGisModalData({
-                    title: `${tableName} — ${gCol.name}`,
-                    subtitle: `Record #${page * pageSize + contextMenu.rowIdx + 1}`,
-                    value: contextMenu.row[gCol.name],
+          {selectedRowIndices.size > 1 && selectedRowIndices.has(contextMenu.rowIdx) ? (
+            <>
+              <div className="context-menu-header">
+                {selectedRowIndices.size} Records Selected
+              </div>
+              <button
+                className="context-menu-item"
+                onClick={() => {
+                  handleCopySelectedRows("json");
+                  setContextMenu(null);
+                }}
+              >
+                <Copy size={13} />
+                <span>Copy {selectedRowIndices.size} Rows as JSON</span>
+              </button>
+              <button
+                className="context-menu-item"
+                onClick={() => {
+                  handleCopySelectedRows("csv");
+                  setContextMenu(null);
+                }}
+              >
+                <FileSpreadsheet size={13} />
+                <span>Copy {selectedRowIndices.size} Rows as CSV</span>
+              </button>
+              <button
+                className="context-menu-item"
+                onClick={() => {
+                  handleCopySelectedRows("sql");
+                  setContextMenu(null);
+                }}
+              >
+                <FileCode size={13} />
+                <span>Copy {selectedRowIndices.size} Rows as SQL</span>
+              </button>
+              <div className="context-menu-separator" />
+              <button
+                className="context-menu-item danger"
+                onClick={() => {
+                  handleBatchDeleteSelected();
+                  setContextMenu(null);
+                }}
+              >
+                <Trash2 size={13} />
+                <span>Delete {selectedRowIndices.size} Records</span>
+              </button>
+              <div className="context-menu-separator" />
+              <button
+                className="context-menu-item"
+                onClick={() => {
+                  handleClearRowSelection();
+                  setContextMenu(null);
+                }}
+              >
+                <X size={13} />
+                <span>Clear Selection</span>
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="context-menu-header">
+                Row #{page * pageSize + contextMenu.rowIdx + 1}
+              </div>
+              <button
+                className="context-menu-item"
+                onClick={() => {
+                  setInspectRowModal({ rowIdx: contextMenu.rowIdx, row: contextMenu.row, pkKey: contextMenu.pkKey });
+                  setInspectSearchTerm("");
+                  setContextMenu(null);
+                }}
+              >
+                <Eye size={13} />
+                <span>Inspect Details</span>
+              </button>
+              <button
+                className="context-menu-item"
+                onClick={() => {
+                  openRowModal(contextMenu.rowIdx, contextMenu.row, false);
+                  setContextMenu(null);
+                }}
+              >
+                <Edit3 size={13} />
+                <span>Edit Record (แก้ไขข้อมูล)</span>
+              </button>
+              {columns.some((c) => isGeometryColumn(c.type, c.name) && isGisData(contextMenu.row[c.name])) && (
+                <button
+                  className="context-menu-item"
+                  onClick={() => {
+                    const gCol = columns.find((c) => isGeometryColumn(c.type, c.name) && isGisData(contextMenu.row[c.name]));
+                    if (gCol) {
+                      setGisModalData({
+                        title: `${tableName} — ${gCol.name}`,
+                        subtitle: `Record #${page * pageSize + contextMenu.rowIdx + 1}`,
+                        value: contextMenu.row[gCol.name],
+                      });
+                    }
+                    setContextMenu(null);
+                  }}
+                >
+                  <Globe size={13} style={{ color: "var(--accent-blue)" }} />
+                  <span>View on Map</span>
+                </button>
+              )}
+              <button
+                className="context-menu-item"
+                onClick={() => {
+                  const clone = { ...contextMenu.row };
+                  columns.forEach((c) => {
+                    if (c.autoIncrement || (c.primaryKey && c.type.toLowerCase().includes("int"))) {
+                      clone[c.name] = "__AUTO__";
+                    }
                   });
-                }
-                setContextMenu(null);
-              }}
-            >
-              <Globe size={13} style={{ color: "var(--accent-blue)" }} />
-              <span>View on Map</span>
-            </button>
+                  setNewRows([...newRows, clone]);
+                  setContextMenu(null);
+                }}
+              >
+                <Plus size={13} />
+                <span>Duplicate Row</span>
+              </button>
+              <div className="context-menu-separator" />
+              <button
+                className="context-menu-item"
+                onClick={() => {
+                  navigator.clipboard.writeText(JSON.stringify(contextMenu.row, null, 2));
+                  setContextMenu(null);
+                }}
+              >
+                <Copy size={13} />
+                <span>Copy as JSON</span>
+              </button>
+              <button
+                className="context-menu-item"
+                onClick={() => {
+                  const cols = Object.keys(contextMenu.row).filter((k) => contextMenu.row[k] !== undefined);
+                  const colList = cols.map((c) => `"${c}"`).join(", ");
+                  const valList = cols.map((c) => {
+                    const v = contextMenu.row[c];
+                    if (v === null) return "NULL";
+                    if (typeof v === "number" || typeof v === "boolean") return String(v);
+                    return `'${String(v).replace(/'/g, "''")}'`;
+                  }).join(", ");
+                  const sql = `INSERT INTO "${tableName}" (${colList}) VALUES (${valList});`;
+                  navigator.clipboard.writeText(sql);
+                  setContextMenu(null);
+                }}
+              >
+                <FileCode size={13} />
+                <span>Copy as SQL INSERT</span>
+              </button>
+              <div className="context-menu-separator" />
+              <button
+                className={`context-menu-item ${deletedRowKeys.has(contextMenu.pkKey) ? "" : "danger"}`}
+                onClick={() => {
+                  toggleDeleteRow(contextMenu.pkKey);
+                  setContextMenu(null);
+                }}
+              >
+                {deletedRowKeys.has(contextMenu.pkKey) ? <RotateCcw size={13} /> : <Trash2 size={13} />}
+                <span>{deletedRowKeys.has(contextMenu.pkKey) ? "Restore Record (ยกเลิกการลบ)" : "Delete Record"}</span>
+              </button>
+            </>
           )}
-          <button
-            className="context-menu-item"
-            onClick={() => {
-              const clone = { ...contextMenu.row };
-              columns.forEach((c) => {
-                if (c.autoIncrement || (c.primaryKey && c.type.toLowerCase().includes("int"))) {
-                  clone[c.name] = "__AUTO__";
-                }
-              });
-              setNewRows([...newRows, clone]);
-              setContextMenu(null);
-            }}
-          >
-            <Plus size={13} />
-            <span>Duplicate Row</span>
-          </button>
-          <div className="context-menu-separator" />
-          <button
-            className="context-menu-item"
-            onClick={() => {
-              navigator.clipboard.writeText(JSON.stringify(contextMenu.row, null, 2));
-              setContextMenu(null);
-            }}
-          >
-            <Copy size={13} />
-            <span>Copy as JSON</span>
-          </button>
-          <button
-            className="context-menu-item"
-            onClick={() => {
-              const cols = Object.keys(contextMenu.row).filter((k) => contextMenu.row[k] !== undefined);
-              const colList = cols.map((c) => `"${c}"`).join(", ");
-              const valList = cols.map((c) => {
-                const v = contextMenu.row[c];
-                if (v === null) return "NULL";
-                if (typeof v === "number" || typeof v === "boolean") return String(v);
-                return `'${String(v).replace(/'/g, "''")}'`;
-              }).join(", ");
-              const sql = `INSERT INTO "${tableName}" (${colList}) VALUES (${valList});`;
-              navigator.clipboard.writeText(sql);
-              setContextMenu(null);
-            }}
-          >
-            <FileCode size={13} />
-            <span>Copy as SQL INSERT</span>
-          </button>
-          <div className="context-menu-separator" />
-          <button
-            className={`context-menu-item ${deletedRowKeys.has(contextMenu.pkKey) ? "" : "danger"}`}
-            onClick={() => {
-              toggleDeleteRow(contextMenu.pkKey);
-              setContextMenu(null);
-            }}
-          >
-            {deletedRowKeys.has(contextMenu.pkKey) ? <RotateCcw size={13} /> : <Trash2 size={13} />}
-            <span>{deletedRowKeys.has(contextMenu.pkKey) ? "Restore Record (ยกเลิกการลบ)" : "Delete Record"}</span>
-          </button>
         </div>
       )}
 
@@ -2530,6 +2808,13 @@ export const DataGrid: React.FC<DataGridProps> = ({
           opacity: 0.8;
         }
 
+        .row-selected td {
+          background: rgba(59, 130, 246, 0.16) !important;
+          border-bottom-color: rgba(59, 130, 246, 0.3) !important;
+        }
+        .row-selected:hover td {
+          background: rgba(59, 130, 246, 0.22) !important;
+        }
         .row-deleted td {
           background: rgba(239, 68, 68, 0.08) !important;
           color: #fca5a5 !important;
@@ -2538,6 +2823,73 @@ export const DataGrid: React.FC<DataGridProps> = ({
         }
         .row-deleted:hover td {
           background: rgba(239, 68, 68, 0.14) !important;
+        }
+
+        .grid-floating-bar {
+          position: fixed;
+          bottom: 40px;
+          left: 50%;
+          transform: translateX(-50%);
+          background: var(--bg-card);
+          border: 1px solid var(--border-medium);
+          box-shadow: var(--shadow-popup);
+          border-radius: var(--radius-md);
+          padding: 6px 12px;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          z-index: 999;
+          animation: slideUpFloat 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        @keyframes slideUpFloat {
+          from { opacity: 0; transform: translate(-50%, 10px); }
+          to { opacity: 1; transform: translate(-50%, 0); }
+        }
+        .bar-info {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 11.5px;
+          font-weight: 500;
+          color: var(--text-main);
+        }
+        .bar-count {
+          background: var(--accent-blue);
+          color: #fff;
+          font-size: 10px;
+          font-weight: 700;
+          padding: 1.5px 6px;
+          border-radius: 10px;
+        }
+        .bar-actions {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+        .btn-icon-clear {
+          background: transparent;
+          border: none;
+          color: var(--text-muted);
+          cursor: pointer;
+          padding: 4px;
+          border-radius: 3px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: all 0.12s ease;
+        }
+        .btn-icon-clear:hover {
+          color: var(--text-main);
+          background: var(--bg-hover);
+        }
+        .bar-toast {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          font-size: 11px;
+          color: #10b981;
+          font-weight: 600;
+          animation: fadeIn 0.12s ease;
         }
 
         .delete-confirm-card {

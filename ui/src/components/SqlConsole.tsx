@@ -19,6 +19,7 @@ interface SqlConsoleProps {
   tables?: string[];
   columns?: ColumnInfo[];
   theme?: "dark" | "light";
+  initialSql?: string;
   onExecuteSql: (sql: string) => Promise<QueryExecutionResult>;
   onCommitChanges?: (changes: PendingChanges) => Promise<CommitResult>;
 }
@@ -67,12 +68,20 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
   tables = [],
   columns = [],
   theme = "dark",
+  initialSql,
   onExecuteSql,
   onCommitChanges,
 }) => {
   const [sql, setSql] = useState<string>(
-    activeTable ? `SELECT * FROM ${activeTable} LIMIT 50;` : "SELECT 1;"
+    initialSql || (activeTable ? `SELECT * FROM ${activeTable} LIMIT 50;` : "SELECT 1;")
   );
+
+  useEffect(() => {
+    if (initialSql && initialSql !== sql) {
+      setSql(initialSql);
+    }
+  }, [initialSql]);
+
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<QueryExecutionResult | null>(null);
 
