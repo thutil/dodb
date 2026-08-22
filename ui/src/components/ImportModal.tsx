@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   Clock,
   Copy,
+  Database,
   FileCode,
   FileJson,
   FileSpreadsheet,
@@ -274,9 +275,11 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   }, [file, format, csv]);
 
   useEffect(() => {
-    if (step !== 2 || !file) return;
-    loadPreview();
-  }, [step, file, loadPreview]);
+    if (!file) return;
+    if (format === "sql" || step === 2) {
+      loadPreview();
+    }
+  }, [step, file, format, loadPreview]);
 
   const isTabular = format !== "sql";
   const creatingTable = targetTable === CREATE_NEW;
@@ -458,6 +461,16 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
   if (!isOpen || !mounted || typeof document === "undefined") return null;
 
+  const stepsToDisplay = useMemo(() => {
+    if (format === "sql") {
+      return [
+        { id: 1 as Step, label: "SQL Import", hint: "File, preview & options" },
+        { id: 4 as Step, label: "Run", hint: "Progress & report" }
+      ];
+    }
+    return STEPS;
+  }, [format]);
+
   const content = (
     <div className="import-portal-root">
       <div className="import-overlay" onMouseDown={handleClose}>
@@ -489,7 +502,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
           {/* ---------- Body ---------- */}
           <div className="import-body">
             <nav className="step-rail">
-              {STEPS.map((s) => {
+              {stepsToDisplay.map((s) => {
                 const state = s.id === step ? "is-current" : s.id < step ? "is-done" : "";
                 const blocked = stepBlocker(s.id);
                 return (
@@ -519,6 +532,15 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                   picking={picking}
                   dragging={dragging}
                   error={fileError}
+                  preview={preview}
+                  previewing={previewing}
+                  previewError={previewError}
+                  activeDatabase={activeDatabase}
+                  txMode={txMode}
+                  onErrorMode={onErrorMode}
+                  dryRun={dryRun}
+                  dialectMismatch={dialectMismatch}
+                  connectionType={activeProfile?.type}
                   onBrowse={handleBrowse}
                   onDrop={handleDrop}
                   onDragState={setDragging}
@@ -531,6 +553,10 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                     setCsv((prev) => ({ ...prev, ...patch }));
                     setPreview(null);
                   }}
+                  onTxMode={setTxMode}
+                  onErrorModeChange={setOnErrorMode}
+                  onDryRun={setDryRun}
+                  onRetryPreview={loadPreview}
                 />
               )}
 
@@ -622,7 +648,17 @@ export const ImportModal: React.FC<ImportModalProps> = ({
               <button className="btn btn-secondary" onClick={handleClose} disabled={running}>
                 {step === 4 && !running ? "Close" : "Cancel"}
               </button>
-              {step < 3 && (
+              {step === 1 && format === "sql" && (
+                <button
+                  className="btn btn-primary"
+                  onClick={handleStart}
+                  disabled={!file || previewing || !activeProfile}
+                >
+                  <Play size={12} />
+                  <span>{dryRun ? "Run Dry Run" : "Start SQL Import"}</span>
+                </button>
+              )}
+              {step < 3 && format !== "sql" && (
                 <button
                   className="btn btn-primary"
                   onClick={() => setStep((s) => (s + 1) as Step)}
@@ -643,7 +679,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                 </button>
               )}
               {step === 4 && !running && (
-                <button className="btn btn-secondary" onClick={() => setStep(3)}>
+                <button className="btn btn-secondary" onClick={() => setStep(format === "sql" ? 1 : 3)}>
                   <Settings2 size={12} />
                   <span>Options</span>
                 </button>
@@ -894,11 +930,24 @@ interface SourceStepProps {
   picking: boolean;
   dragging: boolean;
   error: string | null;
+  preview: ImportPreview | null;
+  previewing: boolean;
+  previewError: string | null;
+  activeDatabase: string;
+  txMode: TxMode;
+  onErrorMode: OnErrorMode;
+  dryRun: boolean;
+  dialectMismatch: string | null;
+  connectionType?: string;
   onBrowse: () => void;
   onDrop: (e: React.DragEvent) => void;
   onDragState: (dragging: boolean) => void;
   onFormat: (format: ImportFormat) => void;
   onCsv: (patch: Partial<CsvOptions>) => void;
+  onTxMode: (tx: TxMode) => void;
+  onErrorModeChange: (m: OnErrorMode) => void;
+  onDryRun: (d: boolean) => void;
+  onRetryPreview: () => void;
 }
 
 const SourceStep: React.FC<SourceStepProps> = ({
@@ -908,17 +957,30 @@ const SourceStep: React.FC<SourceStepProps> = ({
   picking,
   dragging,
   error,
+  preview,
+  previewing,
+  previewError,
+  activeDatabase,
+  txMode,
+  onErrorMode,
+  dryRun,
+  dialectMismatch,
+  connectionType,
   onBrowse,
   onDrop,
   onDragState,
   onFormat,
-  onCsv
+  onCsv,
+  onTxMode,
+  onErrorModeChange,
+  onDryRun,
+  onRetryPreview
 }) => (
   <div className="pane">
     <SectionHeader
       icon={<Upload size={14} />}
-      title="Source file"
-      sub="Read straight off disk, so a multi-gigabyte dump never has to fit in memory."
+      title="Source File"
+      sub="Select a file to import into your database."
     />
 
     {file ? (
@@ -935,7 +997,7 @@ const SourceStep: React.FC<SourceStepProps> = ({
         </div>
         <button className="btn btn-secondary btn-sm" onClick={onBrowse} disabled={picking}>
           {picking ? <Loader2 size={11} className="spin" /> : <FolderOpen size={11} />}
-          <span>Change</span>
+          <span>Change File</span>
         </button>
       </div>
     ) : (
@@ -977,6 +1039,101 @@ const SourceStep: React.FC<SourceStepProps> = ({
         ))}
       </div>
     </div>
+
+    {/* SQL Dump Direct Single-View Panel */}
+    {format === "sql" && file && (
+      <div className="sql-direct-panel">
+        <div className="sql-info-row">
+          <div className="target-badge">
+            <Database size={13} className="target-badge-icon" />
+            <span>Target Database: <strong className="font-mono">{activeDatabase}</strong></span>
+          </div>
+          {preview?.kind === "sql" && (
+            <span className="sql-stmt-badge font-mono">
+              ~{preview.estimatedStatements.toLocaleString()} statements
+            </span>
+          )}
+        </div>
+
+        {dialectMismatch && (
+          <Banner
+            tone="warn"
+            text={`This dump looks like ${dialectMismatch}, but you are connected to ${connectionType}. Dialect-specific statements may fail.`}
+          />
+        )}
+        {preview?.kind === "sql" && preview.copyBlocks > 0 && (
+          <Banner
+            tone="info"
+            text={`${preview.copyBlocks} COPY … FROM stdin block(s) found and will be converted to INSERTs automatically.`}
+          />
+        )}
+        {previewError && (
+          <Banner
+            tone="error"
+            text={`Failed to read preview: ${previewError}`}
+          />
+        )}
+
+        {/* SQL Statements Preview */}
+        <div className="sql-preview-card">
+          <div className="sql-card-header">
+            <span className="sql-card-title font-mono">SQL Statement Preview</span>
+            {previewing && <Loader2 size={12} className="spin" />}
+          </div>
+          <div className="sql-list-view font-mono">
+            {preview?.kind === "sql" && preview.statements.length > 0 ? (
+              preview.statements.slice(0, 50).map((s, i) => (
+                <div key={i} className="sql-preview-row">
+                  <span className="sql-line-num">{s.line}</span>
+                  <span className="sql-code-snippet">{s.sql}</span>
+                </div>
+              ))
+            ) : previewing ? (
+              <div className="sql-empty-hint">Scanning SQL statements...</div>
+            ) : (
+              <div className="sql-empty-hint">No SQL statements found in preview.</div>
+            )}
+          </div>
+        </div>
+
+        {/* Options Row */}
+        <div className="sql-options-card">
+          <span className="micro-label">Execution Options</span>
+          <div className="sql-options-grid">
+            <label className="field">
+              <span className="field-label">Transaction Mode</span>
+              <select
+                className="input select"
+                value={txMode}
+                onChange={(e) => onTxMode(e.target.value as TxMode)}
+              >
+                <option value="single">Single Transaction (All or nothing)</option>
+                <option value="none">Statement by Statement (No Transaction)</option>
+              </select>
+            </label>
+            <label className="field">
+              <span className="field-label">On Statement Error</span>
+              <select
+                className="input select"
+                value={onErrorMode}
+                onChange={(e) => onErrorModeChange(e.target.value as OnErrorMode)}
+              >
+                <option value="stop">Stop immediately</option>
+                <option value="continue">Continue on errors</option>
+              </select>
+            </label>
+          </div>
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={dryRun}
+              onChange={(e) => onDryRun(e.target.checked)}
+            />
+            <span>Dry run (validate SQL syntax without committing changes)</span>
+          </label>
+        </div>
+      </div>
+    )}
 
     {format === "csv" && (
       <div className="field-group">
@@ -1203,6 +1360,118 @@ const SourceStep: React.FC<SourceStepProps> = ({
         font-size: 11.5px;
         color: var(--text-main);
         cursor: pointer;
+      }
+      .sql-direct-panel {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        animation: fadeIn 0.12s ease;
+      }
+      .sql-info-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .target-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11.5px;
+        color: var(--text-main);
+        background: var(--bg-tertiary);
+        padding: 5px 10px;
+        border: 1px solid var(--border-light);
+        border-radius: var(--radius-xs);
+      }
+      :global(.target-badge-icon) {
+        color: var(--accent-blue);
+      }
+      .sql-stmt-badge {
+        font-size: 10.5px;
+        font-weight: 600;
+        color: var(--text-sub);
+        background: var(--bg-tertiary);
+        padding: 4px 8px;
+        border: 1px solid var(--border-light);
+        border-radius: var(--radius-xs);
+      }
+      .sql-preview-card {
+        display: flex;
+        flex-direction: column;
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border-light);
+        border-radius: var(--radius-sm);
+        overflow: hidden;
+      }
+      .sql-card-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 6px 10px;
+        background: var(--bg-card);
+        border-bottom: 1px solid var(--border-light);
+      }
+      .sql-card-title {
+        font-size: 10.5px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        font-weight: 700;
+        color: var(--text-muted);
+      }
+      .sql-list-view {
+        max-height: 180px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        font-size: 11px;
+        background: var(--bg-tertiary);
+      }
+      .sql-preview-row {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        padding: 4px 10px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+      }
+      .sql-preview-row:last-child {
+        border-bottom: none;
+      }
+      .sql-line-num {
+        color: var(--text-muted);
+        font-size: 10px;
+        user-select: none;
+        min-width: 24px;
+      }
+      .sql-code-snippet {
+        color: var(--text-main);
+        word-break: break-all;
+        line-height: 1.4;
+      }
+      .sql-empty-hint {
+        padding: 18px;
+        font-size: 11px;
+        color: var(--text-muted);
+        text-align: center;
+      }
+      .sql-options-card {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 10px 12px;
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border-light);
+        border-radius: var(--radius-sm);
+      }
+      .sql-options-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+      @media (max-width: 600px) {
+        .sql-options-grid {
+          grid-template-columns: 1fr;
+        }
       }
       .note {
         font-size: 10.5px;

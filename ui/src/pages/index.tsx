@@ -778,15 +778,62 @@ export default function Home() {
     });
   };
 
+  const handleRequestTruncateMultiple = (tbls: string[]) => {
+    if (tbls.length === 0) return;
+    if (tbls.length === 1) {
+      handleRequestTruncate(tbls[0]);
+      return;
+    }
+    const dialect: DBType = activeProfile?.type === "mariadb" ? "mariadb" : activeProfile?.type === "sqlite" ? "sqlite" : "postgres";
+    const stmts = tbls.map((t) => buildTruncateTable(t, dialect, false));
+    const cascadeStmts = tbls.map((t) => buildTruncateTable(t, dialect, true));
+    setConfirmDdlRequest({
+      title: `Truncate ${tbls.length} Tables`,
+      description: `Are you sure you want to delete all rows in ${tbls.length} tables (${tbls.slice(0, 3).join(", ")}${tbls.length > 3 ? "..." : ""})? This action cannot be undone.`,
+      statements: stmts,
+      cascadeStatements: cascadeStmts,
+      allowCascade: dialect === "postgres",
+      confirmLabel: `Truncate ${tbls.length} Tables`,
+      typeToConfirm: "TRUNCATE",
+    });
+  };
+
+  const handleRequestDropMultiple = (tbls: string[]) => {
+    if (tbls.length === 0) return;
+    if (tbls.length === 1) {
+      handleRequestDrop(tbls[0]);
+      return;
+    }
+    const dialect: DBType = activeProfile?.type === "mariadb" ? "mariadb" : activeProfile?.type === "sqlite" ? "sqlite" : "postgres";
+    const stmts = tbls.map((t) => buildDropTable(t, dialect, false));
+    const cascadeStmts = tbls.map((t) => buildDropTable(t, dialect, true));
+    setConfirmDdlRequest({
+      title: `Drop ${tbls.length} Tables`,
+      description: `Are you sure you want to permanently DROP ${tbls.length} tables (${tbls.slice(0, 3).join(", ")}${tbls.length > 3 ? "..." : ""}) and all their data? This action cannot be undone.`,
+      statements: stmts,
+      cascadeStatements: cascadeStmts,
+      allowCascade: dialect !== "sqlite",
+      confirmLabel: `Drop ${tbls.length} Tables`,
+      typeToConfirm: "DROP",
+    });
+  };
+
   const handleDdlDone = async () => {
     const req = confirmDdlRequest;
     setConfirmDdlRequest(null);
     await fetchTables();
-    if (req?.typeToConfirm && req.typeToConfirm === activeTable && req.title.startsWith("Drop")) {
-      setActiveTable(null);
-      setRows([]);
-      setColumns([]);
-      setTotalRows(0);
+    if (req && req.title.startsWith("Drop")) {
+      const droppedCurrent =
+        (req.typeToConfirm && req.typeToConfirm === activeTable) ||
+        (activeTable && req.statements.some((s) => s.includes(quoteTableIdent(activeTable, activeProfile?.type === "mariadb" ? "mariadb" : activeProfile?.type === "sqlite" ? "sqlite" : "postgres"))));
+      if (droppedCurrent) {
+        setActiveTable(null);
+        setRows([]);
+        setColumns([]);
+        setTotalRows(0);
+      } else {
+        fetchTableData();
+      }
     } else {
       fetchTableData();
     }
@@ -891,6 +938,8 @@ export default function Home() {
               onEditStructure={(tbl) => setEditTableModalTable(tbl)}
               onTruncateTable={(tbl) => handleRequestTruncate(tbl)}
               onDropTable={(tbl) => handleRequestDrop(tbl)}
+              onTruncateTables={(tbls) => handleRequestTruncateMultiple(tbls)}
+              onDropTables={(tbls) => handleRequestDropMultiple(tbls)}
               onImportIntoDatabase={() => setImportTarget({ table: null })}
               onImportIntoTable={(tbl) => setImportTarget({ table: tbl })}
               onOpenInSql={(sql) => {

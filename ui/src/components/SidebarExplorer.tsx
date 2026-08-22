@@ -17,6 +17,8 @@ interface SidebarExplorerProps {
   onEditStructure?: (table: string) => void;
   onTruncateTable?: (table: string) => void;
   onDropTable?: (table: string) => void;
+  onTruncateTables?: (tables: string[]) => void;
+  onDropTables?: (tables: string[]) => void;
   onImportIntoDatabase?: () => void;
   onImportIntoTable?: (table: string) => void;
   onRefresh: () => void;
@@ -24,9 +26,10 @@ interface SidebarExplorerProps {
   dbType?: string;
 }
 
-/** Right-click target: a specific table, or empty space in the tables list. */
+/** Right-click target: a specific table, multiple tables, or empty space. */
 type MenuTarget =
   | { kind: "table"; x: number; y: number; table: string }
+  | { kind: "multi_tables"; x: number; y: number; tables: string[] }
   | { kind: "blank"; x: number; y: number };
 
 export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
@@ -42,6 +45,8 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
   onEditStructure,
   onTruncateTable,
   onDropTable,
+  onTruncateTables,
+  onDropTables,
   onImportIntoDatabase,
   onImportIntoTable,
   onRefresh,
@@ -50,6 +55,8 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
 }) => {
   const [mounted, setMounted] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  const [selectedTables, setSelectedTables] = useState<Set<string>>(new Set());
+  const [lastSelectedTable, setLastSelectedTable] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<MenuTarget | null>(null);
   const [copiedItem, setCopiedItem] = useState(false);
 
@@ -57,24 +64,81 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
     setMounted(true);
   }, []);
 
+  // Synchronize activeTable with selectedTables if not multi-selecting
+  useEffect(() => {
+    if (activeTable && selectedTables.size <= 1 && !selectedTables.has(activeTable)) {
+      setSelectedTables(new Set([activeTable]));
+      setLastSelectedTable(activeTable);
+    }
+  }, [activeTable]);
+
   // Structure editing is unavailable on SQLite (its ALTER TABLE cannot express it).
   const isSqlite = dbType === "sqlite";
   const dialect: DBType = dbType === "mariadb" || dbType === "mysql" ? "mariadb" : isSqlite ? "sqlite" : "postgres";
   const quoteIdent = (name: string) => quoteTableIdent(name, dialect);
 
+  const filteredTables = tables.filter((table) =>
+    table.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const handleTableClick = (e: React.MouseEvent, table: string) => {
+    if (e.metaKey || e.ctrlKey) {
+      // Toggle selection with Command / Ctrl
+      setSelectedTables((prev) => {
+        const next = new Set(prev);
+        if (next.has(table)) {
+          next.delete(table);
+        } else {
+          next.add(table);
+        }
+        if (next.size === 1) {
+          onSelectTable(Array.from(next)[0]);
+        }
+        return next;
+      });
+      setLastSelectedTable(table);
+    } else if (e.shiftKey && lastSelectedTable && filteredTables.includes(lastSelectedTable)) {
+      // Range selection with Shift
+      const startIdx = filteredTables.indexOf(lastSelectedTable);
+      const endIdx = filteredTables.indexOf(table);
+      if (startIdx !== -1 && endIdx !== -1) {
+        const [low, high] = startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
+        const range = filteredTables.slice(low, high + 1);
+        setSelectedTables(new Set(range));
+      }
+    } else {
+      // Normal single selection
+      setSelectedTables(new Set([table]));
+      setLastSelectedTable(table);
+      onSelectTable(table);
+    }
+  };
+
   const openMenu = (e: React.MouseEvent, target: { kind: "table"; table: string } | { kind: "blank" }) => {
     e.preventDefault();
     e.stopPropagation();
+
+    if (target.kind === "table") {
+      if (selectedTables.has(target.table) && selectedTables.size > 1) {
+        setContextMenu({
+          kind: "multi_tables",
+          tables: Array.from(selectedTables),
+          x: Math.min(e.clientX, window.innerWidth - 210),
+          y: Math.min(e.clientY, window.innerHeight - 300),
+        });
+        return;
+      } else {
+        setSelectedTables(new Set([target.table]));
+        setLastSelectedTable(target.table);
+      }
+    }
+
     setContextMenu({
       ...target,
       x: Math.min(e.clientX, window.innerWidth - 210),
       y: Math.min(e.clientY, window.innerHeight - 300),
     } as MenuTarget);
   };
-
-  const filteredTables = tables.filter((table) =>
-    table.toLowerCase().includes(searchTerm.toLowerCase())
-  );
 
   // Close context menu when clicking outside or pressing Escape
   useEffect(() => {
@@ -102,6 +166,15 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
     }, 600);
   };
 
+  const handleCopyMultipleNames = (tbls: string[]) => {
+    navigator.clipboard.writeText(tbls.join("\n"));
+    setCopiedItem(true);
+    setTimeout(() => {
+      setCopiedItem(false);
+      setContextMenu(null);
+    }, 600);
+  };
+
   const handleCopySelect = (tableName: string) => {
     navigator.clipboard.writeText(`SELECT * FROM ${quoteIdent(tableName)} LIMIT 50;`);
     setCopiedItem(true);
@@ -109,6 +182,30 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
       setCopiedItem(false);
       setContextMenu(null);
     }, 600);
+  };
+
+  const handleClearSelection = () => {
+    if (activeTable) {
+      setSelectedTables(new Set([activeTable]));
+    } else {
+      setSelectedTables(new Set());
+    }
+  };
+
+  const handleBatchDrop = (tbls: string[]) => {
+    if (onDropTables) {
+      onDropTables(tbls);
+    } else if (onDropTable && tbls.length > 0) {
+      onDropTable(tbls[0]);
+    }
+  };
+
+  const handleBatchTruncate = (tbls: string[]) => {
+    if (onTruncateTables) {
+      onTruncateTables(tbls);
+    } else if (onTruncateTable && tbls.length > 0) {
+      onTruncateTable(tbls[0]);
+    }
   };
 
   return (
@@ -147,7 +244,7 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
           <input
             type="text"
             className="input search-field"
-            placeholder="Filter tables..."
+            placeholder="Filter tables (⌘-click to multi-select)..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             autoCapitalize="none"
@@ -161,6 +258,54 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
           )}
         </div>
       </div>
+
+      {/* Multi-Selection Action Banner */}
+      {selectedTables.size > 1 && (
+        <div className="multi-select-banner">
+          <div className="multi-select-info">
+            <span className="multi-count">{selectedTables.size}</span>
+            <span>tables selected</span>
+          </div>
+          <div className="multi-select-actions">
+            <button
+              type="button"
+              className="btn-multi-action"
+              onClick={() => handleCopyMultipleNames(Array.from(selectedTables))}
+              title="Copy table names"
+            >
+              <Copy size={11} />
+            </button>
+            {!isSqlite && (onTruncateTables || onTruncateTable) && (
+              <button
+                type="button"
+                className="btn-multi-action danger"
+                onClick={() => handleBatchTruncate(Array.from(selectedTables))}
+                title="Truncate selected tables"
+              >
+                <Eraser size={11} />
+              </button>
+            )}
+            {(onDropTables || onDropTable) && (
+              <button
+                type="button"
+                className="btn-multi-action danger"
+                onClick={() => handleBatchDrop(Array.from(selectedTables))}
+                title="Drop selected tables"
+              >
+                <Trash2 size={11} />
+              </button>
+            )}
+            <button
+              type="button"
+              className="btn-multi-action"
+              onClick={handleClearSelection}
+              title="Clear selection"
+            >
+              <X size={11} />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Tables list */}
       <div
@@ -199,16 +344,17 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
         ) : (
           <div className="table-tree">
             {filteredTables.map((table) => {
-              const isActive = activeTable === table;
+              const isSelected = selectedTables.has(table);
+              const isActive = activeTable === table && selectedTables.size <= 1;
               return (
                 <div
                   key={table}
-                  className={`tree-item ${isActive ? "active" : ""}`}
-                  onClick={() => onSelectTable(table)}
+                  className={`tree-item ${isActive ? "active" : ""} ${isSelected ? "selected" : ""}`}
+                  onClick={(e) => handleTableClick(e, table)}
                   onContextMenu={(e) => openMenu(e, { kind: "table", table })}
-                  title={`${table} (Right-click for options)`}
+                  title={`${table} (⌘/Ctrl+Click to multi-select, Right-click for options)`}
                 >
-                  <Table2 size={14} className={`tree-icon ${isActive ? "active-icon" : ""}`} />
+                  <Table2 size={14} className={`tree-icon ${isActive || isSelected ? "active-icon" : ""}`} />
                   <span className="tree-label">{table}</span>
                 </div>
               );
@@ -275,6 +421,66 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
               >
                 <RefreshCw size={13} />
                 <span>Refresh Tables</span>
+              </button>
+            </>
+          ) : contextMenu.kind === "multi_tables" ? (
+            <>
+              <div className="context-menu-header">
+                <Database size={12} className="menu-header-icon" />
+                <span className="menu-header-name">{contextMenu.tables.length} Tables Selected</span>
+              </div>
+
+              <div className="context-menu-divider" />
+
+              <button
+                className="context-menu-item"
+                onClick={() => handleCopyMultipleNames(contextMenu.tables)}
+              >
+                {copiedItem ? <Check size={13} className="copy-check" /> : <Copy size={13} />}
+                <span>{copiedItem ? "Copied Names!" : `Copy ${contextMenu.tables.length} Table Names`}</span>
+              </button>
+
+              {(onTruncateTables || onTruncateTable || onDropTables || onDropTable) && (
+                <div className="context-menu-divider" />
+              )}
+
+              {!isSqlite && (onTruncateTables || onTruncateTable) && (
+                <button
+                  className="context-menu-item danger"
+                  onClick={() => {
+                    handleBatchTruncate(contextMenu.tables);
+                    setContextMenu(null);
+                  }}
+                >
+                  <Eraser size={13} />
+                  <span>Truncate {contextMenu.tables.length} Tables</span>
+                </button>
+              )}
+
+              {(onDropTables || onDropTable) && (
+                <button
+                  className="context-menu-item danger"
+                  onClick={() => {
+                    handleBatchDrop(contextMenu.tables);
+                    setContextMenu(null);
+                  }}
+                >
+                  <Trash2 size={13} />
+                  <span>Drop {contextMenu.tables.length} Tables</span>
+                </button>
+              )}
+
+              <div className="context-menu-divider" />
+
+              <button
+                className="context-menu-item"
+                onClick={() => {
+                  handleClearSelection();
+                  setContextMenu(null);
+                }}
+              >
+                <X size={13} />
+                <span>Clear Selection</span>
               </button>
             </>
           ) : (
@@ -527,6 +733,64 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
           color: var(--text-main);
         }
 
+        .multi-select-banner {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 6px 8px;
+          background: rgba(59, 130, 246, 0.12);
+          border: 1px solid rgba(59, 130, 246, 0.3);
+          border-radius: var(--radius-xs);
+          animation: slideDown 0.14s ease;
+        }
+        @keyframes slideDown {
+          from { opacity: 0; transform: translateY(-4px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .multi-select-info {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          font-size: 11px;
+          color: var(--text-main);
+          font-weight: 500;
+        }
+        .multi-count {
+          background: var(--accent-blue);
+          color: #fff;
+          font-weight: 700;
+          font-size: 10px;
+          padding: 1px 5px;
+          border-radius: 10px;
+        }
+        .multi-select-actions {
+          display: flex;
+          align-items: center;
+          gap: 3px;
+        }
+        .btn-multi-action {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 22px;
+          height: 22px;
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-light);
+          border-radius: var(--radius-xs);
+          color: var(--text-main);
+          cursor: pointer;
+          transition: all 0.12s ease;
+        }
+        .btn-multi-action:hover {
+          background: var(--bg-hover);
+          color: var(--text-main);
+        }
+        .btn-multi-action.danger:hover {
+          background: rgba(244, 63, 94, 0.2);
+          color: var(--accent-red);
+          border-color: rgba(244, 63, 94, 0.4);
+        }
+
         .tables-group {
           min-height: 0;
           flex: 1;
@@ -560,6 +824,12 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
         .tree-item:hover {
           background: var(--bg-hover);
           color: var(--text-main);
+        }
+        .tree-item.selected {
+          background: rgba(59, 130, 246, 0.18);
+          color: var(--text-main);
+          font-weight: 500;
+          border: 1px solid rgba(59, 130, 246, 0.35);
         }
         .tree-item.active {
           background: var(--bg-active);
