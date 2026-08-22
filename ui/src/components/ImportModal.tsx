@@ -61,6 +61,62 @@ interface ImportModalProps {
   onImported: (report: ImportReport) => void;
 }
 
+interface ImportErrorBoundaryState {
+  hasError: boolean;
+  errorMsg: string;
+}
+
+class ImportErrorBoundary extends React.Component<
+  { children: React.ReactNode; onClose: () => void },
+  ImportErrorBoundaryState
+> {
+  constructor(props: { children: React.ReactNode; onClose: () => void }) {
+    super(props);
+    this.state = { hasError: false, errorMsg: "" };
+  }
+
+  static getDerivedStateFromError(error: Error): ImportErrorBoundaryState {
+    return { hasError: true, errorMsg: error?.message || String(error) };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error("ImportModal caught error:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="import-portal-root">
+          <div className="import-overlay" onMouseDown={this.props.onClose}>
+            <div
+              className="import-card"
+              style={{ height: "auto", padding: 24, gap: 16, maxWidth: 500 }}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <div style={{ fontWeight: 600, fontSize: 14, color: "var(--text-main)" }}>
+                Import Error
+              </div>
+              <div style={{ fontSize: 12, color: "var(--accent-red)", fontFamily: "monospace" }}>
+                {this.state.errorMsg}
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={this.props.onClose}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 type Step = 1 | 2 | 3 | 4;
 
 const STEPS: { id: Step; label: string; hint: string }[] = [
@@ -297,7 +353,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
       .getColumns(activeProfile.id, activeDatabase, targetTable)
       .then((res) => {
         if (!alive) return;
-        const cols = (res as { columns?: ColumnInfo[] })?.columns ?? [];
+        const cols = Array.isArray(res) ? res : (res as { columns?: ColumnInfo[] })?.columns ?? [];
         setTargetColumns(Array.isArray(cols) ? cols : []);
       })
       .catch(() => {
@@ -312,7 +368,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   }, [isTabular, creatingTable, targetTable, activeProfile, activeDatabase]);
 
   const previewColumns = useMemo(
-    () => (preview?.kind === "tabular" ? preview.columns : []),
+    () => (preview?.kind === "tabular" && Array.isArray(preview.columns) ? preview.columns : []),
     [preview]
   );
 
@@ -363,7 +419,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
   const dialectMismatch = useMemo(() => {
     if (preview?.kind !== "sql" || !activeProfile) return null;
-    const hints = preview.dialectHints;
+    const hints = Array.isArray(preview.dialectHints) ? preview.dialectHints : [];
     if (hints.length === 0 || hints.includes(activeProfile.type)) return null;
     return hints.join(", ");
   }, [preview, activeProfile]);
@@ -423,6 +479,16 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     ]
   );
 
+  const stepsToDisplay = useMemo(() => {
+    if (format === "sql") {
+      return [
+        { id: 1 as Step, label: "SQL Import", hint: "File, preview & options" },
+        { id: 4 as Step, label: "Run", hint: "Progress & report" }
+      ];
+    }
+    return STEPS;
+  }, [format]);
+
   const handleStart = async () => {
     if (!activeProfile || !file) return;
     setStartError(null);
@@ -460,16 +526,6 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   };
 
   if (!isOpen || !mounted || typeof document === "undefined") return null;
-
-  const stepsToDisplay = useMemo(() => {
-    if (format === "sql") {
-      return [
-        { id: 1 as Step, label: "SQL Import", hint: "File, preview & options" },
-        { id: 4 as Step, label: "Run", hint: "Progress & report" }
-      ];
-    }
-    return STEPS;
-  }, [format]);
 
   const content = (
     <div className="import-portal-root">
@@ -916,7 +972,12 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     </div>
   );
 
-  return createPortal(content, document.body);
+  return createPortal(
+    <ImportErrorBoundary onClose={handleClose}>
+      {content}
+    </ImportErrorBoundary>,
+    document.body
+  );
 };
 
 // ==========================================
@@ -1030,7 +1091,6 @@ const SourceStep: React.FC<SourceStepProps> = ({
             key={f.id}
             className={`pill ${format === f.id ? "is-active" : ""}`}
             onClick={() => onFormat(f.id)}
-            disabled={!file}
           >
             <FormatIcon format={f.id} size={13} />
             <span className="pill-label">{f.label}</span>
@@ -1041,16 +1101,16 @@ const SourceStep: React.FC<SourceStepProps> = ({
     </div>
 
     {/* SQL Dump Direct Single-View Panel */}
-    {format === "sql" && file && (
+    {format === "sql" && (
       <div className="sql-direct-panel">
         <div className="sql-info-row">
           <div className="target-badge">
             <Database size={13} className="target-badge-icon" />
-            <span>Target Database: <strong className="font-mono">{activeDatabase}</strong></span>
+            <span>Target Database: <strong className="font-mono">{activeDatabase || "None"}</strong></span>
           </div>
-          {preview?.kind === "sql" && (
+          {preview?.kind === "sql" && preview.estimatedStatements != null && (
             <span className="sql-stmt-badge font-mono">
-              ~{preview.estimatedStatements.toLocaleString()} statements
+              ~{Number(preview.estimatedStatements || 0).toLocaleString()} statements
             </span>
           )}
         </div>
@@ -1058,10 +1118,10 @@ const SourceStep: React.FC<SourceStepProps> = ({
         {dialectMismatch && (
           <Banner
             tone="warn"
-            text={`This dump looks like ${dialectMismatch}, but you are connected to ${connectionType}. Dialect-specific statements may fail.`}
+            text={`This dump looks like ${dialectMismatch}, but you are connected to ${connectionType || "current database"}. Dialect-specific statements may fail.`}
           />
         )}
-        {preview?.kind === "sql" && preview.copyBlocks > 0 && (
+        {preview?.kind === "sql" && typeof preview.copyBlocks === "number" && preview.copyBlocks > 0 && (
           <Banner
             tone="info"
             text={`${preview.copyBlocks} COPY … FROM stdin block(s) found and will be converted to INSERTs automatically.`}
@@ -1075,26 +1135,28 @@ const SourceStep: React.FC<SourceStepProps> = ({
         )}
 
         {/* SQL Statements Preview */}
-        <div className="sql-preview-card">
-          <div className="sql-card-header">
-            <span className="sql-card-title font-mono">SQL Statement Preview</span>
-            {previewing && <Loader2 size={12} className="spin" />}
+        {file && (
+          <div className="sql-preview-card">
+            <div className="sql-card-header">
+              <span className="sql-card-title font-mono">SQL Statement Preview</span>
+              {previewing && <Loader2 size={12} className="spin" />}
+            </div>
+            <div className="sql-list-view font-mono">
+              {preview?.kind === "sql" && Array.isArray(preview.statements) && preview.statements.length > 0 ? (
+                preview.statements.slice(0, 50).map((s, i) => (
+                  <div key={i} className="sql-preview-row">
+                    <span className="sql-line-num">{s.line}</span>
+                    <span className="sql-code-snippet">{s.sql}</span>
+                  </div>
+                ))
+              ) : previewing ? (
+                <div className="sql-empty-hint">Scanning SQL statements...</div>
+              ) : (
+                <div className="sql-empty-hint">No SQL statements found in preview.</div>
+              )}
+            </div>
           </div>
-          <div className="sql-list-view font-mono">
-            {preview?.kind === "sql" && preview.statements.length > 0 ? (
-              preview.statements.slice(0, 50).map((s, i) => (
-                <div key={i} className="sql-preview-row">
-                  <span className="sql-line-num">{s.line}</span>
-                  <span className="sql-code-snippet">{s.sql}</span>
-                </div>
-              ))
-            ) : previewing ? (
-              <div className="sql-empty-hint">Scanning SQL statements...</div>
-            ) : (
-              <div className="sql-empty-hint">No SQL statements found in preview.</div>
-            )}
-          </div>
-        </div>
+        )}
 
         {/* Options Row */}
         <div className="sql-options-card">
@@ -1107,8 +1169,9 @@ const SourceStep: React.FC<SourceStepProps> = ({
                 value={txMode}
                 onChange={(e) => onTxMode(e.target.value as TxMode)}
               >
-                <option value="single">Single Transaction (All or nothing)</option>
-                <option value="none">Statement by Statement (No Transaction)</option>
+                <option value="singleTransaction">Single Transaction (All or nothing)</option>
+                <option value="perStatement">Statement by Statement (No Transaction)</option>
+                <option value="atomicBatch">Per Batch</option>
               </select>
             </label>
             <label className="field">
@@ -1118,8 +1181,8 @@ const SourceStep: React.FC<SourceStepProps> = ({
                 value={onErrorMode}
                 onChange={(e) => onErrorModeChange(e.target.value as OnErrorMode)}
               >
-                <option value="stop">Stop immediately</option>
-                <option value="continue">Continue on errors</option>
+                <option value="abort">Stop immediately</option>
+                <option value="skipRow">Continue on errors</option>
               </select>
             </label>
           </div>
