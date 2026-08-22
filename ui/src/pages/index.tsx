@@ -19,7 +19,7 @@ import { ImportModal } from "../components/ImportModal";
 import { AlertCircle, X, CheckCircle2, Download, Upload, XCircle } from "lucide-react";
 import { ConnectionProfile, ColumnInfo, TableRowData, QueryExecutionResult, ColumnFilter, DBType } from "../types";
 import { DdlResult } from "../components/tableDesign/draft";
-import { quoteTableIdent } from "../utils/ddlBuilder";
+import { quoteTableIdent, buildDropTable, buildTruncateTable } from "../utils/ddlBuilder";
 import { apiClient } from "../utils/apiClient";
 import { auditLogger } from "../utils/auditLogger";
 import { dumpManager, DumpProgress } from "../utils/dumpManager";
@@ -750,13 +750,14 @@ export default function Home() {
 
   const handleRequestTruncate = (tbl: string) => {
     const dialect: DBType = activeProfile?.type === "mariadb" ? "mariadb" : activeProfile?.type === "sqlite" ? "sqlite" : "postgres";
-    const sql = dialect === "sqlite"
-      ? `DELETE FROM ${quoteTableIdent(tbl, "sqlite")};`
-      : `TRUNCATE TABLE ${quoteTableIdent(tbl, dialect)};`;
+    const sql = buildTruncateTable(tbl, dialect, false);
+    const cascadeSql = buildTruncateTable(tbl, dialect, true);
     setConfirmDdlRequest({
       title: `Truncate Table "${tbl}"`,
       description: `Are you sure you want to delete all rows in table "${tbl}"? This action cannot be undone.`,
       statements: [sql],
+      cascadeStatements: [cascadeSql],
+      allowCascade: dialect === "postgres",
       confirmLabel: "Truncate Table",
       typeToConfirm: tbl,
     });
@@ -764,11 +765,14 @@ export default function Home() {
 
   const handleRequestDrop = (tbl: string) => {
     const dialect: DBType = activeProfile?.type === "mariadb" ? "mariadb" : activeProfile?.type === "sqlite" ? "sqlite" : "postgres";
-    const sql = `DROP TABLE ${quoteTableIdent(tbl, dialect)};`;
+    const sql = buildDropTable(tbl, dialect, false);
+    const cascadeSql = buildDropTable(tbl, dialect, true);
     setConfirmDdlRequest({
       title: `Drop Table "${tbl}"`,
       description: `Are you sure you want to permanently DROP table "${tbl}" and all of its schema, indexes, and data? This action cannot be undone.`,
       statements: [sql],
+      cascadeStatements: [cascadeSql],
+      allowCascade: dialect !== "sqlite",
       confirmLabel: "Drop Table",
       typeToConfirm: tbl,
     });

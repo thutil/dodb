@@ -416,13 +416,18 @@ export function diffTable(original: TableDraft, draft: TableDraft, d: DBType): s
 // Destructive one-liners
 // ---------------------------------------------------------------------------
 
-export function buildDropTable(table: string, d: DBType): string {
-  return "DROP TABLE " + quoteTableIdent(table, d) + ";";
+export function buildDropTable(table: string, d: DBType, cascade = false): string {
+  const base = "DROP TABLE " + quoteTableIdent(table, d);
+  if (cascade && d !== "sqlite") {
+    return base + " CASCADE;";
+  }
+  return base + ";";
 }
 
-export function buildTruncateTable(table: string, d: DBType): string {
+export function buildTruncateTable(table: string, d: DBType, cascade = false): string {
   // SQLite has no TRUNCATE.
   if (d === "sqlite") return "DELETE FROM " + quoteTableIdent(table, d) + ";";
+  if (cascade && d === "postgres") return "TRUNCATE TABLE " + quoteTableIdent(table, d) + " CASCADE;";
   return "TRUNCATE TABLE " + quoteTableIdent(table, d) + ";";
 }
 

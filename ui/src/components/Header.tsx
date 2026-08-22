@@ -115,8 +115,8 @@ export const Header: React.FC<HeaderProps> = ({
       activeProfile?.type === "mariadb"
         ? "mariadb"
         : activeProfile?.type === "sqlite"
-        ? "sqlite"
-        : "postgres";
+          ? "sqlite"
+          : "postgres";
     const quoted = quoteTableIdent(tbl, dialect);
     const sql = `SELECT * FROM ${quoted} LIMIT 100;`;
     if (onOpenInSql) {
@@ -453,7 +453,6 @@ export const Header: React.FC<HeaderProps> = ({
           onClick={onOpenCommandPalette}
           title="Global Quick Search & Command Palette (⌘K / Ctrl+K)"
         >
-          <Search size={12} className="search-icon" />
           <span className="search-text">
             {activeTable ? `Jump to table or command in ${activeTable}...` : "Quick Search tables, commands, actions..."}
           </span>
