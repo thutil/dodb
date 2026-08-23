@@ -330,11 +330,14 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
   // True when the form differs from the saved profile it was loaded from.
   // Connecting would otherwise use the stored credentials while showing the
   // edited ones, because the backend looks the profile up by id.
-  const isFormDirty = (): boolean => {
+  // `data` defaults to the live form, but the unlock path passes the values it
+  // is about to connect with so the password it just put in memory - and has
+  // already dropped from the form - does not read as an edit.
+  const isFormDirty = (data?: Partial<ConnectionProfile>): boolean => {
     if (selectedId === "__NEW__") return false;
     const saved = profiles.find((p) => p.id === selectedId);
     if (!saved) return false;
-    const current = getCleanForm();
+    const current = data ?? getCleanForm();
     const fields: (keyof ConnectionProfile)[] = [
       "name", "type", "host", "port", "user", "password", "database", "filePath", "group",
       "keepAlive", "savePassword",
@@ -383,7 +386,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
   };
 
   const connectFromForm = async (cleanData: Partial<ConnectionProfile>) => {
-    if (isFormDirty()) {
+    if (isFormDirty(cleanData)) {
       setPendingConnect(cleanData);
       return;
     }
