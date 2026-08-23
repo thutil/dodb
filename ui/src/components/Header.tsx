@@ -22,9 +22,11 @@ import {
   Plus,
   Workflow,
   Upload,
+  Settings as SettingsIcon,
 } from "lucide-react";
 import { ConnectionProfile, DBType } from "../types";
 import { quoteTableIdent } from "../utils/ddlBuilder";
+import { Language, t } from "../utils/i18n";
 
 interface HeaderProps {
   activeProfile: ConnectionProfile | null;
@@ -44,12 +46,14 @@ interface HeaderProps {
   onOpenImport?: () => void;
   onOpenCommandPalette?: () => void;
   onOpenAbout?: () => void;
+  onOpenSettings?: () => void;
   onViewStructure?: (table: string) => void;
   onOpenInSql?: (sql: string) => void;
   onRefreshDatabases?: () => void;
   latencyMs?: number | null;
   theme: "dark" | "light";
   onToggleTheme: () => void;
+  language?: Language;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -70,12 +74,14 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenImport,
   onOpenCommandPalette,
   onOpenAbout,
+  onOpenSettings,
   onViewStructure,
   onOpenInSql,
   onRefreshDatabases,
   latencyMs,
   theme,
   onToggleTheme,
+  language = "en",
 }) => {
   const [openMenu, setOpenMenu] = useState<"host" | "db" | "table" | null>(null);
   const [dbSearch, setDbSearch] = useState("");
@@ -180,7 +186,7 @@ export const Header: React.FC<HeaderProps> = ({
               {openMenu === "host" && (
                 <div className="bc-dropdown-popover">
                   <div className="bc-dropdown-header">
-                    <div className="bc-dropdown-title">Host / Connection</div>
+                    <div className="bc-dropdown-title">{t("hostConnection", language)}</div>
                     <span className={`db-type-badge ${activeProfile.type}`}>
                       {activeProfile.type.toUpperCase()}
                     </span>
@@ -191,7 +197,7 @@ export const Header: React.FC<HeaderProps> = ({
 
                   {profiles && profiles.length > 0 && (
                     <>
-                      <div className="bc-dropdown-section-title">Switch Connection</div>
+                      <div className="bc-dropdown-section-title">{t("switchConnection", language)}</div>
                       <div className="bc-dropdown-list">
                         {profiles.map((p) => (
                           <button
@@ -225,7 +231,7 @@ export const Header: React.FC<HeaderProps> = ({
                     }}
                   >
                     <Plus size={12} className="item-icon" />
-                    <span>Manage Connections...</span>
+                    <span>{t("manageConnections", language)}</span>
                   </button>
 
                   {onDisconnect && (
@@ -238,7 +244,7 @@ export const Header: React.FC<HeaderProps> = ({
                       }}
                     >
                       <LogOut size={12} className="item-icon" />
-                      <span>Disconnect</span>
+                      <span>{t("disconnect", language)}</span>
                     </button>
                   )}
                 </div>
@@ -267,7 +273,7 @@ export const Header: React.FC<HeaderProps> = ({
               {openMenu === "db" && (
                 <div className="bc-dropdown-popover">
                   <div className="bc-dropdown-header">
-                    <div className="bc-dropdown-title">Databases ({databases.length})</div>
+                    <div className="bc-dropdown-title">{t("databases", language)} ({databases.length})</div>
                     {onRefreshDatabases && (
                       <button
                         type="button"
@@ -276,7 +282,7 @@ export const Header: React.FC<HeaderProps> = ({
                           e.stopPropagation();
                           onRefreshDatabases();
                         }}
-                        title="Refresh database list"
+                        title={t("refresh", language)}
                       >
                         <RefreshCw size={10} />
                       </button>
@@ -288,7 +294,7 @@ export const Header: React.FC<HeaderProps> = ({
                       <Search size={11} className="search-inline-icon" />
                       <input
                         type="text"
-                        placeholder="Search database..."
+                        placeholder={t("filterDatabases", language)}
                         value={dbSearch}
                         onChange={(e) => setDbSearch(e.target.value)}
                         autoFocus
@@ -299,7 +305,7 @@ export const Header: React.FC<HeaderProps> = ({
 
                   <div className="bc-dropdown-list">
                     {filteredDatabases.length === 0 ? (
-                      <div className="bc-dropdown-empty">No database found</div>
+                      <div className="bc-dropdown-empty">{t("noDbFound", language)}</div>
                     ) : (
                       filteredDatabases.map((db) => (
                         <button
@@ -348,7 +354,7 @@ export const Header: React.FC<HeaderProps> = ({
                   {openMenu === "table" && (
                     <div className="bc-dropdown-popover">
                       <div className="bc-dropdown-header">
-                        <div className="bc-dropdown-title">Table Actions</div>
+                        <div className="bc-dropdown-title">{t("tableActions", language)}</div>
                         <span className="bc-table-chip">{activeTable}</span>
                       </div>
 
@@ -362,7 +368,7 @@ export const Header: React.FC<HeaderProps> = ({
                           }}
                         >
                           <Database size={12} className="item-icon" />
-                          <span>Show in Data Explorer</span>
+                          <span>{t("showInDataExplorer", language)}</span>
                         </button>
 
                         {onViewStructure && (
@@ -375,7 +381,7 @@ export const Header: React.FC<HeaderProps> = ({
                             }}
                           >
                             <Layers size={12} className="item-icon" />
-                            <span>View Structure (Schema)</span>
+                            <span>{t("viewStructure", language)}</span>
                           </button>
                         )}
 
@@ -385,7 +391,7 @@ export const Header: React.FC<HeaderProps> = ({
                           onClick={() => handleOpenTableInSql(activeTable)}
                         >
                           <Terminal size={12} className="item-icon" />
-                          <span>Open in SQL Console</span>
+                          <span>{t("openInSqlConsole", language)}</span>
                         </button>
 
                         <button
@@ -394,21 +400,21 @@ export const Header: React.FC<HeaderProps> = ({
                           onClick={(e) => handleCopyTableName(e, activeTable)}
                         >
                           {copiedTable ? <Check size={12} className="item-icon text-green" /> : <Copy size={12} className="item-icon" />}
-                          <span>{copiedTable ? "Copied Table Name!" : "Copy Table Name"}</span>
+                          <span>{copiedTable ? t("copiedTableName", language) : t("copyTableName", language)}</span>
                         </button>
                       </div>
 
                       {tables.length > 1 && (
                         <>
                           <div className="bc-dropdown-divider" />
-                          <div className="bc-dropdown-section-title">Switch Table ({tables.length})</div>
+                          <div className="bc-dropdown-section-title">{t("switchTable", language)} ({tables.length})</div>
 
                           {tables.length > 6 && (
                             <div className="bc-dropdown-search">
                               <Search size={11} className="search-inline-icon" />
                               <input
                                 type="text"
-                                placeholder="Filter tables..."
+                                placeholder={t("filterTables", language)}
                                 value={tableSearch}
                                 onChange={(e) => setTableSearch(e.target.value)}
                                 autoFocus
@@ -419,17 +425,17 @@ export const Header: React.FC<HeaderProps> = ({
 
                           <div className="bc-dropdown-list max-h">
                             {filteredTables.length === 0 ? (
-                              <div className="bc-dropdown-empty">No table found</div>
+                              <div className="bc-dropdown-empty">{t("noTableFound", language)}</div>
                             ) : (
-                              filteredTables.map((t) => (
+                              filteredTables.map((tItem) => (
                                 <button
-                                  key={t}
+                                  key={tItem}
                                   type="button"
-                                  className={`bc-dropdown-item ${t === activeTable ? "active" : ""}`}
+                                  className={`bc-dropdown-item ${tItem === activeTable ? "active" : ""}`}
                                   onClick={() => {
                                     setOpenMenu(null);
                                     if (onSelectTable) {
-                                      onSelectTable(t);
+                                      onSelectTable(tItem);
                                     }
                                     if (activeView !== "explorer") {
                                       onChangeView("explorer");
@@ -437,8 +443,8 @@ export const Header: React.FC<HeaderProps> = ({
                                   }}
                                 >
                                   <TableIcon size={12} className="item-icon" />
-                                  <span className="item-text">{t}</span>
-                                  {t === activeTable && <Check size={12} className="check-icon" />}
+                                  <span className="item-text">{tItem}</span>
+                                  {tItem === activeTable && <Check size={12} className="check-icon" />}
                                 </button>
                               ))
                             )}
@@ -462,7 +468,7 @@ export const Header: React.FC<HeaderProps> = ({
           title="Global Quick Search & Command Palette (⌘K / Ctrl+K)"
         >
           <span className="search-text">
-            {activeTable ? `Jump to table or command in ${activeTable}...` : "Quick Search tables, commands, actions..."}
+            {activeTable ? t("quickSearchInTable", language, { table: activeTable }) : t("quickSearchPlaceholder", language)}
           </span>
           <kbd className="search-shortcut">⌘K</kbd>
         </button>
@@ -487,7 +493,7 @@ export const Header: React.FC<HeaderProps> = ({
             title="Data Explorer (Table & JSON View)"
           >
             <Database size={12} className="tab-icon" />
-            <span className="tab-label">Explorer</span>
+            <span className="tab-label">{t("navExplorer", language)}</span>
           </button>
           <button
             className={`tab-btn ${activeView === "sql" ? "active" : ""}`}
@@ -495,7 +501,7 @@ export const Header: React.FC<HeaderProps> = ({
             title="SQL Query Console"
           >
             <Terminal size={12} className="tab-icon" />
-            <span className="tab-label">SQL</span>
+            <span className="tab-label">{t("navSql", language)}</span>
           </button>
           <button
             className={`tab-btn ${activeView === "visual-query" ? "active" : ""}`}
@@ -503,7 +509,7 @@ export const Header: React.FC<HeaderProps> = ({
             title="Visual Query Builder (Drag-and-Drop JOIN & Filters)"
           >
             <Workflow size={12} className="tab-icon" />
-            <span className="tab-label">Visual Query</span>
+            <span className="tab-label">{t("navVisualQuery", language)}</span>
           </button>
           <button
             className={`tab-btn ${activeView === "diagram" ? "active" : ""}`}
@@ -511,7 +517,7 @@ export const Header: React.FC<HeaderProps> = ({
             title="Entity-Relationship Diagram"
           >
             <GitFork size={12} className="tab-icon" />
-            <span className="tab-label">ERD</span>
+            <span className="tab-label">{t("navErd", language)}</span>
           </button>
           <button
             className={`tab-btn ${activeView === "admin" ? "active" : ""}`}
@@ -519,7 +525,7 @@ export const Header: React.FC<HeaderProps> = ({
             title="Database Administration"
           >
             <Shield size={12} className="tab-icon" />
-            <span className="tab-label">Admin</span>
+            <span className="tab-label">{t("navAdmin", language)}</span>
           </button>
         </nav>
 
@@ -529,23 +535,33 @@ export const Header: React.FC<HeaderProps> = ({
           {onOpenImport && (
             <button className="btn btn-secondary header-btn" onClick={onOpenImport} title="Import data from a SQL dump, CSV or JSON file">
               <Upload size={12} />
-              <span className="btn-text-responsive">Import</span>
+              <span className="btn-text-responsive">{t("navImport", language)}</span>
             </button>
           )}
 
           {onOpenAuditLogs && (
             <button className="btn btn-secondary header-btn" onClick={onOpenAuditLogs} title="View Audit Logs & History">
               <FileText size={12} />
-              <span className="btn-text-responsive">Logs</span>
+              <span className="btn-text-responsive">{t("navLogs", language)}</span>
             </button>
           )}
 
           <button className="btn btn-secondary header-btn conn-btn" onClick={onOpenConnections} title="Manage Database Connections">
             <Server size={12} />
-            <span className="btn-text-responsive">Connections</span>
+            <span className="btn-text-responsive">{t("navConnections", language)}</span>
           </button>
 
-          <button className="btn btn-secondary header-icon-btn" onClick={onToggleTheme} title={`Switch to ${theme === "dark" ? "Light" : "Dark"} Mode`}>
+          {onOpenSettings && (
+            <button
+              className="btn btn-secondary header-icon-btn"
+              onClick={onOpenSettings}
+              title={t("navSettings", language)}
+            >
+              <SettingsIcon size={12} className="settings-icon" />
+            </button>
+          )}
+
+          <button className="btn btn-secondary header-icon-btn" onClick={onToggleTheme} title={theme === "dark" ? t("switchThemeLight", language) : t("switchThemeDark", language)}>
             {theme === "dark" ? <Sun size={12} className="theme-icon sun" /> : <Moon size={12} className="theme-icon moon" />}
           </button>
         </div>

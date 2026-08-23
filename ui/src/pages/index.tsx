@@ -16,6 +16,8 @@ import { VisualQueryBuilder } from "../components/VisualQueryBuilder";
 import { CommandPalette } from "../components/CommandPalette";
 import { ImportModal } from "../components/ImportModal";
 import { AboutModal } from "../components/AboutModal";
+import { SettingsModal } from "../components/SettingsModal";
+import { Language, t } from "../utils/i18n";
 import { AlertCircle, X, CheckCircle2, Download, Upload, XCircle } from "lucide-react";
 import { ConnectionProfile, ColumnInfo, TableRowData, QueryExecutionResult, ColumnFilter, DBType } from "../types";
 import { DdlResult } from "../components/tableDesign/draft";
@@ -87,6 +89,9 @@ export default function Home() {
   const [isAuditLogOpen, setIsAuditLogOpen] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [language, setLanguage] = useState<Language>("en");
+  const [uiScale, setUiScale] = useState<number>(100);
   const [dumpProgress, setDumpProgress] = useState<DumpProgress>(dumpManager.getProgress());
   const [showDumpToast, setShowDumpToast] = useState(false);
   const [importTarget, setImportTarget] = useState<{ table: string | null } | null>(null);
@@ -143,8 +148,24 @@ export default function Home() {
   const reconnectExhaustedRef = React.useRef<Set<string>>(new Set());
   const bootstrappedRef = React.useRef(false);
 
-  // Auto-detect OS Theme on mount
+  // Auto-detect OS Theme on mount and load saved language & UI scale
   useEffect(() => {
+    try {
+      const savedLang = localStorage.getItem("dodb_language") as Language | null;
+      if (savedLang === "en" || savedLang === "th") {
+        setLanguage(savedLang);
+      }
+      const savedScale = localStorage.getItem("dodb_ui_scale");
+      if (savedScale) {
+        const num = Number(savedScale);
+        if (!isNaN(num) && num >= 80 && num <= 130) {
+          setUiScale(num);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load settings from localStorage:", e);
+    }
+
     const isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
     const initialTheme = isDark ? "dark" : "light";
     setTheme(initialTheme);
@@ -160,6 +181,22 @@ export default function Home() {
     mediaQuery.addEventListener("change", handleChange);
     return () => mediaQuery.removeEventListener("change", handleChange);
   }, []);
+
+  // Update UI scale on root element
+  useEffect(() => {
+    try {
+      const root = document.documentElement;
+      (root.style as any).zoom = `${uiScale}%`;
+      localStorage.setItem("dodb_ui_scale", String(uiScale));
+    } catch (e) {}
+  }, [uiScale]);
+
+  const handleLanguageChange = (newLang: Language) => {
+    setLanguage(newLang);
+    try {
+      localStorage.setItem("dodb_language", newLang);
+    } catch (e) {}
+  };
 
   // Dynamically load Tauri version at runtime if running in desktop app
   useEffect(() => {
@@ -1047,6 +1084,7 @@ export default function Home() {
           onOpenImport={() => setImportTarget({ table: activeTable })}
           onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
           onOpenAbout={() => setIsAboutModalOpen(true)}
+          onOpenSettings={() => setIsSettingsOpen(true)}
           onViewStructure={(tbl) => setStructureModalTable(tbl)}
           onOpenInSql={(sql) => {
             setActiveView("sql");
@@ -1056,6 +1094,7 @@ export default function Home() {
           latencyMs={latencyMs}
           theme={theme}
           onToggleTheme={toggleTheme}
+          language={language}
         />
 
         <div className="app-main-body">
@@ -1314,6 +1353,7 @@ export default function Home() {
           onOpenCreateTable={() => setIsCreateTableOpen(true)}
           onOpenAuditLogs={() => setIsAuditLogOpen(true)}
           onOpenImport={() => setImportTarget({ table: activeTable })}
+          onOpenSettings={() => setIsSettingsOpen(true)}
           onToggleTheme={toggleTheme}
           theme={theme}
           activeProfile={activeProfile}
@@ -1333,6 +1373,18 @@ export default function Home() {
           isOpen={isAboutModalOpen}
           onClose={() => setIsAboutModalOpen(false)}
           version={appVersion}
+        />
+
+        <SettingsModal
+          isOpen={isSettingsOpen}
+          onClose={() => setIsSettingsOpen(false)}
+          language={language}
+          onChangeLanguage={handleLanguageChange}
+          uiScale={uiScale}
+          onChangeUiScale={setUiScale}
+          theme={theme}
+          onToggleTheme={toggleTheme}
+          apiBase={API_BASE}
         />
 
         {/* Import completion toast, so a background import still reports back */}
