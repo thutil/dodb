@@ -199,6 +199,7 @@ export const AboutModal: React.FC<AboutModalProps> = ({
         .about-modal-card {
           width: 500px;
           max-width: 92vw;
+          max-height: 86vh;
           background: var(--bg-card);
           border: 1px solid var(--border-light);
           border-radius: var(--radius-lg, 12px);
@@ -328,6 +329,9 @@ export const AboutModal: React.FC<AboutModalProps> = ({
           display: flex;
           flex-direction: column;
           gap: 12px;
+          overflow-y: auto;
+          flex: 1;
+          min-height: 0;
         }
 
         .section-box {

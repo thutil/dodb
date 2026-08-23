@@ -242,13 +242,6 @@ export default function Home() {
       const isInspect = (e.ctrlKey || e.metaKey) && (e.shiftKey || e.altKey) && (key === "i" || key === "j" || key === "c");
       const isViewSource = (e.ctrlKey || e.metaKey) && key === "u";
 
-      if ((e.ctrlKey || e.metaKey) && key === "k") {
-        e.preventDefault();
-        e.stopPropagation();
-        setIsCommandPaletteOpen((prev) => !prev);
-        return;
-      }
-
       if (isF12 || isInspect || isViewSource) {
         e.preventDefault();
         e.stopPropagation();
@@ -268,6 +261,92 @@ export default function Home() {
     setTheme(nextTheme);
     document.documentElement.setAttribute("data-theme", nextTheme);
   };
+
+  // Comprehensive Global Keyboard Shortcuts Listener
+  useEffect(() => {
+    const handleGlobalShortcuts = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isInput = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+      const isCmdOrCtrl = e.metaKey || e.ctrlKey;
+      const key = (e.key || "").toLowerCase();
+
+      // Command Palette (⌘K / Ctrl+K)
+      if (isCmdOrCtrl && key === "k") {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsCommandPaletteOpen((prev) => !prev);
+        return;
+      }
+
+      // Settings (⌘, / Ctrl+,)
+      if (isCmdOrCtrl && key === ",") {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsSettingsOpen((prev) => !prev);
+        return;
+      }
+
+      // Toggle Theme (⌘Shift+D / Ctrl+Shift+D)
+      if (isCmdOrCtrl && e.shiftKey && key === "d") {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleTheme();
+        return;
+      }
+
+      // Navigation & Action Shortcuts (when not focused in inputs)
+      if (!isInput) {
+        if (isCmdOrCtrl && !e.shiftKey && key === "1") {
+          e.preventDefault();
+          setActiveView("explorer");
+          return;
+        }
+        if (isCmdOrCtrl && !e.shiftKey && key === "2") {
+          e.preventDefault();
+          setActiveView("sql");
+          return;
+        }
+        if (isCmdOrCtrl && !e.shiftKey && key === "3") {
+          e.preventDefault();
+          setActiveView("visual-query");
+          return;
+        }
+        if (isCmdOrCtrl && !e.shiftKey && key === "4") {
+          e.preventDefault();
+          setActiveView("diagram");
+          return;
+        }
+        if (isCmdOrCtrl && !e.shiftKey && key === "5") {
+          e.preventDefault();
+          setActiveView("admin");
+          return;
+        }
+        if (isCmdOrCtrl && !e.shiftKey && key === "n") {
+          e.preventDefault();
+          setIsCreateTableOpen(true);
+          return;
+        }
+        if (isCmdOrCtrl && !e.shiftKey && key === "o") {
+          e.preventDefault();
+          setIsConnModalOpen(true);
+          return;
+        }
+        if (isCmdOrCtrl && !e.shiftKey && key === "i") {
+          e.preventDefault();
+          setImportTarget({ table: activeTable });
+          return;
+        }
+        if (isCmdOrCtrl && !e.shiftKey && key === "l") {
+          e.preventDefault();
+          setIsAuditLogOpen(true);
+          return;
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleGlobalShortcuts);
+    return () => window.removeEventListener("keydown", handleGlobalShortcuts);
+  }, [activeTable, theme]);
 
   const fetchProfiles = useCallback(async () => {
     try {
@@ -1517,7 +1596,7 @@ export default function Home() {
               <>
                 <span className="footer-dot">•</span>
                 <span className="footer-dump-running font-mono">
-                  📦 Exporting {dumpProgress.currentTable} ({dumpProgress.rowsExported.toLocaleString()} rows)...
+                  <Download size={10} /> Exporting {dumpProgress.currentTable} ({dumpProgress.rowsExported.toLocaleString()} rows)...
                 </span>
               </>
             )}

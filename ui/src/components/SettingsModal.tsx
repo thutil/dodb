@@ -13,6 +13,10 @@ import {
   Sparkles,
   Maximize2,
   ZoomIn,
+  Compass,
+  Play,
+  Terminal,
+  Keyboard,
 } from "lucide-react";
 import { Language, t } from "../utils/i18n";
 
@@ -89,14 +93,36 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     { label: "Full HD 1080p", w: 1920, h: 1080 },
   ];
 
-  const shortcutsList = [
-    { key: "⌘K / Ctrl+K", desc: t("shortcutCommandPalette", language) },
-    { key: "⌘Enter / Ctrl+Enter", desc: t("shortcutRunQuery", language) },
-    { key: "⌘Shift+F / Ctrl+Shift+F", desc: t("shortcutFormatSql", language) },
-    { key: "F5 / ⌘R", desc: t("shortcutRefresh", language) },
-    { key: "⌘T / Ctrl+T", desc: t("shortcutNewQuery", language) },
-    { key: "⌘B / Ctrl+B", desc: t("shortcutToggleSidebar", language) },
-    { key: "Esc", desc: t("shortcutCloseModal", language) },
+  const shortcutSections = [
+    {
+      group: language === "th" ? "การนำทางและมุมมอง" : "Navigation & Views",
+      items: [
+        { key: "⌘, / Ctrl+,", desc: t("shortcutSettings", language) },
+        { key: "⌘K / Ctrl+K", desc: t("shortcutCommandPalette", language) },
+        { key: "⌘1 .. ⌘5", desc: `${t("shortcutExplorerView", language)}, ${t("shortcutSqlView", language)}, ${t("shortcutVisualQueryView", language)}, ${t("shortcutErdView", language)}, ${t("shortcutAdminView", language)}` },
+        { key: "⌘B / Ctrl+B", desc: t("shortcutToggleSidebar", language) },
+      ],
+    },
+    {
+      group: language === "th" ? "การจัดการและคำสั่ง" : "Actions & Management",
+      items: [
+        { key: "⌘N / Ctrl+N", desc: t("shortcutCreateTable", language) },
+        { key: "⌘O / Ctrl+O", desc: t("shortcutConnections", language) },
+        { key: "⌘I / Ctrl+I", desc: t("shortcutImport", language) },
+        { key: "⌘L / Ctrl+L", desc: t("shortcutAuditLogs", language) },
+        { key: "F5 / ⌘R", desc: t("shortcutRefresh", language) },
+        { key: "⌘Shift+D / Ctrl+Shift+D", desc: t("shortcutToggleTheme", language) },
+      ],
+    },
+    {
+      group: language === "th" ? "หน้าต่างคำสั่ง SQL" : "SQL & Query",
+      items: [
+        { key: "⌘Enter / Ctrl+Enter", desc: t("shortcutRunQuery", language) },
+        { key: "⌘Shift+F / Ctrl+Shift+F", desc: t("shortcutFormatSql", language) },
+        { key: "⌘T / Ctrl+T", desc: t("shortcutNewQuery", language) },
+        { key: "Esc", desc: t("shortcutCloseModal", language) },
+      ],
+    },
   ];
 
   const handleApplyWindowSize = async (targetW?: number, targetH?: number) => {
@@ -142,11 +168,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         <div className="modal-header">
           <div className="title-area">
             <div className="title-icon-box">
-              <Settings size={18} />
+              <Settings size={17} />
             </div>
             <div className="title-text-group">
               <span className="modal-title">{t("settingsTitle", language)}</span>
-              <span className="modal-subtitle">dodb Database Client</span>
+              <span className="modal-subtitle">dodb Studio</span>
             </div>
           </div>
           <button className="icon-close-btn" onClick={onClose} title={t("close", language)}>
@@ -174,12 +200,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             className={`tab-btn ${activeTab === "shortcuts" ? "active" : ""}`}
             onClick={() => setActiveTab("shortcuts")}
           >
-            <Command size={14} />
+            <Keyboard size={14} />
             <span>{t("tabShortcuts", language)}</span>
           </button>
         </div>
 
-        {/* Modal Body */}
+        {/* Modal Body with constant fixed height & clean scroll */}
         <div className="modal-content-area">
           {/* TAB 1: GENERAL */}
           {activeTab === "general" && (
@@ -188,7 +214,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div className="setting-section">
                 <div className="section-head">
                   <div className="section-head-title">
-                    <Globe size={15} className="head-icon" />
+                    <Globe size={14} className="head-icon" />
                     <span>{t("languageSectionTitle", language)}</span>
                   </div>
                   <p className="section-head-desc">{t("languageSectionDesc", language)}</p>
@@ -200,12 +226,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     className={`option-card ${language === "en" ? "active" : ""}`}
                     onClick={() => onChangeLanguage("en")}
                   >
-                    <div className="lang-flag-indicator">🇬🇧</div>
+                    <div className="lang-code-badge">EN</div>
                     <div className="option-info">
                       <div className="option-main-label">{t("langEnglish", language)}</div>
                       <div className="option-sub-label">{t("langEnglishSub", language)}</div>
                     </div>
-                    {language === "en" && <Check size={16} className="active-check-icon" />}
+                    {language === "en" && <Check size={15} className="active-check-icon" />}
                   </button>
 
                   <button
@@ -213,12 +239,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     className={`option-card ${language === "th" ? "active" : ""}`}
                     onClick={() => onChangeLanguage("th")}
                   >
-                    <div className="lang-flag-indicator">🇹🇭</div>
+                    <div className="lang-code-badge th">TH</div>
                     <div className="option-info">
                       <div className="option-main-label">{t("langThai", language)}</div>
                       <div className="option-sub-label">{t("langThaiSub", language)}</div>
                     </div>
-                    {language === "th" && <Check size={16} className="active-check-icon" />}
+                    {language === "th" && <Check size={15} className="active-check-icon" />}
                   </button>
                 </div>
               </div>
@@ -227,7 +253,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div className="setting-section">
                 <div className="section-head">
                   <div className="section-head-title">
-                    <Sparkles size={15} className="head-icon" />
+                    <Sparkles size={14} className="head-icon" />
                     <span>{t("themeSectionTitle", language)}</span>
                   </div>
                   <p className="section-head-desc">{t("themeSectionDesc", language)}</p>
@@ -242,13 +268,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     }}
                   >
                     <div className="theme-preview dark">
-                      <Moon size={16} />
+                      <Moon size={15} />
                     </div>
                     <div className="option-info">
                       <div className="option-main-label">{t("themeDark", language)}</div>
                       <div className="option-sub-label">{t("themeDarkSub", language)}</div>
                     </div>
-                    {theme === "dark" && <Check size={16} className="active-check-icon" />}
+                    {theme === "dark" && <Check size={15} className="active-check-icon" />}
                   </button>
 
                   <button
@@ -259,13 +285,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     }}
                   >
                     <div className="theme-preview light">
-                      <Sun size={16} />
+                      <Sun size={15} />
                     </div>
                     <div className="option-info">
                       <div className="option-main-label">{t("themeLight", language)}</div>
                       <div className="option-sub-label">{t("themeLightSub", language)}</div>
                     </div>
-                    {theme === "light" && <Check size={16} className="active-check-icon" />}
+                    {theme === "light" && <Check size={15} className="active-check-icon" />}
                   </button>
                 </div>
               </div>
@@ -279,7 +305,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div className="setting-section">
                 <div className="section-head">
                   <div className="section-head-title">
-                    <ZoomIn size={15} className="head-icon" />
+                    <ZoomIn size={14} className="head-icon" />
                     <span>{t("uiScaleTitle", language)}</span>
                   </div>
                   <p className="section-head-desc">{t("uiScaleDesc", language)}</p>
@@ -331,7 +357,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div className="setting-section">
                 <div className="section-head">
                   <div className="section-head-title">
-                    <Maximize2 size={15} className="head-icon" />
+                    <Maximize2 size={14} className="head-icon" />
                     <span>{t("windowDimTitle", language)}</span>
                   </div>
                   <p className="section-head-desc">{t("windowDimDesc", language)}</p>
@@ -347,7 +373,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         className={`win-preset-card ${isSelected ? "active" : ""}`}
                         onClick={() => handleApplyWindowSize(p.w, p.h)}
                       >
-                        <Sliders size={14} className="win-preset-icon" />
+                        <Sliders size={13} className="win-preset-icon" />
                         <div className="win-preset-info">
                           <span className="win-preset-title">{p.label}</span>
                           <span className="win-preset-dim">{p.w} × {p.h} px</span>
@@ -410,22 +436,29 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div className="setting-section">
                 <div className="section-head">
                   <div className="section-head-title">
-                    <Command size={15} className="head-icon" />
+                    <Command size={14} className="head-icon" />
                     <span>{t("shortcutsTitle", language)}</span>
                   </div>
                   <p className="section-head-desc">{t("shortcutsDesc", language)}</p>
                 </div>
 
-                <div className="shortcuts-table">
-                  {shortcutsList.map((item, idx) => (
-                    <div key={idx} className="shortcut-row">
-                      <span className="shortcut-desc">{item.desc}</span>
-                      <div className="shortcut-keys">
-                        {item.key.split(" / ").map((k, kidx) => (
-                          <React.Fragment key={kidx}>
-                            {kidx > 0 && <span className="key-separator">/</span>}
-                            <kbd className="key-badge">{k}</kbd>
-                          </React.Fragment>
+                <div className="shortcuts-container">
+                  {shortcutSections.map((sec, secIdx) => (
+                    <div key={secIdx} className="shortcut-group-block">
+                      <div className="shortcut-group-title">{sec.group}</div>
+                      <div className="shortcuts-table">
+                        {sec.items.map((item, idx) => (
+                          <div key={idx} className="shortcut-row">
+                            <span className="shortcut-desc">{item.desc}</span>
+                            <div className="shortcut-keys">
+                              {item.key.split(" / ").map((k, kidx) => (
+                                <React.Fragment key={kidx}>
+                                  {kidx > 0 && <span className="key-separator">/</span>}
+                                  <kbd className="key-badge">{k}</kbd>
+                                </React.Fragment>
+                              ))}
+                            </div>
+                          </div>
                         ))}
                       </div>
                     </div>
@@ -460,9 +493,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         }
 
         .settings-modal-card {
-          width: 580px;
+          width: 590px;
+          height: 530px;
           max-width: 95vw;
-          max-height: 88vh;
+          max-height: 86vh;
           background: var(--bg-card);
           border: 1px solid var(--border-medium);
           border-radius: var(--radius-lg, 12px);
@@ -485,12 +519,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         }
 
         .modal-header {
-          padding: 14px 18px;
+          padding: 12px 18px;
           background: var(--bg-header);
           border-bottom: 1px solid var(--border-light);
           display: flex;
           justify-content: space-between;
           align-items: center;
+          flex-shrink: 0;
         }
 
         .title-area {
@@ -503,8 +538,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           display: flex;
           align-items: center;
           justify-content: center;
-          width: 32px;
-          height: 32px;
+          width: 30px;
+          height: 30px;
           border-radius: var(--radius-md, 8px);
           background: rgba(59, 130, 246, 0.12);
           color: var(--accent-blue);
@@ -550,6 +585,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           background: var(--bg-sidebar);
           border-bottom: 1px solid var(--border-light);
           gap: 4px;
+          flex-shrink: 0;
         }
 
         .tab-btn {
@@ -557,7 +593,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           align-items: center;
           gap: 6px;
           padding: 8px 14px;
-          font-size: 12px;
+          font-size: 11.5px;
           font-weight: 600;
           color: var(--text-sub);
           background: transparent;
@@ -577,26 +613,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           background: var(--bg-card);
         }
 
-        /* Content Area */
+        /* Content Area: Stays flex 1 and scrolls cleanly */
         .modal-content-area {
-          padding: 18px;
+          padding: 16px 18px;
           overflow-y: auto;
           flex: 1;
+          min-height: 0;
           display: flex;
           flex-direction: column;
-          gap: 20px;
+          gap: 18px;
         }
 
         .tab-content {
           display: flex;
           flex-direction: column;
-          gap: 20px;
+          gap: 18px;
         }
 
         .setting-section {
           display: flex;
           flex-direction: column;
-          gap: 12px;
+          gap: 10px;
         }
 
         .section-head {
@@ -635,7 +672,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           display: flex;
           align-items: center;
           gap: 10px;
-          padding: 12px;
+          padding: 10px 12px;
           border-radius: var(--radius-md, 8px);
           border: 1px solid var(--border-light);
           background: var(--bg-secondary, var(--bg-tertiary));
@@ -654,9 +691,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           background: rgba(59, 130, 246, 0.08);
         }
 
-        .lang-flag-indicator {
-          font-size: 20px;
-          line-height: 1;
+        .lang-code-badge {
+          width: 32px;
+          height: 32px;
+          border-radius: 6px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 11px;
+          font-weight: 800;
+          font-family: var(--font-mono);
+          background: rgba(59, 130, 246, 0.12);
+          color: var(--accent-blue);
+          border: 1px solid rgba(59, 130, 246, 0.25);
+          flex-shrink: 0;
+        }
+        .lang-code-badge.th {
+          background: rgba(16, 185, 129, 0.12);
+          color: var(--accent-green);
+          border-color: rgba(16, 185, 129, 0.25);
         }
 
         .theme-preview {
@@ -666,6 +719,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           display: flex;
           align-items: center;
           justify-content: center;
+          flex-shrink: 0;
         }
         .theme-preview.dark {
           background: #18181b;
@@ -687,7 +741,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         }
 
         .option-main-label {
-          font-size: 12px;
+          font-size: 11.5px;
           font-weight: 600;
           color: var(--text-main);
         }
@@ -707,7 +761,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           display: flex;
           flex-direction: column;
           gap: 12px;
-          padding: 14px;
+          padding: 12px 14px;
           background: var(--bg-tertiary);
           border: 1px solid var(--border-light);
           border-radius: var(--radius-md, 8px);
@@ -721,7 +775,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         .scale-min,
         .scale-max {
-          font-size: 11px;
+          font-size: 10.5px;
           font-weight: 600;
           color: var(--text-muted);
           font-family: var(--font-mono);
@@ -757,8 +811,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         }
 
         .preset-chip {
-          padding: 4px 10px;
-          font-size: 11px;
+          padding: 4px 9px;
+          font-size: 10.5px;
           font-weight: 500;
           border-radius: var(--radius-sm, 6px);
           background: var(--bg-card);
@@ -782,8 +836,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           display: inline-flex;
           align-items: center;
           gap: 4px;
-          padding: 4px 10px;
-          font-size: 11px;
+          padding: 4px 9px;
+          font-size: 10.5px;
           color: var(--text-muted);
           background: transparent;
           border: 1px dashed var(--border-medium);
@@ -808,7 +862,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           display: flex;
           align-items: center;
           gap: 8px;
-          padding: 8px 12px;
+          padding: 8px 10px;
           border-radius: var(--radius-sm, 6px);
           border: 1px solid var(--border-light);
           background: var(--bg-tertiary);
@@ -852,7 +906,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           display: flex;
           flex-direction: column;
           gap: 6px;
-          margin-top: 4px;
+          margin-top: 2px;
         }
 
         .custom-dim-label {
@@ -881,19 +935,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         }
 
         .dim-times {
-          font-size: 14px;
+          font-size: 13px;
           color: var(--text-muted);
           padding-bottom: 6px;
         }
 
         .apply-dim-btn {
-          height: 32px;
+          height: 30px;
           white-space: nowrap;
+          font-size: 11px;
         }
 
         .status-banner {
           font-size: 11px;
-          padding: 8px 12px;
+          padding: 6px 10px;
           border-radius: var(--radius-sm, 6px);
           text-align: center;
         }
@@ -908,7 +963,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           border: 1px solid rgba(239, 68, 68, 0.25);
         }
 
-        /* Shortcuts */
+        /* Shortcuts Container */
+        .shortcuts-container {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+
+        .shortcut-group-block {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+        }
+
+        .shortcut-group-title {
+          font-size: 10px;
+          font-weight: 700;
+          text-transform: uppercase;
+          color: var(--text-muted);
+          letter-spacing: 0.5px;
+        }
+
         .shortcuts-table {
           display: flex;
           flex-direction: column;
@@ -922,8 +997,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 10px 14px;
+          padding: 8px 12px;
           border-bottom: 1px solid var(--border-light);
+          gap: 12px;
         }
         .shortcut-row:last-child {
           border-bottom: none;
@@ -932,12 +1008,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         .shortcut-desc {
           font-size: 11px;
           color: var(--text-main);
+          flex: 1;
         }
 
         .shortcut-keys {
           display: flex;
           align-items: center;
           gap: 4px;
+          flex-shrink: 0;
         }
 
         .key-separator {
@@ -960,12 +1038,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         /* Footer */
         .modal-footer {
-          padding: 12px 18px;
+          padding: 10px 18px;
           background: var(--bg-header);
           border-top: 1px solid var(--border-light);
           display: flex;
           justify-content: space-between;
           align-items: center;
+          flex-shrink: 0;
         }
 
         .footer-meta {
