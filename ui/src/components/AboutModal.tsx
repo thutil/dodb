@@ -25,7 +25,7 @@ interface AboutModalProps {
 export const AboutModal: React.FC<AboutModalProps> = ({
   isOpen,
   onClose,
-  version = "0.2.1",
+  version = "0.2.2",
 }) => {
   const [copied, setCopied] = useState(false);
 
