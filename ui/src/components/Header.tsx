@@ -577,25 +577,26 @@ export const Header: React.FC<HeaderProps> = ({
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 0 12px;
-          gap: 12px;
+          padding: 0 10px;
+          gap: 8px;
           -webkit-app-region: drag;
           user-select: none;
           flex-shrink: 0;
           z-index: 100;
           width: 100%;
+          max-width: 100vw;
           box-sizing: border-box;
-          overflow: visible;
+          overflow: hidden;
         }
 
         .header-left {
           display: flex;
           align-items: center;
-          gap: 8px;
+          gap: 6px;
           min-width: 0;
-          flex: 1 1 auto;
+          flex: 0 1 auto;
           -webkit-app-region: no-drag;
-          overflow: visible;
+          overflow: hidden;
         }
 
         .brand {
@@ -946,9 +947,9 @@ export const Header: React.FC<HeaderProps> = ({
           align-items: center;
           justify-content: center;
           gap: 6px;
-          flex: 0 1 280px;
-          min-width: 80px;
-          max-width: 320px;
+          flex: 0 1 200px;
+          min-width: 50px;
+          max-width: 260px;
           -webkit-app-region: no-drag;
         }
         .header-quick-search {
@@ -959,14 +960,14 @@ export const Header: React.FC<HeaderProps> = ({
           background: var(--bg-tertiary);
           border: 1px solid var(--border-light);
           border-radius: var(--radius-sm, 6px);
-          padding: 0 10px;
+          padding: 0 8px;
           height: 28px;
           color: var(--text-muted);
           font-family: var(--font-sans);
           cursor: pointer;
           transition: all 0.15s ease;
           user-select: none;
-          min-width: 60px;
+          min-width: 40px;
           box-sizing: border-box;
         }
         .header-quick-search:hover {
@@ -979,7 +980,7 @@ export const Header: React.FC<HeaderProps> = ({
           flex-shrink: 0;
         }
         .search-text {
-          font-size: 11px;
+          font-size: 10.5px;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
@@ -993,7 +994,7 @@ export const Header: React.FC<HeaderProps> = ({
           background: var(--bg-card);
           border: 1px solid var(--border-light);
           color: var(--text-sub);
-          padding: 1px 5px;
+          padding: 1px 4px;
           border-radius: 3px;
           box-shadow: var(--shadow-sm);
           flex-shrink: 0;
@@ -1002,8 +1003,8 @@ export const Header: React.FC<HeaderProps> = ({
         .header-health-pill {
           display: flex;
           align-items: center;
-          gap: 5px;
-          padding: 0 8px;
+          gap: 4px;
+          padding: 0 6px;
           height: 28px;
           background: var(--bg-tertiary);
           border: 1px solid var(--border-light);
@@ -1042,7 +1043,7 @@ export const Header: React.FC<HeaderProps> = ({
         .header-right {
           display: flex;
           align-items: center;
-          gap: 8px;
+          gap: 6px;
           -webkit-app-region: no-drag;
           flex-shrink: 0;
         }
@@ -1063,7 +1064,7 @@ export const Header: React.FC<HeaderProps> = ({
           align-items: center;
           justify-content: center;
           gap: 4px;
-          padding: 0 9px;
+          padding: 0 8px;
           font-size: 11px;
           font-weight: 500;
           border: 1px solid transparent;
@@ -1107,16 +1108,16 @@ export const Header: React.FC<HeaderProps> = ({
         .action-buttons-group {
           display: flex;
           align-items: center;
-          gap: 6px;
+          gap: 5px;
         }
 
         .header-btn {
           height: 28px;
-          padding: 0 10px;
+          padding: 0 8px;
           font-size: 11px;
           font-weight: 500;
           border-radius: var(--radius-sm, 6px);
-          gap: 5px;
+          gap: 4px;
           display: inline-flex;
           align-items: center;
           box-sizing: border-box;
@@ -1139,33 +1140,57 @@ export const Header: React.FC<HeaderProps> = ({
         .theme-icon.moon { color: #818cf8; }
 
         /* Responsive Breakpoints */
-        @media (max-width: 1080px) {
-          .header-breadcrumb .bc-segment-wrap:first-of-type {
+        @media (max-width: 1380px) {
+          .btn-text-responsive {
             display: none;
           }
+          .header-btn {
+            padding: 0 7px;
+          }
+          .header-breadcrumb .bc-label {
+            max-width: 80px;
+          }
+        }
+
+        @media (max-width: 1150px) {
+          .header-breadcrumb .bc-segment-wrap:first-of-type,
           .header-breadcrumb .bc-arrow:first-of-type {
             display: none;
           }
+          .search-text {
+            display: none;
+          }
+          .search-shortcut {
+            display: none;
+          }
+          .header-center {
+            flex: 0 0 auto;
+            min-width: 0;
+          }
         }
 
-        @media (max-width: 900px) {
-          .btn-text-responsive { display: none; }
-          .header-btn { padding: 0 6px; }
-          .search-text { display: none; }
-          .search-shortcut { display: none; }
-          .header-center { flex: 0 0 auto; min-width: 0; }
+        @media (max-width: 950px) {
+          .tab-label {
+            display: none;
+          }
+          .tab-btn {
+            padding: 0 6px;
+          }
+          .brand-title {
+            display: none;
+          }
+          .header-health-pill {
+            display: none;
+          }
         }
 
-        @media (max-width: 720px) {
-          .tab-label { display: none; }
-          .tab-btn { padding: 2px 6px; }
-          .brand-title { display: none; }
-          .header-health-pill { display: none; }
-        }
-
-        @media (max-width: 580px) {
-          .header-center { display: none; }
-          .header-breadcrumb { max-width: 160px; }
+        @media (max-width: 650px) {
+          .header-center {
+            display: none;
+          }
+          .header-breadcrumb {
+            max-width: 120px;
+          }
         }
       `}</style>
     </header>
