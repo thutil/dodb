@@ -22,9 +22,11 @@ import {
   Plus,
   Workflow,
   Upload,
+  Settings as SettingsIcon,
 } from "lucide-react";
 import { ConnectionProfile, DBType } from "../types";
 import { quoteTableIdent } from "../utils/ddlBuilder";
+import { Language, t } from "../utils/i18n";
 
 interface HeaderProps {
   activeProfile: ConnectionProfile | null;
@@ -43,12 +45,15 @@ interface HeaderProps {
   onOpenAuditLogs?: () => void;
   onOpenImport?: () => void;
   onOpenCommandPalette?: () => void;
+  onOpenAbout?: () => void;
+  onOpenSettings?: () => void;
   onViewStructure?: (table: string) => void;
   onOpenInSql?: (sql: string) => void;
   onRefreshDatabases?: () => void;
   latencyMs?: number | null;
   theme: "dark" | "light";
   onToggleTheme: () => void;
+  language?: Language;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -68,12 +73,15 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAuditLogs,
   onOpenImport,
   onOpenCommandPalette,
+  onOpenAbout,
+  onOpenSettings,
   onViewStructure,
   onOpenInSql,
   onRefreshDatabases,
   latencyMs,
   theme,
   onToggleTheme,
+  language = "en",
 }) => {
   const [openMenu, setOpenMenu] = useState<"host" | "db" | "table" | null>(null);
   const [dbSearch, setDbSearch] = useState("");
@@ -140,8 +148,14 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="header-left">
         <div
           className="brand clickable"
-          onClick={() => onChangeView("explorer")}
-          title="dodb Database Manager - Click to go to Data Explorer"
+          onClick={() => {
+            if (onOpenAbout) {
+              onOpenAbout();
+            } else {
+              onChangeView("explorer");
+            }
+          }}
+          title="dodb Database Manager - Click to view About & Version"
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/icon.png" alt="dodb mascot" className="brand-mascot-img" />
@@ -172,7 +186,7 @@ export const Header: React.FC<HeaderProps> = ({
               {openMenu === "host" && (
                 <div className="bc-dropdown-popover">
                   <div className="bc-dropdown-header">
-                    <div className="bc-dropdown-title">Host / Connection</div>
+                    <div className="bc-dropdown-title">{t("hostConnection", language)}</div>
                     <span className={`db-type-badge ${activeProfile.type}`}>
                       {activeProfile.type.toUpperCase()}
                     </span>
@@ -183,7 +197,7 @@ export const Header: React.FC<HeaderProps> = ({
 
                   {profiles && profiles.length > 0 && (
                     <>
-                      <div className="bc-dropdown-section-title">Switch Connection</div>
+                      <div className="bc-dropdown-section-title">{t("switchConnection", language)}</div>
                       <div className="bc-dropdown-list">
                         {profiles.map((p) => (
                           <button
@@ -217,7 +231,7 @@ export const Header: React.FC<HeaderProps> = ({
                     }}
                   >
                     <Plus size={12} className="item-icon" />
-                    <span>Manage Connections...</span>
+                    <span>{t("manageConnections", language)}</span>
                   </button>
 
                   {onDisconnect && (
@@ -230,7 +244,7 @@ export const Header: React.FC<HeaderProps> = ({
                       }}
                     >
                       <LogOut size={12} className="item-icon" />
-                      <span>Disconnect</span>
+                      <span>{t("disconnect", language)}</span>
                     </button>
                   )}
                 </div>
@@ -259,7 +273,7 @@ export const Header: React.FC<HeaderProps> = ({
               {openMenu === "db" && (
                 <div className="bc-dropdown-popover">
                   <div className="bc-dropdown-header">
-                    <div className="bc-dropdown-title">Databases ({databases.length})</div>
+                    <div className="bc-dropdown-title">{t("databases", language)} ({databases.length})</div>
                     {onRefreshDatabases && (
                       <button
                         type="button"
@@ -268,7 +282,7 @@ export const Header: React.FC<HeaderProps> = ({
                           e.stopPropagation();
                           onRefreshDatabases();
                         }}
-                        title="Refresh database list"
+                        title={t("refresh", language)}
                       >
                         <RefreshCw size={10} />
                       </button>
@@ -280,7 +294,7 @@ export const Header: React.FC<HeaderProps> = ({
                       <Search size={11} className="search-inline-icon" />
                       <input
                         type="text"
-                        placeholder="Search database..."
+                        placeholder={t("filterDatabases", language)}
                         value={dbSearch}
                         onChange={(e) => setDbSearch(e.target.value)}
                         autoFocus
@@ -291,7 +305,7 @@ export const Header: React.FC<HeaderProps> = ({
 
                   <div className="bc-dropdown-list">
                     {filteredDatabases.length === 0 ? (
-                      <div className="bc-dropdown-empty">No database found</div>
+                      <div className="bc-dropdown-empty">{t("noDbFound", language)}</div>
                     ) : (
                       filteredDatabases.map((db) => (
                         <button
@@ -340,7 +354,7 @@ export const Header: React.FC<HeaderProps> = ({
                   {openMenu === "table" && (
                     <div className="bc-dropdown-popover">
                       <div className="bc-dropdown-header">
-                        <div className="bc-dropdown-title">Table Actions</div>
+                        <div className="bc-dropdown-title">{t("tableActions", language)}</div>
                         <span className="bc-table-chip">{activeTable}</span>
                       </div>
 
@@ -354,7 +368,7 @@ export const Header: React.FC<HeaderProps> = ({
                           }}
                         >
                           <Database size={12} className="item-icon" />
-                          <span>Show in Data Explorer</span>
+                          <span>{t("showInDataExplorer", language)}</span>
                         </button>
 
                         {onViewStructure && (
@@ -367,7 +381,7 @@ export const Header: React.FC<HeaderProps> = ({
                             }}
                           >
                             <Layers size={12} className="item-icon" />
-                            <span>View Structure (Schema)</span>
+                            <span>{t("viewStructure", language)}</span>
                           </button>
                         )}
 
@@ -377,7 +391,7 @@ export const Header: React.FC<HeaderProps> = ({
                           onClick={() => handleOpenTableInSql(activeTable)}
                         >
                           <Terminal size={12} className="item-icon" />
-                          <span>Open in SQL Console</span>
+                          <span>{t("openInSqlConsole", language)}</span>
                         </button>
 
                         <button
@@ -386,21 +400,21 @@ export const Header: React.FC<HeaderProps> = ({
                           onClick={(e) => handleCopyTableName(e, activeTable)}
                         >
                           {copiedTable ? <Check size={12} className="item-icon text-green" /> : <Copy size={12} className="item-icon" />}
-                          <span>{copiedTable ? "Copied Table Name!" : "Copy Table Name"}</span>
+                          <span>{copiedTable ? t("copiedTableName", language) : t("copyTableName", language)}</span>
                         </button>
                       </div>
 
                       {tables.length > 1 && (
                         <>
                           <div className="bc-dropdown-divider" />
-                          <div className="bc-dropdown-section-title">Switch Table ({tables.length})</div>
+                          <div className="bc-dropdown-section-title">{t("switchTable", language)} ({tables.length})</div>
 
                           {tables.length > 6 && (
                             <div className="bc-dropdown-search">
                               <Search size={11} className="search-inline-icon" />
                               <input
                                 type="text"
-                                placeholder="Filter tables..."
+                                placeholder={t("filterTables", language)}
                                 value={tableSearch}
                                 onChange={(e) => setTableSearch(e.target.value)}
                                 autoFocus
@@ -411,17 +425,17 @@ export const Header: React.FC<HeaderProps> = ({
 
                           <div className="bc-dropdown-list max-h">
                             {filteredTables.length === 0 ? (
-                              <div className="bc-dropdown-empty">No table found</div>
+                              <div className="bc-dropdown-empty">{t("noTableFound", language)}</div>
                             ) : (
-                              filteredTables.map((t) => (
+                              filteredTables.map((tItem) => (
                                 <button
-                                  key={t}
+                                  key={tItem}
                                   type="button"
-                                  className={`bc-dropdown-item ${t === activeTable ? "active" : ""}`}
+                                  className={`bc-dropdown-item ${tItem === activeTable ? "active" : ""}`}
                                   onClick={() => {
                                     setOpenMenu(null);
                                     if (onSelectTable) {
-                                      onSelectTable(t);
+                                      onSelectTable(tItem);
                                     }
                                     if (activeView !== "explorer") {
                                       onChangeView("explorer");
@@ -429,8 +443,8 @@ export const Header: React.FC<HeaderProps> = ({
                                   }}
                                 >
                                   <TableIcon size={12} className="item-icon" />
-                                  <span className="item-text">{t}</span>
-                                  {t === activeTable && <Check size={12} className="check-icon" />}
+                                  <span className="item-text">{tItem}</span>
+                                  {tItem === activeTable && <Check size={12} className="check-icon" />}
                                 </button>
                               ))
                             )}
@@ -454,7 +468,7 @@ export const Header: React.FC<HeaderProps> = ({
           title="Global Quick Search & Command Palette (⌘K / Ctrl+K)"
         >
           <span className="search-text">
-            {activeTable ? `Jump to table or command in ${activeTable}...` : "Quick Search tables, commands, actions..."}
+            {activeTable ? t("quickSearchInTable", language, { table: activeTable }) : t("quickSearchPlaceholder", language)}
           </span>
           <kbd className="search-shortcut">⌘K</kbd>
         </button>
@@ -479,7 +493,7 @@ export const Header: React.FC<HeaderProps> = ({
             title="Data Explorer (Table & JSON View)"
           >
             <Database size={12} className="tab-icon" />
-            <span className="tab-label">Explorer</span>
+            <span className="tab-label">{t("navExplorer", language)}</span>
           </button>
           <button
             className={`tab-btn ${activeView === "sql" ? "active" : ""}`}
@@ -487,7 +501,7 @@ export const Header: React.FC<HeaderProps> = ({
             title="SQL Query Console"
           >
             <Terminal size={12} className="tab-icon" />
-            <span className="tab-label">SQL</span>
+            <span className="tab-label">{t("navSql", language)}</span>
           </button>
           <button
             className={`tab-btn ${activeView === "visual-query" ? "active" : ""}`}
@@ -495,7 +509,7 @@ export const Header: React.FC<HeaderProps> = ({
             title="Visual Query Builder (Drag-and-Drop JOIN & Filters)"
           >
             <Workflow size={12} className="tab-icon" />
-            <span className="tab-label">Visual Query</span>
+            <span className="tab-label">{t("navVisualQuery", language)}</span>
           </button>
           <button
             className={`tab-btn ${activeView === "diagram" ? "active" : ""}`}
@@ -503,7 +517,7 @@ export const Header: React.FC<HeaderProps> = ({
             title="Entity-Relationship Diagram"
           >
             <GitFork size={12} className="tab-icon" />
-            <span className="tab-label">ERD</span>
+            <span className="tab-label">{t("navErd", language)}</span>
           </button>
           <button
             className={`tab-btn ${activeView === "admin" ? "active" : ""}`}
@@ -511,7 +525,7 @@ export const Header: React.FC<HeaderProps> = ({
             title="Database Administration"
           >
             <Shield size={12} className="tab-icon" />
-            <span className="tab-label">Admin</span>
+            <span className="tab-label">{t("navAdmin", language)}</span>
           </button>
         </nav>
 
@@ -519,33 +533,40 @@ export const Header: React.FC<HeaderProps> = ({
 
         <div className="action-buttons-group">
           {onOpenImport && (
-            <button className="btn btn-secondary header-btn" onClick={onOpenImport} title="Import data from a SQL dump, CSV or JSON file">
-              <Upload size={12} />
-              <span className="btn-text-responsive">Import</span>
+            <button className="btn btn-secondary header-icon-btn" onClick={onOpenImport} title={t("shortcutImport", language)}>
+              <Upload size={13} />
             </button>
           )}
 
           {onOpenAuditLogs && (
-            <button className="btn btn-secondary header-btn" onClick={onOpenAuditLogs} title="View Audit Logs & History">
-              <FileText size={12} />
-              <span className="btn-text-responsive">Logs</span>
+            <button className="btn btn-secondary header-icon-btn" onClick={onOpenAuditLogs} title={t("shortcutAuditLogs", language)}>
+              <FileText size={13} />
             </button>
           )}
 
-          <button className="btn btn-secondary header-btn conn-btn" onClick={onOpenConnections} title="Manage Database Connections">
-            <Server size={12} />
-            <span className="btn-text-responsive">Connections</span>
+          <button className="btn btn-secondary header-icon-btn conn-btn" onClick={onOpenConnections} title={t("shortcutConnections", language)}>
+            <Server size={13} />
           </button>
 
-          <button className="btn btn-secondary header-icon-btn" onClick={onToggleTheme} title={`Switch to ${theme === "dark" ? "Light" : "Dark"} Mode`}>
-            {theme === "dark" ? <Sun size={12} className="theme-icon sun" /> : <Moon size={12} className="theme-icon moon" />}
+          {onOpenSettings && (
+            <button
+              className="btn btn-secondary header-icon-btn"
+              onClick={onOpenSettings}
+              title={t("settingsTitle", language)}
+            >
+              <SettingsIcon size={13} className="settings-icon" />
+            </button>
+          )}
+
+          <button className="btn btn-secondary header-icon-btn" onClick={onToggleTheme} title={theme === "dark" ? t("switchThemeLight", language) : t("switchThemeDark", language)}>
+            {theme === "dark" ? <Sun size={13} className="theme-icon sun" /> : <Moon size={13} className="theme-icon moon" />}
           </button>
         </div>
       </div>
 
       <style jsx>{`
         .app-header {
-          height: var(--header-h);
+          height: var(--header-h, 44px);
           background: var(--bg-header);
           backdrop-filter: blur(16px);
           -webkit-backdrop-filter: blur(16px);
@@ -553,15 +574,14 @@ export const Header: React.FC<HeaderProps> = ({
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 0 10px;
-          gap: 8px;
+          padding: 0 12px;
+          gap: 10px;
           -webkit-app-region: drag;
           user-select: none;
           flex-shrink: 0;
           z-index: 100;
           width: 100%;
           box-sizing: border-box;
-          overflow: visible;
         }
 
         .header-left {
@@ -569,57 +589,63 @@ export const Header: React.FC<HeaderProps> = ({
           align-items: center;
           gap: 8px;
           min-width: 0;
-          flex-shrink: 1;
+          flex: 0 1 auto;
           -webkit-app-region: no-drag;
-          overflow: visible;
         }
 
         .brand {
-          display: flex;
+          display: inline-flex;
           align-items: center;
-          gap: 6px;
+          gap: 7px;
           color: var(--text-main);
           -webkit-app-region: no-drag;
           cursor: default;
-          padding: 2px 4px;
-          border-radius: 6px;
-          transition: background 0.15s ease;
+          padding: 3px 6px;
+          height: 28px;
+          border-radius: var(--radius-sm, 6px);
+          border: 1px solid transparent;
+          transition: all 0.15s ease;
           flex-shrink: 0;
+          box-sizing: border-box;
         }
         .brand.clickable {
           cursor: pointer;
         }
         .brand.clickable:hover {
           background: var(--bg-hover);
+          border-color: var(--border-light);
         }
         .brand-mascot-img {
           width: 20px;
           height: 20px;
-          border-radius: 4px;
+          border-radius: 5px;
           object-fit: cover;
-          box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+          box-shadow: 0 2px 5px rgba(0, 0, 0, 0.25);
           flex-shrink: 0;
         }
         .brand-title {
           font-weight: 700;
           font-size: 12px;
           letter-spacing: -0.2px;
+          line-height: 1;
         }
 
         .header-breadcrumb {
-          display: flex;
+          display: inline-flex;
           align-items: center;
-          gap: 3px;
+          gap: 4px;
           font-size: 11px;
           color: var(--text-muted);
           background: var(--bg-tertiary);
           padding: 2px 6px;
-          border-radius: var(--radius-sm);
+          height: 28px;
+          border-radius: var(--radius-sm, 6px);
           border: 1px solid var(--border-light);
           white-space: nowrap;
           position: relative;
           min-width: 0;
           flex-shrink: 1;
+          box-sizing: border-box;
         }
         .bc-divider {
           color: var(--border-medium);
@@ -641,10 +667,11 @@ export const Header: React.FC<HeaderProps> = ({
         .bc-item {
           display: inline-flex;
           align-items: center;
-          gap: 3px;
+          gap: 4px;
           font-size: 11px;
           font-weight: 500;
-          padding: 2px 5px;
+          padding: 0 6px;
+          height: 22px;
           border-radius: 4px;
           border: 1px solid transparent;
           background: transparent;
@@ -654,9 +681,10 @@ export const Header: React.FC<HeaderProps> = ({
           user-select: none;
           font-family: inherit;
           text-decoration: none;
-          line-height: 1.2;
+          line-height: 1;
           min-width: 0;
-          max-width: 130px;
+          max-width: 140px;
+          box-sizing: border-box;
         }
         .bc-item:hover, .bc-item.is-open {
           background: var(--bg-hover);
@@ -680,10 +708,10 @@ export const Header: React.FC<HeaderProps> = ({
         }
         .bc-segment-icon {
           flex-shrink: 0;
-          opacity: 0.8;
+          opacity: 0.85;
         }
         .bc-label {
-          max-width: 100px;
+          max-width: 110px;
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
@@ -801,63 +829,67 @@ export const Header: React.FC<HeaderProps> = ({
           background: transparent;
           border: none;
           outline: none;
-          font-size: 11px;
           color: var(--text-main);
+          font-size: 11px;
+          font-family: var(--font-sans);
           width: 100%;
-          font-family: inherit;
         }
+        .bc-search-input::placeholder {
+          color: var(--text-muted);
+        }
+
         .bc-dropdown-list {
           display: flex;
           flex-direction: column;
-          gap: 1px;
-          max-height: 200px;
+          gap: 2px;
+          max-height: 220px;
           overflow-y: auto;
-          margin: 2px 0;
         }
         .bc-dropdown-list.max-h {
-          max-height: 240px;
+          max-height: 200px;
         }
         .bc-dropdown-actions {
           display: flex;
           flex-direction: column;
-          gap: 1px;
-          margin: 4px 0 2px 0;
+          gap: 2px;
         }
+
         .bc-dropdown-item {
           display: flex;
           align-items: center;
           gap: 8px;
           padding: 5px 8px;
+          border-radius: 4px;
           font-size: 11px;
           color: var(--text-sub);
           background: transparent;
           border: none;
-          border-radius: 4px;
           cursor: pointer;
           text-align: left;
           width: 100%;
+          transition: all 0.12s ease;
+          user-select: none;
           font-family: inherit;
-          transition: all 0.1s ease;
         }
         .bc-dropdown-item:hover {
           background: var(--bg-hover);
           color: var(--text-main);
         }
         .bc-dropdown-item.active {
-          background: rgba(59, 130, 246, 0.12);
-          color: var(--accent-blue);
+          background: var(--bg-hover);
+          color: var(--text-main);
           font-weight: 600;
         }
         .bc-dropdown-item.action-item {
-          font-size: 11px;
           color: var(--text-main);
         }
         .bc-dropdown-item.action-item.danger {
-          color: var(--accent-rose, #ef4444);
+          color: var(--accent-red);
         }
         .bc-dropdown-item.action-item.danger:hover {
           background: rgba(239, 68, 68, 0.12);
         }
+
         .item-icon {
           flex-shrink: 0;
           opacity: 0.75;
@@ -909,9 +941,9 @@ export const Header: React.FC<HeaderProps> = ({
           align-items: center;
           justify-content: center;
           gap: 6px;
-          flex: 0 1 280px;
-          min-width: 80px;
-          max-width: 300px;
+          flex: 0 1 200px;
+          min-width: 50px;
+          max-width: 260px;
           -webkit-app-region: no-drag;
         }
         .header-quick-search {
@@ -921,15 +953,16 @@ export const Header: React.FC<HeaderProps> = ({
           gap: 6px;
           background: var(--bg-tertiary);
           border: 1px solid var(--border-light);
-          border-radius: var(--radius-sm);
-          padding: 3px 8px;
-          height: 26px;
+          border-radius: var(--radius-sm, 6px);
+          padding: 0 8px;
+          height: 28px;
           color: var(--text-muted);
           font-family: var(--font-sans);
           cursor: pointer;
-          transition: all 0.12s ease;
+          transition: all 0.15s ease;
           user-select: none;
-          min-width: 60px;
+          min-width: 40px;
+          box-sizing: border-box;
         }
         .header-quick-search:hover {
           background: var(--bg-hover);
@@ -941,7 +974,7 @@ export const Header: React.FC<HeaderProps> = ({
           flex-shrink: 0;
         }
         .search-text {
-          font-size: 11px;
+          font-size: 10.5px;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
@@ -965,22 +998,23 @@ export const Header: React.FC<HeaderProps> = ({
           display: flex;
           align-items: center;
           gap: 4px;
-          padding: 2px 6px;
-          height: 24px;
+          padding: 0 6px;
+          height: 28px;
           background: var(--bg-tertiary);
           border: 1px solid var(--border-light);
-          border-radius: var(--radius-sm);
-          font-size: 9.5px;
+          border-radius: var(--radius-sm, 6px);
+          font-size: 10px;
           color: var(--text-muted);
           font-family: var(--font-mono);
           flex-shrink: 0;
+          box-sizing: border-box;
         }
         .health-dot {
-          width: 5px;
-          height: 5px;
+          width: 6px;
+          height: 6px;
           border-radius: 50%;
           background: var(--accent-green);
-          box-shadow: 0 0 5px var(--accent-green);
+          box-shadow: 0 0 6px var(--accent-green);
           transition: all 0.2s ease;
         }
         .header-health-pill.is-connecting .health-dot {
@@ -989,11 +1023,11 @@ export const Header: React.FC<HeaderProps> = ({
         }
         .header-health-pill.is-medium .health-dot {
           background: var(--accent-amber, #f59e0b);
-          box-shadow: 0 0 5px var(--accent-amber, #f59e0b);
+          box-shadow: 0 0 6px var(--accent-amber, #f59e0b);
         }
         .header-health-pill.is-slow .health-dot {
           background: var(--accent-rose, #ef4444);
-          box-shadow: 0 0 5px var(--accent-rose, #ef4444);
+          box-shadow: 0 0 6px var(--accent-rose, #ef4444);
         }
         .health-ping {
           font-weight: 500;
@@ -1006,23 +1040,26 @@ export const Header: React.FC<HeaderProps> = ({
           gap: 6px;
           -webkit-app-region: no-drag;
           flex-shrink: 0;
+          margin-left: auto;
         }
 
         .nav-tabs {
           display: flex;
           background: var(--bg-tertiary);
           padding: 2px;
-          border-radius: 6px;
+          height: 28px;
+          border-radius: var(--radius-sm, 6px);
           border: 1px solid var(--border-light);
           gap: 2px;
           align-items: center;
+          box-sizing: border-box;
         }
         .tab-btn {
-          display: flex;
+          display: inline-flex;
           align-items: center;
           justify-content: center;
           gap: 4px;
-          padding: 2px 8px;
+          padding: 0 8px;
           font-size: 11px;
           font-weight: 500;
           border: 1px solid transparent;
@@ -1031,12 +1068,13 @@ export const Header: React.FC<HeaderProps> = ({
           border-radius: 4px;
           cursor: pointer;
           transition: all 0.12s ease;
-          height: 24px;
+          height: 22px;
           white-space: nowrap;
+          box-sizing: border-box;
         }
         .tab-icon {
           flex-shrink: 0;
-          opacity: 0.7;
+          opacity: 0.75;
         }
         .tab-btn:hover {
           color: var(--text-main);
@@ -1056,68 +1094,98 @@ export const Header: React.FC<HeaderProps> = ({
 
         .header-divider {
           width: 1px;
-          height: 16px;
+          height: 18px;
           background: var(--border-light);
           margin: 0 1px;
+          flex-shrink: 0;
         }
 
         .action-buttons-group {
           display: flex;
           align-items: center;
-          gap: 4px;
+          gap: 5px;
         }
 
         .header-btn {
-          height: 26px;
+          height: 28px;
           padding: 0 8px;
           font-size: 11px;
-          border-radius: 5px;
+          font-weight: 500;
+          border-radius: var(--radius-sm, 6px);
           gap: 4px;
           display: inline-flex;
           align-items: center;
+          box-sizing: border-box;
+          transition: all 0.12s ease;
         }
 
         .header-icon-btn {
-          height: 26px;
-          width: 26px;
+          height: 28px;
+          width: 28px;
           padding: 0;
-          display: flex;
+          display: inline-flex;
           align-items: center;
           justify-content: center;
-          border-radius: 5px;
+          border-radius: var(--radius-sm, 6px);
+          box-sizing: border-box;
+          transition: all 0.12s ease;
         }
 
         .theme-icon.sun { color: #f59e0b; }
         .theme-icon.moon { color: #818cf8; }
 
         /* Responsive Breakpoints */
-        @media (max-width: 1080px) {
-          .header-breadcrumb .bc-segment-wrap:first-of-type {
+        @media (max-width: 1380px) {
+          .btn-text-responsive {
             display: none;
           }
+          .header-btn {
+            padding: 0 7px;
+          }
+          .header-breadcrumb .bc-label {
+            max-width: 80px;
+          }
+        }
+
+        @media (max-width: 1150px) {
+          .header-breadcrumb .bc-segment-wrap:first-of-type,
           .header-breadcrumb .bc-arrow:first-of-type {
             display: none;
           }
+          .search-text {
+            display: none;
+          }
+          .search-shortcut {
+            display: none;
+          }
+          .header-center {
+            flex: 0 0 auto;
+            min-width: 0;
+          }
         }
 
-        @media (max-width: 900px) {
-          .btn-text-responsive { display: none; }
-          .header-btn { padding: 0 6px; }
-          .search-text { display: none; }
-          .search-shortcut { display: none; }
-          .header-center { flex: 0 0 auto; min-width: 0; }
+        @media (max-width: 950px) {
+          .tab-label {
+            display: none;
+          }
+          .tab-btn {
+            padding: 0 6px;
+          }
+          .brand-title {
+            display: none;
+          }
+          .header-health-pill {
+            display: none;
+          }
         }
 
-        @media (max-width: 720px) {
-          .tab-label { display: none; }
-          .tab-btn { padding: 2px 6px; }
-          .brand-title { display: none; }
-          .header-health-pill { display: none; }
-        }
-
-        @media (max-width: 580px) {
-          .header-center { display: none; }
-          .header-breadcrumb { max-width: 160px; }
+        @media (max-width: 650px) {
+          .header-center {
+            display: none;
+          }
+          .header-breadcrumb {
+            max-width: 120px;
+          }
         }
       `}</style>
     </header>

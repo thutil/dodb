@@ -21,15 +21,21 @@ import {
   AlertTriangle,
   Copy,
   Check,
+  Lock,
 } from "lucide-react";
 import { ConnectionProfile, DBType } from "../types";
 import { apiClient } from "../utils/apiClient";
 
 interface ConnectionModalProps {
   isOpen: boolean;
+  dismissible?: boolean;
   onClose: () => void;
   profiles: ConnectionProfile[];
   activeProfile?: ConnectionProfile | null;
+  bootstrappingName?: string | null;
+  autoUnlockProfileId?: string | null;
+  hasRuntimePassword?: (id: string) => boolean;
+  onUnlockProfile?: (id: string, password: string) => Promise<void>;
   onSaveProfile: (profile: Partial<ConnectionProfile>) => Promise<ConnectionProfile | void>;
   onSaveAllProfiles?: (profiles: ConnectionProfile[]) => Promise<void>;
   onDeleteProfile: (id: string) => Promise<void>;
@@ -43,9 +49,14 @@ interface ConnectionModalProps {
 
 export const ConnectionModal: React.FC<ConnectionModalProps> = ({
   isOpen,
+  dismissible = true,
   onClose,
   profiles,
   activeProfile,
+  bootstrappingName,
+  autoUnlockProfileId,
+  hasRuntimePassword,
+  onUnlockProfile,
   onSaveProfile,
   onSaveAllProfiles,
   onDeleteProfile,
@@ -64,6 +75,8 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
     password: "",
     database: "postgres",
     filePath: "",
+    keepAlive: false,
+    savePassword: true,
   });
   const [portText, setPortText] = useState<string>("5432");
   const [testResult, setTestResult] = useState<{ success: boolean; text: string } | null>(null);
@@ -92,8 +105,15 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
   const [renamingGroup, setRenamingGroup] = useState<{ oldName: string; newName: string } | null>(null);
   const [deletingGroup, setDeletingGroup] = useState<string | null>(null);
   const [confirmDeleteProfile, setConfirmDeleteProfile] = useState<ConnectionProfile | null>(null);
-  // Set when Connect is pressed on a saved profile that has unsaved edits.
   const [pendingConnect, setPendingConnect] = useState<Partial<ConnectionProfile> | null>(null);
+  const [unlockRequest, setUnlockRequest] = useState<{
+    profile: Partial<ConnectionProfile>;
+    mode: "form" | "direct";
+  } | null>(null);
+  // Set when a supplied password was rejected, so the field stays flagged.
+  const [unlockError, setUnlockError] = useState<string | null>(null);
+  const [unlocking, setUnlocking] = useState(false);
+  const passwordInputRef = React.useRef<HTMLInputElement>(null);
 
   // Close context menu when clicking outside
   useEffect(() => {
@@ -153,7 +173,11 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
     if (selectedId && selectedId !== "__NEW__") {
       const p = profiles.find((item) => item.id === selectedId);
       if (p) {
-        setForm(p);
+        setForm({
+          ...p,
+          keepAlive: p.keepAlive === true,
+          savePassword: p.savePassword !== false,
+        });
         setPortText(p.port ? String(p.port) : (p.type === "postgres" ? "5432" : "3306"));
         const defaults = ["Default", "Production", "Staging", "Development", "Local"];
         const existing = profiles.map((pr) => pr.group).filter(Boolean);
@@ -166,6 +190,48 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
       }
     }
   }, [selectedId, profiles]);
+
+  /// Flags the form's Password field instead of opening a second modal, so the
+  /// password is typed where every other credential is.
+  const requestUnlock = (profile: Partial<ConnectionProfile>, mode: "form" | "direct") => {
+    setUnlockRequest({ profile, mode });
+    setUnlockError(null);
+  };
+
+  // Move focus to the field the user is being asked to fill.
+  useEffect(() => {
+    if (!unlockRequest) return;
+    const timer = window.setTimeout(() => passwordInputRef.current?.focus(), 0);
+    return () => window.clearTimeout(timer);
+  }, [unlockRequest]);
+
+  // Drop a pending unlock once the user moves to a different profile.
+  useEffect(() => {
+    if (unlockRequest && unlockRequest.profile.id !== selectedId) {
+      setUnlockRequest(null);
+      setUnlockError(null);
+    }
+  }, [selectedId, unlockRequest]);
+
+  // The field is red while the password it asked for is still missing, and
+  // after a password the database rejected.
+  const passwordFlagged = !!unlockError || (!!unlockRequest && !form.password);
+  const passwordHint = unlockError
+    ? unlockError
+    : unlockRequest
+      ? "Password required - kept in memory until dodb closes, never written to disk."
+      : null;
+
+  const autoUnlockAskedRef = React.useRef<string | null>(null);
+  useEffect(() => {
+    if (!isOpen || !autoUnlockProfileId) return;
+    if (autoUnlockAskedRef.current === autoUnlockProfileId) return;
+    const target = profiles.find((p) => p.id === autoUnlockProfileId);
+    if (!target) return;
+    autoUnlockAskedRef.current = autoUnlockProfileId;
+    setSelectedId(target.id);
+    requestUnlock(target, "direct");
+  }, [isOpen, autoUnlockProfileId, profiles]);
 
   const handleTypeChange = (type: DBType) => {
     if (type === "sqlite") {
@@ -195,6 +261,9 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
       ...form,
       port: isNaN(finalPort) ? (form.type === "postgres" ? 5432 : 3306) : finalPort,
       group: form.group ? form.group.trim() : "Default",
+      keepAlive: form.keepAlive === true,
+      // SQLite has no password to withhold, so the switch never applies to it.
+      savePassword: form.type === "sqlite" ? true : form.savePassword !== false,
     };
     if (selectedId === "__NEW__") {
       delete data.id;
@@ -256,13 +325,17 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
   // True when the form differs from the saved profile it was loaded from.
   // Connecting would otherwise use the stored credentials while showing the
   // edited ones, because the backend looks the profile up by id.
-  const isFormDirty = (): boolean => {
+  // `data` defaults to the live form, but the unlock path passes the values it
+  // is about to connect with so the password it just put in memory - and has
+  // already dropped from the form - does not read as an edit.
+  const isFormDirty = (data?: Partial<ConnectionProfile>): boolean => {
     if (selectedId === "__NEW__") return false;
     const saved = profiles.find((p) => p.id === selectedId);
     if (!saved) return false;
-    const current = getCleanForm();
+    const current = data ?? getCleanForm();
     const fields: (keyof ConnectionProfile)[] = [
       "name", "type", "host", "port", "user", "password", "database", "filePath", "group",
+      "keepAlive", "savePassword",
     ];
     return fields.some((f) => {
       const a = current[f] ?? "";
@@ -298,6 +371,21 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
     } finally {
       setConnecting(false);
     }
+  };
+
+  const needsPassword = (data: Partial<ConnectionProfile>): boolean => {
+    if (data.type === "sqlite") return false;
+    if (data.savePassword !== false) return false;
+    if (data.password) return false;
+    return !(data.id && hasRuntimePassword?.(data.id));
+  };
+
+  const connectFromForm = async (cleanData: Partial<ConnectionProfile>) => {
+    if (isFormDirty(cleanData)) {
+      setPendingConnect(cleanData);
+      return;
+    }
+    await connectWith(cleanData, false);
   };
 
   const handleConnect = async () => {
@@ -343,18 +431,24 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
       return;
     }
 
-    // A saved profile with pending edits: let the user decide which values to use.
-    if (isFormDirty()) {
-      setPendingConnect(cleanData);
+    if (unlockRequest && cleanData.password) {
+      await submitUnlock(cleanData.password);
       return;
     }
 
-    await connectWith(cleanData, false);
+    if (needsPassword(cleanData)) {
+      setTestResult(null);
+      requestUnlock(cleanData, "form");
+      return;
+    }
+
+    await connectFromForm(cleanData);
   };
 
-  const handleConnectDirectly = async (profile: ConnectionProfile) => {
+  /// Connects a profile exactly as stored, skipping the form. Split out so the
+  /// password prompt can resume it.
+  const connectStoredProfile = async (profile: ConnectionProfile) => {
     setConnecting(true);
-    setSelectedId(profile.id);
     setTestResult(null);
     try {
       const res = await onTestConnection(profile);
@@ -376,6 +470,46 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
     }
   };
 
+  const handleConnectDirectly = async (profile: ConnectionProfile) => {
+    setSelectedId(profile.id);
+    if (needsPassword(profile)) {
+      setTestResult(null);
+      requestUnlock(profile, "direct");
+      return;
+    }
+    await connectStoredProfile(profile);
+  };
+
+  /// Hands the typed password to the app - which keeps it in memory only - and
+  /// resumes the connect that asked for it.
+  const submitUnlock = async (value: string) => {
+    if (!unlockRequest) return;
+    const { profile, mode } = unlockRequest;
+    if (!profile.id || !onUnlockProfile) {
+      setUnlockError("This connection has no id yet - save it first.");
+      return;
+    }
+    setUnlocking(true);
+    try {
+      await onUnlockProfile(profile.id, value);
+      setUnlockRequest(null);
+      setUnlockError(null);
+      // The password lives in memory only, so it must not linger in the form
+      // and make it look edited.
+      setForm((prev) => ({ ...prev, password: "" }));
+      if (mode === "direct") {
+        await connectStoredProfile(profile as ConnectionProfile);
+      } else {
+        await connectFromForm({ ...profile, password: "" });
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setUnlockError(`Could not use that password: ${msg}`);
+    } finally {
+      setUnlocking(false);
+    }
+  };
+
   const handleCreateNew = () => {
     setSelectedId("__NEW__");
     setPortText("5432");
@@ -389,6 +523,8 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
       password: "",
       database: "postgres",
       filePath: "",
+      keepAlive: false,
+      savePassword: true,
     });
     setIsCustomGroup(false);
     setTestResult(null);
@@ -407,6 +543,8 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
       password: "",
       database: "postgres",
       filePath: "",
+      keepAlive: false,
+      savePassword: true,
     });
     setIsCustomGroup(false);
     setTestResult(null);
@@ -442,7 +580,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
     setGroupOrder(newOrder);
     try {
       localStorage.setItem("dodb_group_order", JSON.stringify(newOrder));
-    } catch {}
+    } catch { }
 
     if ((form.group || "Default") === oldName) {
       setForm((prev) => ({ ...prev, group: trimmed }));
@@ -478,7 +616,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
     setGroupOrder(newOrder);
     try {
       localStorage.setItem("dodb_group_order", JSON.stringify(newOrder));
-    } catch {}
+    } catch { }
     setDeletingGroup(null);
   };
 
@@ -495,7 +633,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
     setGroupOrder(newOrder);
     try {
       localStorage.setItem("dodb_group_order", JSON.stringify(newOrder));
-    } catch {}
+    } catch { }
   };
 
   // Group profiles
@@ -526,10 +664,10 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
   };
 
   const isCurrentActive = Boolean(activeProfile && selectedId === activeProfile.id);
-if (!isOpen) return null;
+  if (!isOpen) return null;
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay" onClick={dismissible ? onClose : undefined}>
       <div className="modal-window" onClick={(e) => e.stopPropagation()}>
         {/* macOS Style Window Top Bar */}
         <div className="window-header">
@@ -539,7 +677,13 @@ if (!isOpen) return null;
             </div>
             <div className="title-text-group">
               <span className="window-main-title">Database Connections</span>
-              <span className="window-sub-title">Manage connection profiles and environments</span>
+              <span className={`window-sub-title${dismissible ? "" : " required"}`}>
+                {bootstrappingName
+                  ? `Reconnecting to ${bootstrappingName}...`
+                  : dismissible
+                    ? "Manage connection profiles and environments"
+                    : "Connect to a database to continue"}
+              </span>
             </div>
             {activeProfile && (
               <span className="active-conn-pill">
@@ -548,9 +692,11 @@ if (!isOpen) return null;
               </span>
             )}
           </div>
-          <button className="window-close-btn" onClick={onClose} title="Close">
-            <X size={15} />
-          </button>
+          {dismissible && (
+            <button className="window-close-btn" onClick={onClose} title="Close">
+              <X size={15} />
+            </button>
+          )}
         </div>
 
         <div className="window-body">
@@ -738,6 +884,8 @@ if (!isOpen) return null;
                 </div>
               )}
 
+
+
               {/* Database Engine Type Segmented Picker */}
               <div className="form-section-card">
                 <div className="section-label">Database Type</div>
@@ -771,8 +919,31 @@ if (!isOpen) return null;
 
               {/* General Connection Settings */}
               <div className="form-section-card">
+                {testResult && (
+                  <div className={`status-feedback-box ${testResult.success ? "success" : "error"}`}>
+                    <div className="feedback-content-left">
+                      {testResult.success ? <CheckCircle2 size={14} className="feedback-icon" /> : <XCircle size={14} className="feedback-icon" />}
+                      <span className="feedback-text">{testResult.text}</span>
+                    </div>
+                    {!testResult.success && (
+                      <button
+                        type="button"
+                        className="btn-feedback-copy"
+                        onClick={() => {
+                          navigator.clipboard.writeText(testResult.text);
+                          setCopiedErrorText(true);
+                          setTimeout(() => setCopiedErrorText(false), 2000);
+                        }}
+                        title="Copy error message"
+                      >
+                        {copiedErrorText ? <Check size={11} /> : <Copy size={11} />}
+                        <span>{copiedErrorText ? "Copied" : "Copy"}</span>
+                      </button>
+                    )}
+                  </div>
+                )}
                 <div className="section-label">Connection Details</div>
-                
+
                 <div className="field-grid-2">
                   <div className="field-group flex-2">
                     <label className="field-label">Profile Name</label>
@@ -894,12 +1065,28 @@ if (!isOpen) return null;
                       <div className="field-group">
                         <label className="field-label">Password</label>
                         <input
+                          ref={passwordInputRef}
                           type="password"
-                          className="input form-input"
+                          className={`input form-input${passwordFlagged ? " input-invalid" : ""}`}
                           placeholder="••••••••"
                           value={form.password || ""}
-                          onChange={(e) => setForm({ ...form, password: e.target.value })}
+                          onChange={(e) => {
+                            setForm({ ...form, password: e.target.value });
+                            if (unlockError) setUnlockError(null);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && unlockRequest) {
+                              e.preventDefault();
+                              handleConnect();
+                            }
+                          }}
                         />
+                        {passwordHint && (
+                          <span className="field-error-hint">
+                            <Lock size={10} />
+                            <span>{passwordHint}</span>
+                          </span>
+                        )}
                       </div>
                     </div>
 
@@ -912,33 +1099,39 @@ if (!isOpen) return null;
                         onChange={(e) => setForm({ ...form, database: e.target.value })}
                       />
                     </div>
+
+                    <label className="field-switch mt-12">
+                      <input
+                        type="checkbox"
+                        checked={form.savePassword !== false}
+                        onChange={(e) => setForm({ ...form, savePassword: e.target.checked })}
+                      />
+                      <span className="field-switch-text">
+                        <span className="field-switch-title">Save password</span>
+                        <span className="field-switch-hint">
+                          Off: the password is never written to disk - dodb asks for it once each
+                          time the app starts.
+                        </span>
+                      </span>
+                    </label>
                   </>
                 )}
-              </div>
 
-              {testResult && (
-                <div className={`status-feedback-box ${testResult.success ? "success" : "error"}`}>
-                  <div className="feedback-content-left">
-                    {testResult.success ? <CheckCircle2 size={14} className="feedback-icon" /> : <XCircle size={14} className="feedback-icon" />}
-                    <span className="feedback-text">{testResult.text}</span>
-                  </div>
-                  {!testResult.success && (
-                    <button
-                      type="button"
-                      className="btn-feedback-copy"
-                      onClick={() => {
-                        navigator.clipboard.writeText(testResult.text);
-                        setCopiedErrorText(true);
-                        setTimeout(() => setCopiedErrorText(false), 2000);
-                      }}
-                      title="Copy error message"
-                    >
-                      {copiedErrorText ? <Check size={11} /> : <Copy size={11} />}
-                      <span>{copiedErrorText ? "Copied" : "Copy"}</span>
-                    </button>
-                  )}
-                </div>
-              )}
+                <label className="field-switch mt-12">
+                  <input
+                    type="checkbox"
+                    checked={form.keepAlive === true}
+                    onChange={(e) => setForm({ ...form, keepAlive: e.target.checked })}
+                  />
+                  <span className="field-switch-text">
+                    <span className="field-switch-title">Keep connection alive</span>
+                    <span className="field-switch-hint">
+                      Holds the connection open, reconnects on its own when it drops, and connects
+                      this profile when dodb starts.
+                    </span>
+                  </span>
+                </label>
+              </div>
             </div>
 
             {/* Bottom Footer Actions */}
@@ -984,17 +1177,19 @@ if (!isOpen) return null;
                 <button
                   className="btn btn-primary connect-main-btn"
                   onClick={handleConnect}
-                  disabled={connecting || testing || saving || disconnecting}
+                  disabled={connecting || unlocking || testing || saving || disconnecting}
                 >
-                  {connecting ? <RefreshCw size={13} className="spin" /> : <Zap size={13} />}
+                  {connecting || unlocking ? <RefreshCw size={13} className="spin" /> : <Zap size={13} />}
                   <span>
-                    {connecting
+                    {connecting || unlocking
                       ? "Connecting..."
                       : selectedId === "__NEW__"
-                      ? "Save & Connect"
-                      : isCurrentActive
-                      ? "Reconnect"
-                      : "Connect"}
+                        ? "Save & Connect"
+                        : unlockRequest
+                          ? "Unlock & Connect"
+                          : isCurrentActive
+                            ? "Reconnect"
+                            : "Connect"}
                   </span>
                 </button>
               </div>
@@ -1175,7 +1370,6 @@ if (!isOpen) return null;
                 onClick={async () => {
                   const data = pendingConnect;
                   setPendingConnect(null);
-                  // Session-only: the edited values are used, nothing is written to disk.
                   await connectWith({ ...data, id: undefined }, true);
                 }}
               >
@@ -1293,9 +1487,6 @@ if (!isOpen) return null;
         .app-icon-badge {
           width: 28px;
           height: 28px;
-          border-radius: 7px;
-          background: rgba(59, 130, 246, 0.15);
-          color: var(--accent-blue);
           display: flex;
           align-items: center;
           justify-content: center;
@@ -1313,7 +1504,10 @@ if (!isOpen) return null;
         }
         .window-sub-title {
           font-size: 10.5px;
-          color: var(--text-muted);
+        }
+        .window-sub-title.required {
+          color: gray;
+          font-weight: 600;
         }
         .active-conn-pill {
           display: inline-flex;
@@ -1762,11 +1956,54 @@ if (!isOpen) return null;
           font-weight: 500;
           color: var(--text-sub);
         }
+        .field-switch {
+          display: flex;
+          align-items: flex-start;
+          gap: 8px;
+          cursor: pointer;
+          user-select: none;
+        }
+        .field-switch input[type="checkbox"] {
+          width: 13px;
+          height: 13px;
+          margin: 1px 0 0;
+          accent-color: var(--accent-blue);
+          cursor: pointer;
+          flex-shrink: 0;
+        }
+        .field-switch-text {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+        .field-switch-title {
+          font-size: 11px;
+          font-weight: 500;
+          color: var(--text-sub);
+        }
+        .field-switch-hint {
+          font-size: 10px;
+          line-height: 1.4;
+          color: var(--text-muted);
+        }
         .form-input, .form-select {
           width: 100%;
           height: 28px;
           font-size: 11.5px;
           border-radius: var(--radius-sm);
+        }
+        .form-input.input-invalid,
+        .form-input.input-invalid:focus {
+          border-color: var(--accent-red);
+          box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.16);
+        }
+        .field-error-hint {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          font-size: 10px;
+          line-height: 1.4;
+          color: var(--accent-red);
         }
 
         .custom-group-input-wrap {

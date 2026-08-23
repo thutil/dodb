@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Database, Table2, RefreshCw, Search, HardDrive, X, Layers, Terminal, Copy, Check, Plus, Pencil, Trash2, Eraser, Upload } from "lucide-react";
 import { DBType } from "../types";
 import { quoteTableIdent } from "../utils/ddlBuilder";
+import { Language, t } from "../utils/i18n";
 
 interface SidebarExplorerProps {
   databases: string[];
@@ -24,6 +25,7 @@ interface SidebarExplorerProps {
   onRefresh: () => void;
   loading: boolean;
   dbType?: string;
+  language?: Language;
 }
 
 /** Right-click target: a specific table, multiple tables, or empty space. */
@@ -52,6 +54,7 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
   onRefresh,
   loading,
   dbType,
+  language = "en",
 }) => {
   const [mounted, setMounted] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -232,9 +235,9 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
         <div className="group-header">
           <div className="group-label">
             <HardDrive size={12} />
-            <span>Database</span>
+            <span>{t("sidebarDatabase", language)}</span>
           </div>
-          <button className="icon-action-btn" onClick={onRefresh} title="Refresh Databases & Tables">
+          <button className="icon-action-btn" onClick={onRefresh} title={t("shortcutRefresh", language)}>
             <RefreshCw size={11} className={loading ? "spin" : ""} />
           </button>
         </div>
@@ -244,7 +247,7 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
             value={activeDatabase}
             onChange={(e) => onSelectDatabase(e.target.value)}
           >
-            {databases.length === 0 && <option value="">No Databases</option>}
+            {databases.length === 0 && <option value="">{t("noDbFound", language)}</option>}
             {databases.map((db) => (
               <option key={db} value={db}>
                 {db}
@@ -257,11 +260,13 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
       {/* Filter tables input with clear button */}
       <div className="sidebar-group search-group">
         <div className="search-box">
-          <Search size={12} className="search-icon" />
+          <span className="search-icon-wrap">
+            <Search size={12} />
+          </span>
           <input
             type="text"
             className="input search-field"
-            placeholder="Filter tables (⌘-click to multi-select)..."
+            placeholder={t("sidebarFilterTables", language)}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             autoCapitalize="none"
@@ -269,7 +274,7 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
             spellCheck={false}
           />
           {searchTerm && (
-            <button className="clear-search-btn" onClick={() => setSearchTerm("")} title="Clear filter">
+            <button className="clear-search-btn" onClick={() => setSearchTerm("")} title={t("close", language)}>
               <X size={11} />
             </button>
           )}
@@ -281,14 +286,14 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
         <div className="multi-select-banner">
           <div className="multi-select-info">
             <span className="multi-count">{selectedTables.size}</span>
-            <span>tables selected</span>
+            <span>{t("gridRowsSelected", language)}</span>
           </div>
           <div className="multi-select-actions">
             <button
               type="button"
               className="btn-multi-action"
               onClick={() => handleCopyMultipleNames(Array.from(selectedTables))}
-              title="Copy table names"
+              title={t("copyTableName", language)}
             >
               <Copy size={11} />
             </button>
@@ -316,7 +321,7 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
               type="button"
               className="btn-multi-action"
               onClick={handleClearSelection}
-              title="Clear selection"
+              title={t("gridClearSelection", language)}
             >
               <X size={11} />
             </button>
@@ -332,7 +337,7 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
         <div className="group-header">
           <div className="group-label">
             <Database size={12} />
-            <span>Tables</span>
+            <span>{t("sidebarTables", language)}</span>
           </div>
           <div className="group-header-right">
             <span className="table-count-badge">{filteredTables.length}</span>
@@ -340,7 +345,7 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
               <button
                 className="icon-action-btn"
                 onClick={onCreateTable}
-                title="Create Table"
+                title={t("sidebarCreateTable", language)}
                 disabled={!activeDatabase}
               >
                 <Plus size={12} />
@@ -352,11 +357,11 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
         {loading ? (
           <div className="sidebar-message">
             <RefreshCw size={14} className="spin loading-icon" />
-            <span>Loading tables...</span>
+            <span>{t("loading", language)}</span>
           </div>
         ) : filteredTables.length === 0 ? (
           <div className="sidebar-message">
-            {searchTerm ? "No tables match filter" : "No tables in database"}
+            {searchTerm ? t("sidebarNoTables", language) : t("noTableFound", language)}
           </div>
         ) : (
           <div className="table-tree">
@@ -720,11 +725,17 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
           display: flex;
           align-items: center;
         }
-        .search-icon {
+        .search-icon-wrap {
           position: absolute;
           left: 8px;
+          top: 50%;
+          transform: translateY(-50%);
           color: var(--text-muted);
           pointer-events: none;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 2;
         }
         .search-field {
           padding-left: 26px;
@@ -733,6 +744,7 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
           font-size: 11.5px;
           height: 28px;
           border-radius: 5px;
+          box-sizing: border-box;
         }
         .clear-search-btn {
           position: absolute;

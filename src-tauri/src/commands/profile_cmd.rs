@@ -59,6 +59,12 @@ pub async fn save_profile(mut profile: ConnectionProfile, state: State<'_, DbSta
             all_profiles.push(profile.clone());
         }
     }
+    if !profile.save_password && !profile.password.is_empty() {
+        if let Ok(mut runtime) = state.runtime_passwords.lock() {
+            runtime.insert(profile.id.clone(), profile.password.clone());
+        }
+    }
+
     profiles::save_profiles(&mut all_profiles)?;
     Ok(profile)
 }
@@ -75,6 +81,9 @@ pub async fn save_all_profiles(mut profiles: Vec<ConnectionProfile>, state: Stat
 #[command]
 pub async fn delete_profile(id: String, state: State<'_, DbState>) -> Result<(), String> {
     let _ = close_profile_pools(&state, Some(&id)).await;
+    if let Ok(mut runtime) = state.runtime_passwords.lock() {
+        runtime.remove(&id);
+    }
     let mut all_profiles = profiles::load_profiles()?;
     all_profiles.retain(|p| p.id != id);
     profiles::save_profiles(&mut all_profiles)?;
@@ -82,7 +91,45 @@ pub async fn delete_profile(id: String, state: State<'_, DbState>) -> Result<(),
 }
 
 #[command]
-pub async fn test_connection(profile: ConnectionProfile) -> Result<bool, String> {
+pub async fn test_connection(mut profile: ConnectionProfile, state: State<'_, DbState>) -> Result<bool, String> {
+    if profile.password.is_empty() && !profile.id.is_empty() {
+        if let Ok(runtime) = state.runtime_passwords.lock() {
+            if let Some(pw) = runtime.get(&profile.id) {
+                profile.password = pw.clone();
+            }
+        }
+    }
     test_connection_standalone(&profile).await
 }
 
+#[command]
+pub async fn set_runtime_password(id: String, password: String, state: State<'_, DbState>) -> Result<(), String> {
+    if id.trim().is_empty() {
+        return Err("A connection id is required to remember its password.".to_string());
+    }
+    {
+        let mut runtime = state.runtime_passwords.lock().map_err(|e| e.to_string())?;
+        runtime.insert(id.clone(), password);
+    }
+    let _ = close_profile_pools(&state, Some(&id)).await;
+    Ok(())
+}
+
+/// Forgets a remembered password - one profile, or all of them when `id` is None.
+#[command]
+pub async fn clear_runtime_password(id: Option<String>, state: State<'_, DbState>) -> Result<(), String> {
+    match id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(one) => {
+            {
+                let mut runtime = state.runtime_passwords.lock().map_err(|e| e.to_string())?;
+                runtime.remove(one);
+            }
+            let _ = close_profile_pools(&state, Some(one)).await;
+        }
+        None => {
+            let mut runtime = state.runtime_passwords.lock().map_err(|e| e.to_string())?;
+            runtime.clear();
+        }
+    }
+    Ok(())
+}

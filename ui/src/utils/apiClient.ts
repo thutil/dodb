@@ -14,26 +14,30 @@ export const apiClient = {
   getProfiles: async () => {
     return await invoke("get_profiles");
   },
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   saveProfile: async (profile: any) => {
     return await invoke("save_profile", { profile });
   },
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   saveAllProfiles: async (profiles: any[]) => {
     return await invoke("save_all_profiles", { profiles });
   },
   deleteProfile: async (id: string) => {
     return await invoke("delete_profile", { id });
   },
-  // Connect without saving: the backend keeps the connection in memory only and
-  // returns it with a "session-" id that every other command accepts.
   registerSessionProfile: async (profile: unknown) => {
-    return await invoke<ConnectionProfile>("register_session_profile", { profile });
+    return await invoke<ConnectionProfile>("register_session_profile", {
+      profile,
+    });
   },
   unregisterSessionProfile: async (id: string) => {
     return await invoke("unregister_session_profile", { id });
   },
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  setRuntimePassword: async (id: string, password: string) => {
+    return await invoke("set_runtime_password", { id, password });
+  },
+  clearRuntimePassword: async (id?: string) => {
+    return await invoke("clear_runtime_password", { id });
+  },
+
   testConnection: async (profile: any) => {
     return await invoke("test_connection", { profile });
   },
@@ -63,7 +67,7 @@ export const apiClient = {
     sortOrder?: string,
     searchQuery?: string,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    filters?: any[]
+    filters?: any[],
   ) => {
     return await invoke("get_rows", {
       id,
@@ -74,14 +78,21 @@ export const apiClient = {
       sortColumn,
       sortOrder,
       searchQuery,
-      filters
+      filters,
     });
   },
-  commitChanges: async (id: string, database: string, table: string, changes: unknown) => {
-    return await invoke<{ success: boolean; queries: string[]; affected: number[]; totalAffected: number }>(
-      "commit_changes",
-      { id, database, table, changes }
-    );
+  commitChanges: async (
+    id: string,
+    database: string,
+    table: string,
+    changes: unknown,
+  ) => {
+    return await invoke<{
+      success: boolean;
+      queries: string[];
+      affected: number[];
+      totalAffected: number;
+    }>("commit_changes", { id, database, table, changes });
   },
   executeCommand: async (id: string, database: string, command: string) => {
     return await invoke("execute_command", { id, database, command });
@@ -105,7 +116,11 @@ export const apiClient = {
   describeImportFile: async (path: string): Promise<ImportFileInfo> => {
     return await invoke("describe_import_file", { path });
   },
-  previewImportFile: async (path: string, format: ImportFormat, csv: CsvOptions): Promise<ImportPreview> => {
+  previewImportFile: async (
+    path: string,
+    format: ImportFormat,
+    csv: CsvOptions,
+  ): Promise<ImportPreview> => {
     return await invoke("preview_import_file", { path, format, csv });
   },
   // `onProgress` is a Tauri Channel: the Rust side pushes a tick per batch
@@ -114,7 +129,7 @@ export const apiClient = {
     id: string,
     database: string,
     request: ImportRequest,
-    onProgress: Channel<ImportProgress>
+    onProgress: Channel<ImportProgress>,
   ): Promise<ImportReport> => {
     return await invoke("run_import", { id, database, request, onProgress });
   },
@@ -134,16 +149,30 @@ export const apiClient = {
   adminDropDatabase: async (id: string, database: string, name: string) => {
     return await invoke("admin_drop_database", { id, database, name });
   },
-  adminCreateUser: async (id: string, database: string, username: string, password: string, isSuperuser: boolean) => {
-    return await invoke("admin_create_user", { id, database, username, password, isSuperuser });
+  adminCreateUser: async (
+    id: string,
+    database: string,
+    username: string,
+    password: string,
+    isSuperuser: boolean,
+  ) => {
+    return await invoke("admin_create_user", {
+      id,
+      database,
+      username,
+      password,
+      isSuperuser,
+    });
   },
-  adminDropUser: async (id: string, database: string, username: string, host?: string) => {
+  adminDropUser: async (
+    id: string,
+    database: string,
+    username: string,
+    host?: string,
+  ) => {
     return await invoke("admin_drop_user", { id, database, username, host });
   },
   adminKillProcess: async (id: string, database: string, pid: string) => {
     return await invoke("admin_kill_process", { id, database, pid });
-  }
+  },
 };
-
-
-

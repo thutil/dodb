@@ -230,11 +230,14 @@ export const ConfirmDdlModal: React.FC<ConfirmDdlModalProps> = ({
         .submodal-card {
           width: 480px;
           max-width: 92vw;
+          max-height: 85vh;
           background: var(--bg-card);
           border: 1px solid var(--border-medium);
           border-radius: var(--radius-md);
           box-shadow: var(--shadow-popup);
           overflow: hidden;
+          display: flex;
+          flex-direction: column;
           animation: slideUp 0.16s cubic-bezier(0.16, 1, 0.3, 1);
         }
         @keyframes slideUp {
@@ -250,6 +253,7 @@ export const ConfirmDdlModal: React.FC<ConfirmDdlModalProps> = ({
           font-size: 12.5px;
           font-weight: 600;
           background: var(--bg-header);
+          flex-shrink: 0;
         }
         .danger-header {
           color: var(--accent-red);
@@ -262,6 +266,9 @@ export const ConfirmDdlModal: React.FC<ConfirmDdlModalProps> = ({
           display: flex;
           flex-direction: column;
           gap: 10px;
+          overflow-y: auto;
+          flex: 1;
+          min-height: 0;
         }
         .submodal-desc {
           font-size: 11.5px;

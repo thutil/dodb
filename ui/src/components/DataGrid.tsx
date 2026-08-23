@@ -48,6 +48,7 @@ import {
   GeoJsonGeometry,
 } from "../utils/gisUtils";
 import { GisMapViewer, GisFeatureRecord } from "./GisMapViewer";
+import { Language, t } from "../utils/i18n";
 
 
 export interface PendingChanges {
@@ -112,6 +113,7 @@ interface DataGridProps {
   theme?: "dark" | "light";
   errorMessage?: string | null;
   onCreateTable?: () => void;
+  language?: Language;
 }
 
 export const DataGrid: React.FC<DataGridProps> = ({
@@ -137,6 +139,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
   theme = "dark",
   errorMessage = null,
   onCreateTable,
+  language = "en",
 }) => {
   const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
 
@@ -1068,7 +1071,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                 title={isFilterPanelOpen ? "Close Filter Drawer" : "Open Filter Drawer (Add column filter rules)"}
               >
                 <Filter size={13} />
-                <span>Filter {filters.length > 0 ? `(${filters.length})` : ""}</span>
+                <span>{t("gridFilter", language)} {filters.length > 0 ? `(${filters.length})` : ""}</span>
               </button>
 
               <button
@@ -1077,7 +1080,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                 title="Add a new row draft to this table"
               >
                 <Plus size={13} />
-                <span>Add Row</span>
+                <span>{t("gridAddRow", language)}</span>
               </button>
 
               {/* Compact Export Dropdown */}
@@ -1088,7 +1091,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                   title="Export table data (JSON, SQL, CSV)"
                 >
                   <Download size={13} />
-                  <span>Export</span>
+                  <span>{t("gridExport", language)}</span>
                   <ChevronDown size={11} className={`export-chevron ${isExportMenuOpen ? "open" : ""}`} />
                 </button>
                 {isExportMenuOpen && (
@@ -1102,7 +1105,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                       title="Export query results as JSON file"
                     >
                       <FileJson size={13} className="menu-icon json-icon" />
-                      <span>Export JSON</span>
+                      <span>{t("gridExportJson", language)}</span>
                     </button>
                     <button
                       className="export-menu-item"
@@ -1113,7 +1116,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                       title="Export query results as SQL INSERT statements"
                     >
                       <Download size={13} className="menu-icon sql-icon" />
-                      <span>Export SQL</span>
+                      <span>{t("gridExportSql", language)}</span>
                     </button>
                     <button
                       className="export-menu-item"
@@ -1124,7 +1127,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                       title="Export query results as CSV spreadsheet"
                     >
                       <FileCode size={13} className="menu-icon csv-icon" />
-                      <span>Export CSV</span>
+                      <span>{t("gridExportCsv", language)}</span>
                     </button>
                   </div>
                 )}
@@ -1133,11 +1136,13 @@ export const DataGrid: React.FC<DataGridProps> = ({
           )}
 
           <div className="search-wrap" title="Quick text search across visible data">
-            <Search size={13} className="search-icon" />
+            <span className="search-icon-wrap">
+              <Search size={13} />
+            </span>
             <input
               type="text"
               className="input search-input"
-              placeholder="Search table..."
+              placeholder={t("gridSearchPlaceholder", language)}
               value={searchQuery}
               title="Search table across loaded records"
               onChange={(e) => {
@@ -1153,7 +1158,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
             title="Reload table records from database"
           >
             <RefreshCw size={13} className={loading ? "spin" : ""} />
-            <span>Refresh</span>
+            <span>{t("refresh", language)}</span>
           </button>
         </div>
       </div>
@@ -1278,11 +1283,11 @@ export const DataGrid: React.FC<DataGridProps> = ({
           <div className="tx-actions">
             <button className="btn btn-secondary" onClick={handleRollback} disabled={submitting}>
               <RotateCcw size={12} />
-              <span>Rollback</span>
+              <span>{t("gridRollback", language)}</span>
             </button>
             <button className="btn btn-primary btn-commit-action" onClick={handleCommit} disabled={submitting}>
               <Check size={12} />
-              <span>{submitting ? "Committing..." : "Commit Changes"}</span>
+              <span>{submitting ? t("loading", language) : t("gridCommit", language)}</span>
             </button>
           </div>
         </div>
@@ -1297,7 +1302,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
 
       <div className="grid-table-area">
         {loading ? (
-          <div className="grid-state-msg">Loading records...</div>
+          <div className="grid-state-msg">{t("loading", language)}</div>
         ) : viewMode === "gis" ? (
           <div className="gis-view-wrapper" style={{ height: "100%", width: "100%", position: "relative" }}>
             <GisMapViewer
@@ -1335,41 +1340,36 @@ export const DataGrid: React.FC<DataGridProps> = ({
           <table className="pro-table">
             <thead>
               <tr>
-                <th className="num-col">#</th>
-                <th className="action-col">Act</th>
-                {columns.map((col) => {
-                  const isSorted = sortColumn === col.name;
-                  const isGeomCol = isGeometryColumn(col.type, col.name);
+                <th className="th-index">#</th>
+                <th className="th-actions">Actions</th>
+                {columns.map((c) => {
+                  const isPk = c.primaryKey;
+                  const isSorted = sortColumn === c.name;
+
                   return (
                     <th
-                      key={col.name}
-                      className={`col-hdr ${isSorted ? "sorted-hdr" : ""}`}
-                      onClick={() => handleHeaderClick(col.name)}
-                      style={{ cursor: "pointer", userSelect: "none" }}
-                      title="Click to toggle order by"
+                      key={c.name}
+                      onClick={() => handleHeaderClick(c.name)}
+                      className={`th-column ${isSorted ? "sorted" : ""}`}
+                      title={`Click to sort by ${c.name} (Shift-click to clear)`}
                     >
-                      <div className="hdr-flex">
-                        {col.primaryKey && (
+                      <div className="th-content">
+                        {isPk && (
                           <span title="Primary Key">
                             <Key size={11} className="pk-icon" />
                           </span>
                         )}
-                        {isGeomCol && (
-                          <span title="GIS Spatial Column">
-                            <Globe size={11} className="pk-icon" style={{ color: "var(--accent-blue)" }} />
-                          </span>
-                        )}
-                        <span className="col-title">{col.name}</span>
-                        <span className="col-type-tag">{col.type}</span>
-                        <span className="sort-icon-badge">
+                        <span className="col-name">{c.name}</span>
+                        <span className="col-type">{c.type}</span>
+                        <span className="sort-icon-wrap">
                           {isSorted ? (
                             sortOrder === "ASC" ? (
-                              <ArrowUp size={11} className="active-sort-icon" />
+                              <ArrowUp size={11} className="sort-active" />
                             ) : (
-                              <ArrowDown size={11} className="active-sort-icon" />
+                              <ArrowDown size={11} className="sort-active" />
                             )
                           ) : (
-                            <ArrowUpDown size={10} className="inactive-sort-icon" />
+                            <ArrowUpDown size={10} className="sort-idle" />
                           )}
                         </span>
                       </div>
@@ -1379,51 +1379,34 @@ export const DataGrid: React.FC<DataGridProps> = ({
               </tr>
             </thead>
             <tbody>
-              {/* New Uncommitted Rows */}
-              {newRows.map((nRow, nIdx) => (
-                <tr key={`new-${nIdx}`} className="new-row-tr">
-                  <td className="row-index new-idx">+</td>
+              {/* Client-side Newly Drafted Rows */}
+              {newRows.map((nr, nIdx) => (
+                <tr key={`new-${nIdx}`} className="row-new-draft">
+                  <td className="row-index new-badge">NEW</td>
                   <td className="action-cell">
-                    <div className="act-group">
-                      <button
-                        className="icon-edit-btn"
-                        onClick={() => openRowModal(nIdx, nRow, true)}
-                        title="Edit Full New Record"
-                      >
-                        <Edit3 size={11} />
-                      </button>
-                      <button
-                        className="icon-del-btn"
-                        onClick={() => setNewRows((prev) => prev.filter((_, i) => i !== nIdx))}
-                        title="Remove new row draft"
-                      >
-                        <Trash2 size={11} />
-                      </button>
-                    </div>
+                    <button
+                      className="icon-del-btn is-deleted"
+                      onClick={() => setNewRows((prev) => prev.filter((_, i) => i !== nIdx))}
+                      title="Discard drafted row"
+                    >
+                      <Trash2 size={11} />
+                    </button>
                   </td>
-                  {columns.map((col) => {
-                    const isEditing = editingCell?.isNew && editingCell.nIdx === nIdx && editingCell.colName === col.name;
-                    const val = nRow[col.name];
-                    const isAuto = val === "__AUTO__";
+                  {columns.map((c) => {
+                    const val = nr[c.name];
+                    const isAuto =
+                      val === "__AUTO__" ||
+                      (c.autoIncrement && (val === undefined || val === "__AUTO__"));
 
                     return (
                       <td
-                        key={col.name}
-                        className={`cell-data cell-new ${isAuto ? "cell-auto" : ""}`}
-                        onDoubleClick={() => startEditing(`new_${nIdx}`, true, nIdx, col.name, val)}
-                        title={isAuto ? "Auto Increment: Double-click to type custom value" : "Double-click to edit cell"}
+                        key={c.name}
+                        className="cell-draft cell-editable"
+                        onClick={() => openRowModal(nIdx, nr, true)}
+                        title="Click to edit drafted values"
                       >
-                        {isEditing ? (
-                          <input
-                            autoFocus
-                            className="input cell-edit-input"
-                            value={editValue}
-                            onChange={(e) => setEditValue(e.target.value)}
-                            onBlur={saveCellEdit}
-                            onKeyDown={(e) => e.key === "Enter" && saveCellEdit()}
-                          />
-                        ) : isAuto ? (
-                          <span className="auto-inc-pill-tag">
+                        {isAuto ? (
+                          <span className="auto-pill">
                             <Zap size={10} /> AUTO
                           </span>
                         ) : val !== undefined && val !== null && val !== "" ? (
@@ -1444,15 +1427,15 @@ export const DataGrid: React.FC<DataGridProps> = ({
                     {errorMessage ? (
                       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "8px", color: "var(--accent-red, #ef4444)" }}>
                         <AlertCircle size={22} />
-                        <span style={{ fontSize: "12px", fontWeight: 600 }}>Database Query Error</span>
+                        <span style={{ fontSize: "12px", fontWeight: 600 }}>{t("gridQueryError", language)}</span>
                         <span style={{ fontSize: "11px", color: "var(--text-muted)", maxWidth: "480px" }}>{errorMessage}</span>
                         <button className="btn btn-secondary btn-sm" onClick={() => onRefresh()} style={{ marginTop: "4px" }}>
                           <RefreshCw size={11} />
-                          <span>Retry</span>
+                          <span>{t("gridRetry", language)}</span>
                         </button>
                       </div>
                     ) : (
-                      "No matching records found"
+                      t("gridNoData", language)
                     )}
                   </td>
                 </tr>
@@ -1616,7 +1599,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
         <div className="grid-floating-bar">
           <div className="bar-info">
             <span className="bar-count">{selectedRowIndices.size}</span>
-            <span>rows selected</span>
+            <span>{t("gridRowsSelected", language)}</span>
           </div>
 
           <div className="bar-actions">
@@ -1627,7 +1610,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
               title="Copy selected rows as JSON array"
             >
               <Copy size={12} />
-              <span>Copy JSON</span>
+              <span>{t("gridCopyJson", language)}</span>
             </button>
             <button
               type="button"
@@ -1636,7 +1619,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
               title="Copy selected rows as CSV"
             >
               <FileSpreadsheet size={12} />
-              <span>Copy CSV</span>
+              <span>{t("gridCopyCsv", language)}</span>
             </button>
             <button
               type="button"
@@ -1645,7 +1628,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
               title="Copy selected rows as SQL INSERT statements"
             >
               <FileCode size={12} />
-              <span>Copy SQL</span>
+              <span>{t("gridCopySql", language)}</span>
             </button>
             <button
               type="button"
@@ -1654,7 +1637,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
               title="Mark selected rows for deletion"
             >
               <Trash2 size={12} />
-              <span>Delete {selectedRowIndices.size} Rows</span>
+              <span>{t("gridDeleteSelected", language, { count: selectedRowIndices.size })}</span>
             </button>
             <button
               type="button"
@@ -1677,7 +1660,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
 
       <div className="grid-footer">
         <span className="pagination-info font-mono">
-          Page {page + 1} / {totalPages} ({rows.length} records shown)
+          {t("gridPageOf", language, { page: page + 1, totalPages, count: rows.length })}
         </span>
 
         <div className="page-nav-btns">
@@ -2073,7 +2056,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
           {selectedRowIndices.size > 1 && selectedRowIndices.has(contextMenu.rowIdx) ? (
             <>
               <div className="context-menu-header">
-                {selectedRowIndices.size} Records Selected
+                {selectedRowIndices.size} {t("gridRowsSelected", language)}
               </div>
               <button
                 className="context-menu-item"
@@ -2083,7 +2066,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                 }}
               >
                 <Copy size={13} />
-                <span>Copy {selectedRowIndices.size} Rows as JSON</span>
+                <span>{t("gridCopyJson", language)}</span>
               </button>
               <button
                 className="context-menu-item"
@@ -2093,7 +2076,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                 }}
               >
                 <FileSpreadsheet size={13} />
-                <span>Copy {selectedRowIndices.size} Rows as CSV</span>
+                <span>{t("gridCopyCsv", language)}</span>
               </button>
               <button
                 className="context-menu-item"
@@ -2103,7 +2086,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                 }}
               >
                 <FileCode size={13} />
-                <span>Copy {selectedRowIndices.size} Rows as SQL</span>
+                <span>{t("gridCopySql", language)}</span>
               </button>
               <div className="context-menu-separator" />
               <button
@@ -2114,7 +2097,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                 }}
               >
                 <Trash2 size={13} />
-                <span>Delete {selectedRowIndices.size} Records</span>
+                <span>{t("gridDeleteSelected", language, { count: selectedRowIndices.size })}</span>
               </button>
               <div className="context-menu-separator" />
               <button
@@ -2125,7 +2108,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                 }}
               >
                 <X size={13} />
-                <span>Clear Selection</span>
+                <span>{t("gridClearSelection", language)}</span>
               </button>
             </>
           ) : (
@@ -2142,7 +2125,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                 }}
               >
                 <Eye size={13} />
-                <span>Inspect Details</span>
+                <span>{t("gridInspectDetails", language)}</span>
               </button>
               <button
                 className="context-menu-item"
@@ -2152,7 +2135,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                 }}
               >
                 <Edit3 size={13} />
-                <span>Edit Record (แก้ไขข้อมูล)</span>
+                <span>{t("gridEditRecord", language)}</span>
               </button>
               {columns.some((c) => isGeometryColumn(c.type, c.name) && isGisData(contextMenu.row[c.name])) && (
                 <button
@@ -2170,7 +2153,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                   }}
                 >
                   <Globe size={13} style={{ color: "var(--accent-blue)" }} />
-                  <span>View on Map</span>
+                  <span>{t("gridViewOnMap", language)}</span>
                 </button>
               )}
               <button
@@ -2187,7 +2170,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                 }}
               >
                 <Plus size={13} />
-                <span>Duplicate Row</span>
+                <span>{t("gridDuplicateRow", language)}</span>
               </button>
               <div className="context-menu-separator" />
               <button
@@ -2198,7 +2181,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                 }}
               >
                 <Copy size={13} />
-                <span>Copy as JSON</span>
+                <span>{t("gridCopyAsJson", language)}</span>
               </button>
               <button
                 className="context-menu-item"
@@ -2217,7 +2200,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                 }}
               >
                 <FileCode size={13} />
-                <span>Copy as SQL INSERT</span>
+                <span>{t("gridCopyAsSql", language)}</span>
               </button>
               <div className="context-menu-separator" />
               <button
@@ -2228,7 +2211,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                 }}
               >
                 {deletedRowKeys.has(contextMenu.pkKey) ? <RotateCcw size={13} /> : <Trash2 size={13} />}
-                <span>{deletedRowKeys.has(contextMenu.pkKey) ? "Restore Record (ยกเลิกการลบ)" : "Delete Record"}</span>
+                <span>{deletedRowKeys.has(contextMenu.pkKey) ? t("gridRestoreRecord", language) : t("gridDeleteRecord", language)}</span>
               </button>
             </>
           )}
@@ -2600,14 +2583,20 @@ export const DataGrid: React.FC<DataGridProps> = ({
 
         .search-wrap {
           position: relative;
-          display: flex;
+          display: inline-flex;
           align-items: center;
         }
-        .search-icon {
+        .search-icon-wrap {
           position: absolute;
           left: 8px;
+          top: 50%;
+          transform: translateY(-50%);
           color: var(--text-muted);
           pointer-events: none;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 2;
         }
         .search-input {
           padding-left: 26px;
@@ -2615,6 +2604,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
           height: 26px;
           font-size: 11px;
           border-radius: var(--radius-sm);
+          box-sizing: border-box;
         }
 
         .transaction-bar {

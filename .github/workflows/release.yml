@@ -1,25 +1,31 @@
-name: Release macOS Binaries
+name: Release App (Windows & macOS)
 
 on:
   push:
     tags:
       - 'v*'
-      - '[0-9]*'
   workflow_dispatch:
 
 jobs:
-  build:
-    name: Build (macos-latest)
-    runs-on: macos-latest
-
+  build-and-release:
     permissions:
       contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: 'windows-latest'
+            args: ''
+          - platform: 'macos-latest'
+            args: '--target universal-apple-darwin'
+
+    runs-on: ${{ matrix.platform }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup pnpm
+      - name: Install pnpm
         uses: pnpm/action-setup@v3
         with:
           version: 9
@@ -30,42 +36,22 @@ jobs:
           node-version: 20
           cache: 'pnpm'
 
-      - name: Sync package.json version with Git Tag
-        shell: bash
-        run: |
-          TAG_VER="${GITHUB_REF_NAME#v}"
-          echo "Setting package version to: $TAG_VER"
-          npm version "$TAG_VER" --no-git-tag-version || true
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: Install dependencies
-        run: |
-          pnpm install --no-frozen-lockfile
-          pnpm --prefix ui install --no-frozen-lockfile
+        run: pnpm install
 
-      # `pnpm build` is `tauri build`, which runs `pnpm build:ui` itself
-      # (beforeBuildCommand) and writes the installers under
-      # src-tauri/target/release/bundle.
-      - name: Build Backend & Frontend
-        run: pnpm build
-
-      - name: Upload Release Binaries
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            src-tauri/target/release/bundle/dmg/*.dmg
-            src-tauri/target/release/bundle/macos/*.app.tar.gz
-          draft: false
-          prerelease: false
-          generate_release_notes: true
-          body: |
-            ### 🚀 dodb Database Manager Release
-
-            Multi-platform database management tool supporting PostgreSQL, MariaDB/MySQL, and SQLite.
-
-            #### ⚠️ macOS Security Note:
-            If macOS Gatekeeper blocks launch upon initial install:
-            ```bash
-            xattr -dr com.apple.quarantine /Applications/dodb.app
-            ```
+      - name: Build Tauri App & Create Release
+        uses: tauri-apps/action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'dodb ${{ github.ref_name }}'
+          releaseBody: 'dodb Database Manager for Windows (.exe / .msi) and macOS (.dmg)'
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}

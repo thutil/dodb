@@ -17,6 +17,7 @@ import {
   Layers,
   Workflow,
   Upload,
+  Settings as SettingsIcon,
 } from "lucide-react";
 import { ConnectionProfile } from "../types";
 
@@ -44,6 +45,7 @@ interface CommandPaletteProps {
   onOpenCreateTable?: () => void;
   onOpenAuditLogs?: () => void;
   onOpenImport?: () => void;
+  onOpenSettings?: () => void;
   onToggleTheme: () => void;
   theme: "dark" | "light";
   activeProfile: ConnectionProfile | null;
@@ -63,6 +65,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   onOpenCreateTable,
   onOpenAuditLogs,
   onOpenImport,
+  onOpenSettings,
   onToggleTheme,
   theme,
   activeProfile,
@@ -247,6 +250,20 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       });
     }
 
+    if (onOpenSettings) {
+      items.push({
+        id: "action-settings",
+        title: "Settings & Preferences (Language, UI Scale, Dimensions)",
+        category: "Actions",
+        icon: <SettingsIcon size={14} className="cmd-icon-action" />,
+        hint: "Preferences, language, scale",
+        action: () => {
+          onOpenSettings();
+          onClose();
+        },
+      });
+    }
+
     return items;
   }, [
     tables,
@@ -263,6 +280,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     onToggleTheme,
     onOpenAuditLogs,
     onOpenImport,
+    onOpenSettings,
     onClose,
   ]);
 

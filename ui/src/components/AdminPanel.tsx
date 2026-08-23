@@ -117,6 +117,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [processes, setProcesses] = useState<DbProcess[]>([]);
   const [processesLoading, setProcessesLoading] = useState(false);
   const [processMsg, setProcessMsg] = useState<{ success: boolean; text: string } | null>(null);
+  const [processSearchTerm, setProcessSearchTerm] = useState("");
+  const [processAutoRefreshSecs, setProcessAutoRefreshSecs] = useState<number>(0);
+  const [copiedQueryPid, setCopiedQueryPid] = useState<string | null>(null);
 
   const currentDb = activeDatabase || activeProfile?.database || "postgres";
 
@@ -135,18 +138,31 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   }, [activeProfile, currentDb]);
 
   // Fetch Processes
-  const fetchProcesses = useCallback(async () => {
+  const fetchProcesses = useCallback(async (silent = false) => {
     if (!activeProfile) return;
-    setProcessesLoading(true);
+    if (!silent) setProcessesLoading(true);
     try {
       const data: any = await apiClient.adminGetProcesses(activeProfile.id, currentDb);
-      setProcesses(data || []);
+      setProcesses(Array.isArray(data) ? data : []);
+      setProcessMsg(null);
     } catch (err: any) {
       console.error("Fetch processes error", err);
+      const msg = err?.message || String(err);
+      setProcessMsg({ success: false, text: msg });
+      setProcesses([]);
     } finally {
-      setProcessesLoading(false);
+      if (!silent) setProcessesLoading(false);
     }
   }, [activeProfile, currentDb]);
+
+  // Auto-refresh interval for processes
+  useEffect(() => {
+    if (subTab !== "processes" || processAutoRefreshSecs <= 0 || !activeProfile) return;
+    const interval = setInterval(() => {
+      fetchProcesses(true);
+    }, processAutoRefreshSecs * 1000);
+    return () => clearInterval(interval);
+  }, [subTab, processAutoRefreshSecs, activeProfile, fetchProcesses]);
 
   // Subscribe to Dump Manager progress
   useEffect(() => {
@@ -649,13 +665,63 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             <div className="pane-section full-table-card">
               <div className="section-top-row">
                 <div className="section-header">
-                  <h4 className="section-heading">Server Running Processes ({processes.length})</h4>
-                  <span className="section-sub">Active queries, background tasks, and connections</span>
+                  <h4 className="section-heading">
+                    Server Running Processes ({processes.length})
+                  </h4>
+                  <span className="section-sub">
+                    {activeProfile.type === "sqlite"
+                      ? "SQLite operates as an embedded in-process database engine"
+                      : "Active queries, background tasks, and client connections"}
+                  </span>
                 </div>
-                <button className="btn btn-secondary" onClick={fetchProcesses} disabled={processesLoading}>
-                  <RefreshCw size={12} className={processesLoading ? "spin" : ""} />
-                  <span>Refresh Processes</span>
-                </button>
+
+                <div className="proc-controls-group">
+                  {/* Search input */}
+                  <div className="proc-search-wrap">
+                    <Search size={12} className="proc-search-icon" />
+                    <input
+                      type="text"
+                      className="input form-control proc-search-input font-mono"
+                      placeholder="Filter pid, user, query..."
+                      value={processSearchTerm}
+                      onChange={(e) => setProcessSearchTerm(e.target.value)}
+                    />
+                    {processSearchTerm && (
+                      <button
+                        className="proc-search-clear"
+                        onClick={() => setProcessSearchTerm("")}
+                        title="Clear filter"
+                      >
+                        <X size={11} />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Auto-refresh dropdown */}
+                  <div className="auto-refresh-wrap">
+                    <Clock size={12} className="meta-icon" />
+                    <select
+                      className="select auto-refresh-select"
+                      value={processAutoRefreshSecs}
+                      onChange={(e) => setProcessAutoRefreshSecs(Number(e.target.value))}
+                      title="Auto-refresh interval"
+                    >
+                      <option value={0}>Auto: Off</option>
+                      <option value={3}>Auto: 3s</option>
+                      <option value={5}>Auto: 5s</option>
+                      <option value={10}>Auto: 10s</option>
+                    </select>
+                  </div>
+
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() => fetchProcesses(false)}
+                    disabled={processesLoading}
+                  >
+                    <RefreshCw size={12} className={processesLoading ? "spin" : ""} />
+                    <span>Refresh</span>
+                  </button>
+                </div>
               </div>
 
               {processMsg && (
@@ -678,6 +744,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 </div>
               )}
 
+              {/* Status summary pills */}
+              {processes.length > 0 && (
+                <div className="proc-summary-pills">
+                  <span className="proc-summary-item">
+                    Total: <strong>{processes.length}</strong>
+                  </span>
+                  <span className="proc-summary-item active-cnt">
+                    Active: <strong>{processes.filter((p) => (p.state || "").toLowerCase() !== "idle" && (p.state || "").toLowerCase() !== "sleep").length}</strong>
+                  </span>
+                  <span className="proc-summary-item idle-cnt">
+                    Idle/Sleep: <strong>{processes.filter((p) => (p.state || "").toLowerCase() === "idle" || (p.state || "").toLowerCase() === "sleep").length}</strong>
+                  </span>
+                </div>
+              )}
+
               <div className="table-wrapper">
                 <table className="admin-table">
                   <thead>
@@ -692,39 +773,84 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     </tr>
                   </thead>
                   <tbody>
-                    {processes.length === 0 ? (
-                      <tr>
-                        <td colSpan={7} className="empty-td">
-                          {processesLoading ? "Loading active processes..." : "No active query processes running"}
-                        </td>
-                      </tr>
-                    ) : (
-                      processes.map((p) => (
-                        <tr key={String(p.pid)}>
-                          <td className="font-mono row-num">{p.pid}</td>
-                          <td className="font-mono">{p.user || "-"}</td>
-                          <td className="font-mono">{p.db || "-"}</td>
-                          <td>
-                            <span className={`process-state-pill ${(p.state || "").toLowerCase()}`}>
-                              {p.state || "active"}
-                            </span>
-                          </td>
-                          <td className="font-mono query-cell" title={p.query}>
-                            <code>{p.query || "<idle>"}</code>
-                          </td>
-                          <td className="font-mono">{String(p.time || "0")}</td>
-                          <td style={{ textAlign: "right" }}>
-                            <button
-                              className="btn btn-danger icon-only-btn"
-                              onClick={() => setProcessToKill(p)}
-                              title={`Kill process ${p.pid}`}
-                            >
-                              <XCircle size={13} />
-                            </button>
-                          </td>
-                        </tr>
-                      ))
-                    )}
+                    {(() => {
+                      const filtered = processes.filter((p) => {
+                        if (!processSearchTerm.trim()) return true;
+                        const term = processSearchTerm.toLowerCase();
+                        return (
+                          String(p.pid).toLowerCase().includes(term) ||
+                          (p.user || "").toLowerCase().includes(term) ||
+                          (p.db || "").toLowerCase().includes(term) ||
+                          (p.state || "").toLowerCase().includes(term) ||
+                          (p.query || "").toLowerCase().includes(term)
+                        );
+                      });
+
+                      if (filtered.length === 0) {
+                        return (
+                          <tr>
+                            <td colSpan={7} className="empty-td">
+                              {processesLoading
+                                ? "Loading active processes..."
+                                : processSearchTerm
+                                ? `No processes match "${processSearchTerm}"`
+                                : activeProfile.type === "sqlite"
+                                ? "SQLite is an embedded database (single local process)"
+                                : "No active query processes running"}
+                            </td>
+                          </tr>
+                        );
+                      }
+
+                      return filtered.map((p) => {
+                        const isQueryCopied = copiedQueryPid === String(p.pid);
+                        return (
+                          <tr key={String(p.pid)}>
+                            <td className="font-mono row-num">{p.pid}</td>
+                            <td className="font-mono">{p.user || "-"}</td>
+                            <td className="font-mono">{p.db || "-"}</td>
+                            <td>
+                              <span
+                                className={`process-state-pill ${(p.state || "active").toLowerCase()}`}
+                              >
+                                {p.state || "active"}
+                              </span>
+                            </td>
+                            <td className="font-mono query-cell" title={p.query}>
+                              <div className="proc-query-row">
+                                <code>{p.query || "<idle>"}</code>
+                                {p.query && p.query !== "<idle>" && (
+                                  <button
+                                    type="button"
+                                    className="proc-copy-btn"
+                                    onClick={() => {
+                                      navigator.clipboard.writeText(p.query);
+                                      setCopiedQueryPid(String(p.pid));
+                                      setTimeout(() => setCopiedQueryPid(null), 1500);
+                                    }}
+                                    title="Copy query SQL"
+                                  >
+                                    {isQueryCopied ? <Check size={10} /> : <Copy size={10} />}
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                            <td className="font-mono">{String(p.time || "0")}</td>
+                            <td style={{ textAlign: "right" }}>
+                              {activeProfile.type !== "sqlite" && (
+                                <button
+                                  className="btn btn-danger icon-only-btn"
+                                  onClick={() => setProcessToKill(p)}
+                                  title={`Kill process ${p.pid}`}
+                                >
+                                  <XCircle size={13} />
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      });
+                    })()}
                   </tbody>
                 </table>
               </div>
@@ -1478,6 +1604,117 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           font-weight: 600;
         }
 
+        .proc-controls-group {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .proc-search-wrap {
+          position: relative;
+          display: flex;
+          align-items: center;
+        }
+        .proc-search-icon {
+          position: absolute;
+          left: 8px;
+          color: var(--text-muted);
+          pointer-events: none;
+        }
+        .proc-search-input {
+          padding-left: 26px;
+          padding-right: 22px;
+          width: 190px;
+          font-size: 11px;
+          height: 28px;
+        }
+        .proc-search-clear {
+          position: absolute;
+          right: 6px;
+          background: transparent;
+          border: none;
+          color: var(--text-muted);
+          cursor: pointer;
+          padding: 2px;
+          display: flex;
+          align-items: center;
+        }
+        .proc-search-clear:hover {
+          color: var(--text-main);
+        }
+
+        .auto-refresh-wrap {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-light);
+          border-radius: var(--radius-sm);
+          padding: 0 6px;
+          height: 28px;
+        }
+        .auto-refresh-select {
+          background: transparent;
+          border: none;
+          color: var(--text-sub);
+          font-size: 11px;
+          cursor: pointer;
+          outline: none;
+        }
+
+        .proc-summary-pills {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          font-size: 11px;
+          color: var(--text-muted);
+          padding: 6px 10px;
+          background: var(--bg-tertiary);
+          border-radius: var(--radius-sm);
+          border: 1px solid var(--border-light);
+        }
+        .proc-summary-item strong {
+          color: var(--text-main);
+        }
+        .proc-summary-item.active-cnt strong {
+          color: #60a5fa;
+        }
+        .proc-summary-item.idle-cnt strong {
+          color: var(--text-sub);
+        }
+
+        .proc-query-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 6px;
+          max-width: 100%;
+        }
+        .proc-query-row code {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          flex: 1;
+        }
+        .proc-copy-btn {
+          background: transparent;
+          border: none;
+          color: var(--text-muted);
+          cursor: pointer;
+          padding: 2px 4px;
+          border-radius: 3px;
+          display: flex;
+          align-items: center;
+          flex-shrink: 0;
+          opacity: 0.6;
+          transition: opacity 0.15s ease, color 0.15s ease;
+        }
+        .proc-copy-btn:hover {
+          opacity: 1;
+          color: var(--text-main);
+          background: rgba(255, 255, 255, 0.08);
+        }
+
         .query-cell {
           max-width: 480px;
           overflow: hidden;
@@ -1523,7 +1760,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           background: rgba(59, 130, 246, 0.15);
           color: #60a5fa;
         }
-        .process-state-pill.idle {
+        .process-state-pill.idle,
+        .process-state-pill.sleep {
           background: var(--bg-tertiary);
           color: var(--text-muted);
         }

@@ -42,13 +42,7 @@ pub fn save_profiles(profiles: &mut Vec<ConnectionProfile>) -> Result<(), String
         fs::create_dir_all(&dir).map_err(|e| format!("Failed to create data dir: {}", e))?;
     }
 
-    // Encrypt passwords before saving
-    let mut encrypted_profiles = profiles.clone();
-    for p in encrypted_profiles.iter_mut() {
-        if !p.password.is_empty() {
-            p.password = encrypt_password(&p.password);
-        }
-    }
+    let encrypted_profiles = prepare_for_disk(profiles);
 
     let raw = serde_json::to_string_pretty(&encrypted_profiles)
         .map_err(|e| format!("Failed to serialize profiles: {}", e))?;
@@ -57,4 +51,62 @@ pub fn save_profiles(profiles: &mut Vec<ConnectionProfile>) -> Result<(), String
     fs::write(path, raw).map_err(|e| format!("Failed to write profiles: {}", e))?;
 
     Ok(())
+}
+
+
+fn prepare_for_disk(profiles: &[ConnectionProfile]) -> Vec<ConnectionProfile> {
+    let mut out = profiles.to_vec();
+    for p in out.iter_mut() {
+        if !p.save_password {
+            p.password.clear();
+        } else if !p.password.is_empty() {
+            p.password = encrypt_password(&p.password);
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::SupportedDB;
+
+    fn profile(save_password: bool) -> ConnectionProfile {
+        ConnectionProfile {
+            id: "p1".to_string(),
+            name: "test".to_string(),
+            r#type: SupportedDB::Postgres,
+            host: "localhost".to_string(),
+            port: 5432,
+            user: "postgres".to_string(),
+            password: "s3cret".to_string(),
+            database: "postgres".to_string(),
+            save_password,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn opting_out_keeps_the_password_off_disk() {
+        let on_disk = prepare_for_disk(&[profile(false)]);
+        assert_eq!(on_disk[0].password, "");
+        let raw = serde_json::to_string(&on_disk).unwrap();
+        assert!(!raw.contains("s3cret"), "{raw}");
+    }
+
+    #[test]
+    fn opting_in_stores_the_password_encrypted() {
+        let on_disk = prepare_for_disk(&[profile(true)]);
+        assert!(on_disk[0].password.starts_with("enc:"), "{}", on_disk[0].password);
+        assert_eq!(decrypt_password(&on_disk[0].password), "s3cret");
+    }
+
+    #[test]
+    fn legacy_profile_json_defaults_to_saving() {
+        let raw = r#"[{"id":"old","name":"Old","type":"postgres","host":"h","port":5432,"user":"u","password":"pw","database":"d"}]"#;
+        let parsed: Vec<ConnectionProfile> = serde_json::from_str(raw).unwrap();
+        assert!(parsed[0].save_password);
+        assert!(!parsed[0].keep_alive);
+        assert!(prepare_for_disk(&parsed)[0].password.starts_with("enc:"));
+    }
 }

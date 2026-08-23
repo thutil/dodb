@@ -9,7 +9,11 @@ pub enum SupportedDB {
     Postgres,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionProfile {
     #[serde(default)]
@@ -29,8 +33,34 @@ pub struct ConnectionProfile {
     pub database: String,
     pub file_path: Option<String>,
     pub group: Option<String>,
+    /// Keep the pool warm, reconnect when it drops, and connect on app launch.
+    #[serde(default)]
+    pub keep_alive: bool,
+    #[serde(default = "default_true")]
+    pub save_password: bool,
     #[serde(default)]
     pub created_at: String,
     #[serde(default)]
     pub updated_at: String,
+}
+
+impl Default for ConnectionProfile {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            name: String::new(),
+            r#type: SupportedDB::default(),
+            host: String::new(),
+            port: 0,
+            user: String::new(),
+            password: String::new(),
+            database: String::new(),
+            file_path: None,
+            group: None,
+            keep_alive: false,
+            save_password: true,
+            created_at: String::new(),
+            updated_at: String::new(),
+        }
+    }
 }

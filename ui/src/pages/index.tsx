@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useState, useEffect, useCallback } from "react";
 import Head from "next/head";
 import { Header } from "../components/Header";
@@ -16,6 +15,9 @@ import { SchemaDiagram } from "../components/SchemaDiagram";
 import { VisualQueryBuilder } from "../components/VisualQueryBuilder";
 import { CommandPalette } from "../components/CommandPalette";
 import { ImportModal } from "../components/ImportModal";
+import { AboutModal } from "../components/AboutModal";
+import { SettingsModal } from "../components/SettingsModal";
+import { Language, t } from "../utils/i18n";
 import { AlertCircle, X, CheckCircle2, Download, Upload, XCircle } from "lucide-react";
 import { ConnectionProfile, ColumnInfo, TableRowData, QueryExecutionResult, ColumnFilter, DBType } from "../types";
 import { DdlResult } from "../components/tableDesign/draft";
@@ -25,8 +27,10 @@ import { auditLogger } from "../utils/auditLogger";
 import { dumpManager, DumpProgress } from "../utils/dumpManager";
 import { importManager, ImportProgress, ImportReport } from "../utils/importManager";
 
-const DEFAULT_APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION || "0.1.0";
+const DEFAULT_APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION || "0.2.3";
 const SESSION_ID_PREFIX = "session-";
+const LAST_PROFILE_KEY = "dodb_last_active_profile";
+const RECONNECT_DELAYS_MS = [1000, 2000, 5000, 10000];
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:5820/api";
 
@@ -80,51 +84,88 @@ export default function Home() {
   const [profiles, setProfiles] = useState<ConnectionProfile[]>([]);
   const [activeProfile, setActiveProfile] = useState<ConnectionProfile | null>(null);
   const [isConnModalOpen, setIsConnModalOpen] = useState(true);
+  const [bootstrapping, setBootstrapping] = useState<string | null>(null);
+  const [autoUnlockProfileId, setAutoUnlockProfileId] = useState<string | null>(null);
   const [isAuditLogOpen, setIsAuditLogOpen] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [language, setLanguage] = useState<Language>("en");
+  const [uiScale, setUiScale] = useState<number>(100);
   const [dumpProgress, setDumpProgress] = useState<DumpProgress>(dumpManager.getProgress());
   const [showDumpToast, setShowDumpToast] = useState(false);
-  // `null` closed; `{ table }` open, with the table preselected from the sidebar.
   const [importTarget, setImportTarget] = useState<{ table: string | null } | null>(null);
   const [importProgress, setImportProgress] = useState<ImportProgress>(importManager.getProgress());
   const [importToast, setImportToast] = useState<ImportReport | null>(null);
+  const [appToast, setAppToast] = useState<{
+    id: string;
+    type: "success" | "error" | "info";
+    title: string;
+    sub?: string;
+    duration?: number;
+  } | null>(null);
+
+  const showToast = useCallback((toast: {
+    type: "success" | "error" | "info";
+    title: string;
+    sub?: string;
+    duration?: number;
+  }) => {
+    const id = Math.random().toString(36).slice(2);
+    setAppToast({ ...toast, id });
+    const dur = toast.duration ?? 4000;
+    if (dur > 0) {
+      setTimeout(() => {
+        setAppToast((curr) => (curr?.id === id ? null : curr));
+      }, dur);
+    }
+  }, []);
   const [structureModalTable, setStructureModalTable] = useState<string | null>(null);
   const [isCreateTableOpen, setIsCreateTableOpen] = useState(false);
   const [editTableModalTable, setEditTableModalTable] = useState<string | null>(null);
   const [confirmDdlRequest, setConfirmDdlRequest] = useState<ConfirmDdlRequest | null>(null);
-
   const [databases, setDatabases] = useState<string[]>([]);
   const [activeDatabase, setActiveDatabase] = useState<string>("");
-
   const [tables, setTables] = useState<string[]>([]);
   const [activeTable, setActiveTable] = useState<string | null>(null);
   const [loadingTables, setLoadingTables] = useState(false);
-
   const [columns, setColumns] = useState<ColumnInfo[]>([]);
   const [rows, setRows] = useState<TableRowData[]>([]);
   const [totalRows, setTotalRows] = useState(0);
   const [loadingData, setLoadingData] = useState(false);
   const [tableError, setTableError] = useState<string | null>(null);
-  // Connection-level failures (database/table listing). Rendered as a banner so
-  // a failed connection can never look like an empty database.
   const [connectionError, setConnectionError] = useState<string | null>(null);
-
-  // Pagination & Filtering
   const [page, setPage] = useState(0);
   const [pageSize] = useState(50);
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortOrder, setSortOrder] = useState<"ASC" | "DESC">("ASC");
   const [searchQuery, setSearchQuery] = useState("");
   const [filters, setFilters] = useState<ColumnFilter[]>([]);
-
-  // Real-time Database Ping Latency
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
-
-  // Request sequence ref to prevent table data race condition
   const fetchSeqRef = React.useRef(0);
+  const unlockedIdsRef = React.useRef<Set<string>>(new Set());
+  const reconnectingRef = React.useRef(false);
+  const reconnectExhaustedRef = React.useRef<Set<string>>(new Set());
+  const bootstrappedRef = React.useRef(false);
 
-  // Auto-detect OS Theme on mount
+  // Auto-detect OS Theme on mount and load saved language & UI scale
   useEffect(() => {
+    try {
+      const savedLang = localStorage.getItem("dodb_language") as Language | null;
+      if (savedLang === "en" || savedLang === "th") {
+        setLanguage(savedLang);
+      }
+      const savedScale = localStorage.getItem("dodb_ui_scale");
+      if (savedScale) {
+        const num = Number(savedScale);
+        if (!isNaN(num) && num >= 80 && num <= 130) {
+          setUiScale(num);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load settings from localStorage:", e);
+    }
+
     const isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
     const initialTheme = isDark ? "dark" : "light";
     setTheme(initialTheme);
@@ -140,6 +181,22 @@ export default function Home() {
     mediaQuery.addEventListener("change", handleChange);
     return () => mediaQuery.removeEventListener("change", handleChange);
   }, []);
+
+  // Update UI scale on root element
+  useEffect(() => {
+    try {
+      const root = document.documentElement;
+      (root.style as any).zoom = `${uiScale}%`;
+      localStorage.setItem("dodb_ui_scale", String(uiScale));
+    } catch (e) {}
+  }, [uiScale]);
+
+  const handleLanguageChange = (newLang: Language) => {
+    setLanguage(newLang);
+    try {
+      localStorage.setItem("dodb_language", newLang);
+    } catch (e) {}
+  };
 
   // Dynamically load Tauri version at runtime if running in desktop app
   useEffect(() => {
@@ -185,13 +242,6 @@ export default function Home() {
       const isInspect = (e.ctrlKey || e.metaKey) && (e.shiftKey || e.altKey) && (key === "i" || key === "j" || key === "c");
       const isViewSource = (e.ctrlKey || e.metaKey) && key === "u";
 
-      if ((e.ctrlKey || e.metaKey) && key === "k") {
-        e.preventDefault();
-        e.stopPropagation();
-        setIsCommandPaletteOpen((prev) => !prev);
-        return;
-      }
-
       if (isF12 || isInspect || isViewSource) {
         e.preventDefault();
         e.stopPropagation();
@@ -212,6 +262,92 @@ export default function Home() {
     document.documentElement.setAttribute("data-theme", nextTheme);
   };
 
+  // Comprehensive Global Keyboard Shortcuts Listener
+  useEffect(() => {
+    const handleGlobalShortcuts = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isInput = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+      const isCmdOrCtrl = e.metaKey || e.ctrlKey;
+      const key = (e.key || "").toLowerCase();
+
+      // Command Palette (⌘K / Ctrl+K)
+      if (isCmdOrCtrl && key === "k") {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsCommandPaletteOpen((prev) => !prev);
+        return;
+      }
+
+      // Settings (⌘, / Ctrl+,)
+      if (isCmdOrCtrl && key === ",") {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsSettingsOpen((prev) => !prev);
+        return;
+      }
+
+      // Toggle Theme (⌘Shift+D / Ctrl+Shift+D)
+      if (isCmdOrCtrl && e.shiftKey && key === "d") {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleTheme();
+        return;
+      }
+
+      // Navigation & Action Shortcuts (when not focused in inputs)
+      if (!isInput) {
+        if (isCmdOrCtrl && !e.shiftKey && key === "1") {
+          e.preventDefault();
+          setActiveView("explorer");
+          return;
+        }
+        if (isCmdOrCtrl && !e.shiftKey && key === "2") {
+          e.preventDefault();
+          setActiveView("sql");
+          return;
+        }
+        if (isCmdOrCtrl && !e.shiftKey && key === "3") {
+          e.preventDefault();
+          setActiveView("visual-query");
+          return;
+        }
+        if (isCmdOrCtrl && !e.shiftKey && key === "4") {
+          e.preventDefault();
+          setActiveView("diagram");
+          return;
+        }
+        if (isCmdOrCtrl && !e.shiftKey && key === "5") {
+          e.preventDefault();
+          setActiveView("admin");
+          return;
+        }
+        if (isCmdOrCtrl && !e.shiftKey && key === "n") {
+          e.preventDefault();
+          setIsCreateTableOpen(true);
+          return;
+        }
+        if (isCmdOrCtrl && !e.shiftKey && key === "o") {
+          e.preventDefault();
+          setIsConnModalOpen(true);
+          return;
+        }
+        if (isCmdOrCtrl && !e.shiftKey && key === "i") {
+          e.preventDefault();
+          setImportTarget({ table: activeTable });
+          return;
+        }
+        if (isCmdOrCtrl && !e.shiftKey && key === "l") {
+          e.preventDefault();
+          setIsAuditLogOpen(true);
+          return;
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleGlobalShortcuts);
+    return () => window.removeEventListener("keydown", handleGlobalShortcuts);
+  }, [activeTable, theme]);
+
   const fetchProfiles = useCallback(async () => {
     try {
       const data: any = await apiClient.getProfiles();
@@ -228,6 +364,15 @@ export default function Home() {
         if (activeProfile.id.startsWith(SESSION_ID_PREFIX)) {
           await apiClient.unregisterSessionProfile(activeProfile.id);
         }
+        if (activeProfile.savePassword === false) {
+          try {
+            await apiClient.clearRuntimePassword(activeProfile.id);
+          } catch (err) {
+            console.warn("Could not clear the remembered password", err);
+          }
+          unlockedIdsRef.current.delete(activeProfile.id);
+        }
+        reconnectExhaustedRef.current.delete(activeProfile.id);
       } else {
         await apiClient.disconnectDatabase();
       }
@@ -249,7 +394,6 @@ export default function Home() {
     fetchProfiles();
   }, [fetchProfiles]);
 
-  // Loads the database list for a profile and returns it. Throws on failure so
   // callers can report it instead of showing an empty list.
   const loadDatabasesFor = useCallback(async (profile: ConnectionProfile) => {
     const dbList = (await apiClient.getDatabases(profile.id)) as string[];
@@ -261,6 +405,39 @@ export default function Home() {
     setConnectionError(null);
     return dbList;
   }, []);
+
+  const reconnectTo = useCallback(
+    async (profile: ConnectionProfile) => {
+      if (reconnectingRef.current || reconnectExhaustedRef.current.has(profile.id)) return;
+      reconnectingRef.current = true;
+      try {
+        for (let attempt = 0; attempt < RECONNECT_DELAYS_MS.length; attempt++) {
+          setConnectionError(
+            `Connection to ${profile.name} dropped - reconnecting (${attempt + 1}/${RECONNECT_DELAYS_MS.length})...`
+          );
+          try {
+            await apiClient.disconnectDatabase(profile.id);
+          } catch {
+            // The pool may already be gone; rebuilding is what matters.
+          }
+          try {
+            fetchSeqRef.current += 1;
+            await loadDatabasesFor(profile);
+            return;
+          } catch {
+            await new Promise((resolve) => setTimeout(resolve, RECONNECT_DELAYS_MS[attempt]));
+          }
+        }
+        reconnectExhaustedRef.current.add(profile.id);
+        setConnectionError(
+          `Could not reconnect to ${profile.name}. Open the connection dialog and connect again.`
+        );
+      } finally {
+        reconnectingRef.current = false;
+      }
+    },
+    [loadDatabasesFor]
+  );
 
   const fetchDatabases = useCallback(async () => {
     if (!activeProfile) return;
@@ -380,7 +557,9 @@ export default function Home() {
     }
   }, [activeDatabase, activeTable, page, sortColumn, sortOrder, searchQuery, filters, fetchTableData]);
 
-  // Real-time Database Ping Heartbeat (measures actual round-trip latency)
+  // Real-time Database Ping Heartbeat (measures actual round-trip latency).
+  // It doubles as the keep-alive: the ping itself keeps the pool warm, and a
+  // failed ping is what triggers a reconnect for keep-alive profiles.
   useEffect(() => {
     if (!activeProfile) {
       setLatencyMs(null);
@@ -391,9 +570,15 @@ export default function Home() {
     const pingServer = async () => {
       try {
         const ms = await apiClient.pingDatabase(activeProfile.id, activeDatabase || undefined);
-        if (isMounted) setLatencyMs(ms);
+        if (!isMounted) return;
+        setLatencyMs(ms);
+        reconnectExhaustedRef.current.delete(activeProfile.id);
       } catch {
-        if (isMounted) setLatencyMs(null);
+        if (!isMounted) return;
+        setLatencyMs(null);
+        if (activeProfile.keepAlive) {
+          void reconnectTo(activeProfile);
+        }
       }
     };
 
@@ -403,7 +588,7 @@ export default function Home() {
       isMounted = false;
       clearInterval(interval);
     };
-  }, [activeProfile?.id, activeDatabase]);
+  }, [activeProfile, activeDatabase, reconnectTo]);
 
   const handleSaveProfile = async (profileData: Partial<ConnectionProfile>) => {
     const previous = activeProfile;
@@ -413,6 +598,10 @@ export default function Home() {
     } catch (err: any) {
       const msg = typeof err === "string" ? err : err?.message || String(err);
       throw new Error(msg || "Save profile failed");
+    }
+
+    if (profileData.savePassword === false && profileData.password) {
+      unlockedIdsRef.current.add(saved.id);
     }
 
     await fetchProfiles();
@@ -506,9 +695,49 @@ export default function Home() {
       return { success: false, error: text };
     }
 
+    if (!target.id.startsWith(SESSION_ID_PREFIX)) {
+      try {
+        localStorage.setItem(LAST_PROFILE_KEY, target.id);
+      } catch {
+        // Storage unavailable; auto-connect simply will not happen next launch.
+      }
+    }
+    reconnectExhaustedRef.current.delete(target.id);
+
     setIsConnModalOpen(false);
     return { success: true };
   };
+
+  const handleUnlockProfile = async (id: string, password: string) => {
+    await apiClient.setRuntimePassword(id, password);
+    unlockedIdsRef.current.add(id);
+    setAutoUnlockProfileId((current) => (current === id ? null : current));
+  };
+
+  const hasRuntimePassword = useCallback((id: string) => unlockedIdsRef.current.has(id), []);
+
+  useEffect(() => {
+    if (bootstrappedRef.current || profiles.length === 0) return;
+    bootstrappedRef.current = true;
+
+    let lastId: string | null = null;
+    try {
+      lastId = localStorage.getItem(LAST_PROFILE_KEY);
+    } catch {
+      return;
+    }
+    const target = lastId ? profiles.find((p) => p.id === lastId) : undefined;
+    if (!target || !target.keepAlive) return;
+
+    if (target.savePassword === false && target.type !== "sqlite") {
+      setAutoUnlockProfileId(target.id);
+      return;
+    }
+
+    setBootstrapping(target.name);
+    handleSwitchProfile(target).finally(() => setBootstrapping(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profiles]);
 
   const handleDeleteProfile = async (id: string) => {
     await apiClient.deleteProfile(id);
@@ -727,6 +956,11 @@ export default function Home() {
     await fetchTables();
     setActiveTable(tableName);
     if (activeView !== "explorer") setActiveView("explorer");
+    showToast({
+      type: "success",
+      title: `Table "${tableName}" created`,
+      sub: "Table schema created and ready",
+    });
   };
 
   const handleTableSaved = async (oldName: string, newName: string) => {
@@ -735,6 +969,11 @@ export default function Home() {
       setActiveTable(newName);
     }
     fetchTableData();
+    showToast({
+      type: "success",
+      title: `Table "${newName}" saved`,
+      sub: oldName !== newName ? `Renamed from "${oldName}"` : "Structure updated successfully",
+    });
   };
 
   const handleImported = (report: ImportReport) => {
@@ -830,17 +1069,42 @@ export default function Home() {
     const req = confirmDdlRequest;
     setConfirmDdlRequest(null);
     await fetchTables();
-    if (req && req.title.startsWith("Drop")) {
-      const droppedCurrent =
-        (req.typeToConfirm && req.typeToConfirm === activeTable) ||
-        (activeTable && req.statements.some((s) => s.includes(quoteTableIdent(activeTable, activeProfile?.type === "mariadb" ? "mariadb" : activeProfile?.type === "sqlite" ? "sqlite" : "postgres"))));
-      if (droppedCurrent) {
-        setActiveTable(null);
-        setRows([]);
-        setColumns([]);
-        setTotalRows(0);
+    if (req) {
+      if (req.title.startsWith("Drop")) {
+        const droppedCurrent =
+          (req.typeToConfirm && req.typeToConfirm === activeTable) ||
+          (activeTable && req.statements.some((s) => s.includes(quoteTableIdent(activeTable, activeProfile?.type === "mariadb" ? "mariadb" : activeProfile?.type === "sqlite" ? "sqlite" : "postgres"))));
+        if (droppedCurrent) {
+          setActiveTable(null);
+          setRows([]);
+          setColumns([]);
+          setTotalRows(0);
+        } else {
+          fetchTableData();
+        }
+        showToast({
+          type: "success",
+          title: req.typeToConfirm && req.typeToConfirm !== "DROP"
+            ? `Table "${req.typeToConfirm}" dropped successfully`
+            : `${req.title} completed`,
+          sub: `${req.statements.length} DDL statement(s) executed`,
+        });
+      } else if (req.title.startsWith("Truncate")) {
+        fetchTableData();
+        showToast({
+          type: "success",
+          title: req.typeToConfirm && req.typeToConfirm !== "TRUNCATE"
+            ? `Table "${req.typeToConfirm}" truncated successfully`
+            : `${req.title} completed`,
+          sub: "All rows deleted successfully",
+        });
       } else {
         fetchTableData();
+        showToast({
+          type: "success",
+          title: `${req.title} completed`,
+          sub: `${req.statements.length} statement(s) executed`,
+        });
       }
     } else {
       fetchTableData();
@@ -898,6 +1162,8 @@ export default function Home() {
           onOpenAuditLogs={() => setIsAuditLogOpen(true)}
           onOpenImport={() => setImportTarget({ table: activeTable })}
           onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+          onOpenAbout={() => setIsAboutModalOpen(true)}
+          onOpenSettings={() => setIsSettingsOpen(true)}
           onViewStructure={(tbl) => setStructureModalTable(tbl)}
           onOpenInSql={(sql) => {
             setActiveView("sql");
@@ -907,6 +1173,7 @@ export default function Home() {
           latencyMs={latencyMs}
           theme={theme}
           onToggleTheme={toggleTheme}
+          language={language}
         />
 
         <div className="app-main-body">
@@ -961,6 +1228,7 @@ export default function Home() {
               }}
               loading={loadingTables}
               dbType={activeProfile?.type}
+              language={language}
             />
           )}
 
@@ -1006,6 +1274,7 @@ export default function Home() {
                   theme={theme}
                   errorMessage={tableError}
                   onCreateTable={() => setIsCreateTableOpen(true)}
+                  language={language}
                 />
               ) : activeView === "sql" ? (
                 <SqlConsole
@@ -1054,9 +1323,18 @@ export default function Home() {
 
         <ConnectionModal
           isOpen={isConnModalOpen}
-          onClose={() => setIsConnModalOpen(false)}
+          // With nothing connected the app has nothing to show, so the dialog
+          // stays put until there is a live connection.
+          dismissible={!!activeProfile}
+          onClose={() => {
+            if (activeProfile) setIsConnModalOpen(false);
+          }}
           profiles={profiles}
           activeProfile={activeProfile}
+          bootstrappingName={bootstrapping}
+          autoUnlockProfileId={autoUnlockProfileId}
+          hasRuntimePassword={hasRuntimePassword}
+          onUnlockProfile={handleUnlockProfile}
           onSaveProfile={handleSaveProfile}
           onSaveAllProfiles={handleSaveAllProfiles}
           onDeleteProfile={handleDeleteProfile}
@@ -1156,6 +1434,7 @@ export default function Home() {
           onOpenCreateTable={() => setIsCreateTableOpen(true)}
           onOpenAuditLogs={() => setIsAuditLogOpen(true)}
           onOpenImport={() => setImportTarget({ table: activeTable })}
+          onOpenSettings={() => setIsSettingsOpen(true)}
           onToggleTheme={toggleTheme}
           theme={theme}
           activeProfile={activeProfile}
@@ -1169,6 +1448,24 @@ export default function Home() {
           tables={tables}
           initialTable={importTarget?.table ?? null}
           onImported={handleImported}
+        />
+
+        <AboutModal
+          isOpen={isAboutModalOpen}
+          onClose={() => setIsAboutModalOpen(false)}
+          version={appVersion}
+          language={language}
+        />
+
+        <SettingsModal
+          isOpen={isSettingsOpen}
+          onClose={() => setIsSettingsOpen(false)}
+          language={language}
+          onChangeLanguage={handleLanguageChange}
+          uiScale={uiScale}
+          onChangeUiScale={setUiScale}
+          theme={theme}
+          onToggleTheme={toggleTheme}
         />
 
         {/* Import completion toast, so a background import still reports back */}
@@ -1211,6 +1508,32 @@ export default function Home() {
                 </button>
               )}
               <button className="toast-dismiss-btn" onClick={() => setImportToast(null)} title="Dismiss">
+                <X size={12} />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Global Action Toast Notification (Drop, Create, Alter, etc.) */}
+        {appToast && (
+          <div className={`global-dump-toast ${appToast.type === "error" ? "failure" : "success"}`}>
+            <div className="toast-left">
+              {appToast.type === "error" ? (
+                <XCircle size={16} className="toast-icon failure" />
+              ) : (
+                <CheckCircle2 size={16} className="toast-icon success" />
+              )}
+              <div className="toast-body">
+                <span className="toast-title">{appToast.title}</span>
+                {appToast.sub && <span className="toast-sub font-mono">{appToast.sub}</span>}
+              </div>
+            </div>
+            <div className="toast-actions">
+              <button
+                className="toast-dismiss-btn"
+                onClick={() => setAppToast(null)}
+                title="Dismiss"
+              >
                 <X size={12} />
               </button>
             </div>
@@ -1275,7 +1598,7 @@ export default function Home() {
               <>
                 <span className="footer-dot">•</span>
                 <span className="footer-dump-running font-mono">
-                  📦 Exporting {dumpProgress.currentTable} ({dumpProgress.rowsExported.toLocaleString()} rows)...
+                  <Download size={10} /> Exporting {dumpProgress.currentTable} ({dumpProgress.rowsExported.toLocaleString()} rows)...
                 </span>
               </>
             )}
@@ -1291,8 +1614,8 @@ export default function Home() {
         .app-layout {
           display: flex;
           flex-direction: column;
-          width: 100vw;
-          height: 100vh;
+          width: 100%;
+          height: 100%;
           overflow: hidden;
           background: var(--bg-app);
         }
