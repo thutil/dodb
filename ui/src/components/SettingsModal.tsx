@@ -29,7 +29,6 @@ interface SettingsModalProps {
   onChangeUiScale: (scale: number) => void;
   theme: "dark" | "light";
   onToggleTheme: () => void;
-  apiBase?: string;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -41,30 +40,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onChangeUiScale,
   theme,
   onToggleTheme,
-  apiBase = "http://localhost:5820/api",
 }) => {
   const [activeTab, setActiveTab] = useState<"general" | "display" | "shortcuts">("general");
-
-  // Window Dimension state
-  const [windowWidth, setWindowWidth] = useState<number>(1280);
-  const [windowHeight, setWindowHeight] = useState<number>(850);
-  const [savingDim, setSavingDim] = useState(false);
-  const [dimStatusMsg, setDimStatusMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
-
-  useEffect(() => {
-    if (isOpen) {
-      const baseUrl = apiBase.endsWith("/") ? apiBase.slice(0, -1) : apiBase;
-      fetch(`${baseUrl}/admin/gui-size`)
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.width && data.height) {
-            setWindowWidth(data.width);
-            setWindowHeight(data.height);
-          }
-        })
-        .catch(() => {});
-    }
-  }, [isOpen, apiBase]);
 
   // Keyboard escape listener to close
   useEffect(() => {
@@ -84,13 +61,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     { label: t("uiScaleStandard", language), value: 100 },
     { label: t("uiScaleComfortable", language), value: 115 },
     { label: t("uiScaleLarge", language), value: 125 },
-  ];
-
-  const windowPresets = [
-    { label: "Compact Standard", w: 1280, h: 850 },
-    { label: 'MacBook 14"', w: 1440, h: 900 },
-    { label: 'MacBook 16"', w: 1600, h: 1000 },
-    { label: "Full HD 1080p", w: 1920, h: 1080 },
   ];
 
   const shortcutSections = [
@@ -124,42 +94,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       ],
     },
   ];
-
-  const handleApplyWindowSize = async (targetW?: number, targetH?: number) => {
-    const w = targetW || windowWidth;
-    const h = targetH || windowHeight;
-
-    if (w < 800 || h < 550) {
-      setDimStatusMsg({ type: "error", text: t("minDimNotice", language) });
-      return;
-    }
-
-    setSavingDim(true);
-    setDimStatusMsg(null);
-
-    try {
-      const baseUrl = apiBase.endsWith("/") ? apiBase.slice(0, -1) : apiBase;
-      const res = await fetch(`${baseUrl}/admin/gui-size`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ width: w, height: h }),
-      });
-
-      if (res.ok) {
-        setWindowWidth(w);
-        setWindowHeight(h);
-        setDimStatusMsg({ type: "success", text: t("windowSizeUpdated", language) });
-        setTimeout(() => setDimStatusMsg(null), 3000);
-      } else {
-        setDimStatusMsg({ type: "error", text: t("windowSizeFailed", language) });
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setDimStatusMsg({ type: "error", text: `Error: ${msg}` });
-    } finally {
-      setSavingDim(false);
-    }
-  };
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -298,7 +232,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           )}
 
-          {/* TAB 2: DISPLAY & WINDOW */}
+          {/* TAB 2: DISPLAY (UI Scale Slider & Presets) */}
           {activeTab === "display" && (
             <div className="tab-content">
               {/* UI Scale Section */}
@@ -313,17 +247,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
                 <div className="scale-control-panel">
                   <div className="scale-slider-row">
-                    <span className="scale-min">80%</span>
+                    <span className="scale-min">85%</span>
                     <input
                       type="range"
-                      min="80"
-                      max="130"
+                      min="85"
+                      max="125"
                       step="5"
                       value={uiScale}
                       onChange={(e) => onChangeUiScale(Number(e.target.value))}
                       className="scale-slider"
                     />
-                    <span className="scale-max">130%</span>
+                    <span className="scale-max">125%</span>
                     <div className="scale-current-badge">{uiScale}%</div>
                   </div>
 
@@ -351,81 +285,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     )}
                   </div>
                 </div>
-              </div>
-
-              {/* GUI Window Dimensions */}
-              <div className="setting-section">
-                <div className="section-head">
-                  <div className="section-head-title">
-                    <Maximize2 size={14} className="head-icon" />
-                    <span>{t("windowDimTitle", language)}</span>
-                  </div>
-                  <p className="section-head-desc">{t("windowDimDesc", language)}</p>
-                </div>
-
-                <div className="window-presets-grid">
-                  {windowPresets.map((p) => {
-                    const isSelected = windowWidth === p.w && windowHeight === p.h;
-                    return (
-                      <button
-                        key={p.label}
-                        type="button"
-                        className={`win-preset-card ${isSelected ? "active" : ""}`}
-                        onClick={() => handleApplyWindowSize(p.w, p.h)}
-                      >
-                        <Sliders size={13} className="win-preset-icon" />
-                        <div className="win-preset-info">
-                          <span className="win-preset-title">{p.label}</span>
-                          <span className="win-preset-dim">{p.w} × {p.h} px</span>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <div className="custom-dim-box">
-                  <span className="custom-dim-label">{t("customResolution", language)}</span>
-                  <div className="custom-inputs-row">
-                    <div className="dim-field">
-                      <label>{t("widthPx", language)}</label>
-                      <input
-                        type="number"
-                        className="input font-mono"
-                        min="800"
-                        max="3840"
-                        value={windowWidth}
-                        onChange={(e) => setWindowWidth(Number(e.target.value))}
-                      />
-                    </div>
-                    <span className="dim-times">×</span>
-                    <div className="dim-field">
-                      <label>{t("heightPx", language)}</label>
-                      <input
-                        type="number"
-                        className="input font-mono"
-                        min="550"
-                        max="2160"
-                        value={windowHeight}
-                        onChange={(e) => setWindowHeight(Number(e.target.value))}
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      className="btn btn-primary apply-dim-btn"
-                      onClick={() => handleApplyWindowSize()}
-                      disabled={savingDim}
-                    >
-                      <Check size={13} />
-                      <span>{t("applySize", language)}</span>
-                    </button>
-                  </div>
-                </div>
-
-                {dimStatusMsg && (
-                  <div className={`status-banner ${dimStatusMsg.type}`}>
-                    {dimStatusMsg.text}
-                  </div>
-                )}
               </div>
             </div>
           )}

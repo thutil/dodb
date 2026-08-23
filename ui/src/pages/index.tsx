@@ -1228,6 +1228,7 @@ export default function Home() {
               }}
               loading={loadingTables}
               dbType={activeProfile?.type}
+              language={language}
             />
           )}
 
@@ -1273,6 +1274,7 @@ export default function Home() {
                   theme={theme}
                   errorMessage={tableError}
                   onCreateTable={() => setIsCreateTableOpen(true)}
+                  language={language}
                 />
               ) : activeView === "sql" ? (
                 <SqlConsole
@@ -1452,6 +1454,7 @@ export default function Home() {
           isOpen={isAboutModalOpen}
           onClose={() => setIsAboutModalOpen(false)}
           version={appVersion}
+          language={language}
         />
 
         <SettingsModal
@@ -1463,7 +1466,6 @@ export default function Home() {
           onChangeUiScale={setUiScale}
           theme={theme}
           onToggleTheme={toggleTheme}
-          apiBase={API_BASE}
         />
 
         {/* Import completion toast, so a background import still reports back */}
@@ -1612,8 +1614,8 @@ export default function Home() {
         .app-layout {
           display: flex;
           flex-direction: column;
-          width: 100vw;
-          height: 100vh;
+          width: 100%;
+          height: 100%;
           overflow: hidden;
           background: var(--bg-app);
         }

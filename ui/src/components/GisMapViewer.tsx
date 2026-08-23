@@ -189,6 +189,11 @@ export const GisMapViewer: React.FC<GisMapViewerProps> = ({
     return [];
   }, [records, value, title]);
 
+  const featuresRef = useRef(features);
+  useEffect(() => {
+    featuresRef.current = features;
+  }, [features]);
+
   const summary = React.useMemo(() => {
     if (features.length === 1) {
       return formatGisSummary(features[0].geometry);
@@ -294,11 +299,6 @@ export const GisMapViewer: React.FC<GisMapViewerProps> = ({
       mapInstanceRef.current = null;
     };
   }, [pickerMode]);
-
-  const featuresRef = useRef(features);
-  useEffect(() => {
-    featuresRef.current = features;
-  }, [features]);
 
   // Update basemap style seamlessly without losing polygon vector layers or resetting view
   const handleSwitchBasemap = (newStyle: BasemapStyle) => {

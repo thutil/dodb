@@ -533,36 +533,33 @@ export const Header: React.FC<HeaderProps> = ({
 
         <div className="action-buttons-group">
           {onOpenImport && (
-            <button className="btn btn-secondary header-btn" onClick={onOpenImport} title="Import data from a SQL dump, CSV or JSON file">
-              <Upload size={12} />
-              <span className="btn-text-responsive">{t("navImport", language)}</span>
+            <button className="btn btn-secondary header-icon-btn" onClick={onOpenImport} title={t("shortcutImport", language)}>
+              <Upload size={13} />
             </button>
           )}
 
           {onOpenAuditLogs && (
-            <button className="btn btn-secondary header-btn" onClick={onOpenAuditLogs} title="View Audit Logs & History">
-              <FileText size={12} />
-              <span className="btn-text-responsive">{t("navLogs", language)}</span>
+            <button className="btn btn-secondary header-icon-btn" onClick={onOpenAuditLogs} title={t("shortcutAuditLogs", language)}>
+              <FileText size={13} />
             </button>
           )}
 
-          <button className="btn btn-secondary header-btn conn-btn" onClick={onOpenConnections} title="Manage Database Connections">
-            <Server size={12} />
-            <span className="btn-text-responsive">{t("navConnections", language)}</span>
+          <button className="btn btn-secondary header-icon-btn conn-btn" onClick={onOpenConnections} title={t("shortcutConnections", language)}>
+            <Server size={13} />
           </button>
 
           {onOpenSettings && (
             <button
               className="btn btn-secondary header-icon-btn"
               onClick={onOpenSettings}
-              title={t("navSettings", language)}
+              title={t("settingsTitle", language)}
             >
-              <SettingsIcon size={12} className="settings-icon" />
+              <SettingsIcon size={13} className="settings-icon" />
             </button>
           )}
 
           <button className="btn btn-secondary header-icon-btn" onClick={onToggleTheme} title={theme === "dark" ? t("switchThemeLight", language) : t("switchThemeDark", language)}>
-            {theme === "dark" ? <Sun size={12} className="theme-icon sun" /> : <Moon size={12} className="theme-icon moon" />}
+            {theme === "dark" ? <Sun size={13} className="theme-icon sun" /> : <Moon size={13} className="theme-icon moon" />}
           </button>
         </div>
       </div>
@@ -577,26 +574,23 @@ export const Header: React.FC<HeaderProps> = ({
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 0 10px;
-          gap: 8px;
+          padding: 0 12px;
+          gap: 10px;
           -webkit-app-region: drag;
           user-select: none;
           flex-shrink: 0;
           z-index: 100;
           width: 100%;
-          max-width: 100vw;
           box-sizing: border-box;
-          overflow: hidden;
         }
 
         .header-left {
           display: flex;
           align-items: center;
-          gap: 6px;
+          gap: 8px;
           min-width: 0;
           flex: 0 1 auto;
           -webkit-app-region: no-drag;
-          overflow: hidden;
         }
 
         .brand {
@@ -1046,6 +1040,7 @@ export const Header: React.FC<HeaderProps> = ({
           gap: 6px;
           -webkit-app-region: no-drag;
           flex-shrink: 0;
+          margin-left: auto;
         }
 
         .nav-tabs {

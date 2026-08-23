@@ -33,10 +33,96 @@ export const translations = {
     noDbFound: "No database found",
     noTableFound: "No table found",
 
+    // DataGrid & Table Actions
+    gridFilter: "Filter",
+    gridAddRow: "Add Row",
+    gridExport: "Export",
+    gridExportJson: "Export JSON",
+    gridExportSql: "Export SQL",
+    gridExportCsv: "Export CSV",
+    gridCommit: "Commit Changes",
+    gridRollback: "Rollback",
+    gridDiscard: "Discard",
+    gridSearchPlaceholder: "Search in table...",
+    gridRowsSelected: "rows selected",
+    gridCopyJson: "Copy JSON",
+    gridCopyCsv: "Copy CSV",
+    gridCopySql: "Copy SQL",
+    gridDeleteSelected: "Delete {count} Rows",
+    gridClearSelection: "Clear Selection",
+    gridInspectDetails: "Inspect Details",
+    gridEditRecord: "Edit Record",
+    gridViewOnMap: "View on Map",
+    gridDuplicateRow: "Duplicate Row",
+    gridCopyAsJson: "Copy as JSON",
+    gridCopyAsSql: "Copy as SQL INSERT",
+    gridDeleteRecord: "Delete Record",
+    gridRestoreRecord: "Restore Record",
+    gridNoData: "No records found in this table",
+    gridNoTableSelected: "Select a table from sidebar to inspect and edit records",
+    gridPageOf: "Page {page} / {totalPages} ({count} records shown)",
+    gridTotalRows: "{count} rows in table",
+    gridEditingRow: "Edit Record",
+    gridNewRow: "Insert New Record",
+    gridConfirmDeleteTitle: "Confirm Row Deletion",
+    gridConfirmDeleteDesc: "Are you sure you want to mark this record for deletion?",
+    gridRetry: "Retry",
+    gridQueryError: "Database Query Error",
+
+    // Sidebar Explorer
+    sidebarDatabase: "DATABASE",
+    sidebarTables: "TABLES",
+    sidebarViews: "VIEWS",
+    sidebarFilterTables: "Filter tables (⌘-click to multi-select)",
+    sidebarCreateTable: "Create Table",
+    sidebarNoTables: "No matching tables found",
+    sidebarRefreshTables: "Refresh tables",
+
+    // SQL Console
+    sqlRun: "Run (⌘+Enter)",
+    sqlFormat: "Format SQL",
+    sqlNewTab: "New Tab",
+    sqlClear: "Clear",
+    sqlSnippets: "Snippets",
+    sqlRecent: "Recent",
+    sqlHistory: "History",
+    sqlExplain: "Explain",
+    sqlAffectedRows: "{count} rows affected",
+    sqlExecutionTime: "Execution time: {ms}ms",
+    sqlEmptyQuery: "Enter an SQL query and press Run (⌘+Enter)",
+
+    // Visual Query Builder
+    vqbTitle: "Visual Query Builder",
+    vqbAddTable: "Add Table",
+    vqbRunQuery: "Run Query",
+    vqbColumns: "Columns",
+    vqbFilters: "Filters (WHERE)",
+    vqbJoins: "Joins (JOIN)",
+    vqbSort: "Sort (ORDER BY)",
+    vqbGroupBy: "Group By",
+    vqbLimit: "Limit",
+    vqbGeneratedSql: "Generated SQL",
+
+    // Schema Diagram
+    erdTitle: "Entity Relationship Diagram",
+    erdZoomFit: "Fit View",
+    erdExportImg: "Export Image",
+    erdFilterTables: "Filter diagram tables...",
+
+    // Admin Panel
+    adminOverview: "System Overview",
+    adminDatabases: "Databases",
+    adminProcesses: "Active Processes",
+    adminUsers: "Database Users",
+    adminCreateDb: "Create Database",
+    adminCreateUser: "Create User",
+    adminKillProcess: "Kill Process",
+    adminDropDb: "Drop Database",
+
     // Settings Modal
     settingsTitle: "Settings & Preferences",
     tabGeneral: "General",
-    tabDisplay: "Display & Window",
+    tabDisplay: "Display & Scale",
     tabShortcuts: "Shortcuts",
     
     // Settings: General
@@ -63,17 +149,6 @@ export const translations = {
     uiScaleLarge: "Large (125%)",
     uiScaleReset: "Reset to Default (100%)",
     currentScale: "Current Scale",
-    
-    windowDimTitle: "GUI Window Dimensions",
-    windowDimDesc: "Set preset or custom resolution for the application window.",
-    presetDimensions: "Preset Dimensions",
-    customResolution: "Custom Resolution (px)",
-    widthPx: "Width (px)",
-    heightPx: "Height (px)",
-    applySize: "Apply Size",
-    windowSizeUpdated: "Window size updated successfully!",
-    windowSizeFailed: "Failed to update window size",
-    minDimNotice: "Minimum dimensions are 800 x 550 px",
     
     // Settings: Shortcuts
     shortcutsTitle: "Keyboard Shortcuts",
@@ -144,10 +219,96 @@ export const translations = {
     noDbFound: "ไม่พบฐานข้อมูล",
     noTableFound: "ไม่พบตาราง",
 
+    // DataGrid & Table Actions
+    gridFilter: "ตัวกรอง",
+    gridAddRow: "เพิ่มแถว",
+    gridExport: "ส่งออก",
+    gridExportJson: "ส่งออก JSON",
+    gridExportSql: "ส่งออก SQL",
+    gridExportCsv: "ส่งออก CSV",
+    gridCommit: "บันทึกการเปลี่ยนแปลง",
+    gridRollback: "ยกเลิก",
+    gridDiscard: "ละทิ้ง",
+    gridSearchPlaceholder: "ค้นหาในตาราง...",
+    gridRowsSelected: "แถวที่เลือก",
+    gridCopyJson: "คัดลอก JSON",
+    gridCopyCsv: "คัดลอก CSV",
+    gridCopySql: "คัดลอก SQL",
+    gridDeleteSelected: "ลบ {count} แถวที่เลือก",
+    gridClearSelection: "ล้างการเลือก",
+    gridInspectDetails: "ดูรายละเอียดข้อมูล",
+    gridEditRecord: "แก้ไขข้อมูลแถวนี้",
+    gridViewOnMap: "ดูบนแผนที่ GIS",
+    gridDuplicateRow: "ทำสำเนาแถวนี้",
+    gridCopyAsJson: "คัดลอกเป็น JSON",
+    gridCopyAsSql: "คัดลอกเป็น SQL INSERT",
+    gridDeleteRecord: "ลบแถวนี้",
+    gridRestoreRecord: "ยกเลิกการลบแถวนี้",
+    gridNoData: "ไม่พบข้อมูลในตารางนี้",
+    gridNoTableSelected: "เลือกตารางจากแถบด้านซ้ายเพื่อดูและแก้ไขข้อมูล",
+    gridPageOf: "หน้า {page} / {totalPages} (แสดง {count} แถว)",
+    gridTotalRows: "{count} แถวในตาราง",
+    gridEditingRow: "แก้ไขแถวข้อมูล",
+    gridNewRow: "เพิ่มแถวข้อมูลใหม่",
+    gridConfirmDeleteTitle: "ยืนยันการลบแถวข้อมูล",
+    gridConfirmDeleteDesc: "คุณแน่ใจหรือไม่ว่าต้องการทำเครื่องหมายลบแถวนี้?",
+    gridRetry: "ลองใหม่อีกครั้ง",
+    gridQueryError: "เกิดข้อผิดพลาดในการดึงข้อมูล",
+
+    // Sidebar Explorer
+    sidebarDatabase: "ฐานข้อมูล",
+    sidebarTables: "ตารางข้อมูล",
+    sidebarViews: "วิว (Views)",
+    sidebarFilterTables: "ค้นหาตาราง (⌘-คลิก เพื่อเลือกหลายตาราง)",
+    sidebarCreateTable: "สร้างตารางใหม่",
+    sidebarNoTables: "ไม่พบตารางที่ตรงกับคำค้นหา",
+    sidebarRefreshTables: "รีเฟรชรายชื่อตาราง",
+
+    // SQL Console
+    sqlRun: "ประมวลผล (⌘+Enter)",
+    sqlFormat: "จัดระเบียบ SQL",
+    sqlNewTab: "แท็บใหม่",
+    sqlClear: "ล้างหน้าต่าง",
+    sqlSnippets: "คำสั่งตัวอย่าง",
+    sqlRecent: "ประวัติล่าสุด",
+    sqlHistory: "ประวัติคำสั่ง",
+    sqlExplain: "วิเคราะห์คำสั่ง (EXPLAIN)",
+    sqlAffectedRows: "ส่งผลกระทบ {count} แถว",
+    sqlExecutionTime: "เวลาประมวลผล: {ms}ms",
+    sqlEmptyQuery: "พิมพ์คำสั่ง SQL แล้วกดปุ่มประมวลผล หรือ ⌘+Enter",
+
+    // Visual Query Builder
+    vqbTitle: "สร้างคำสั่งค้นหา (Visual Query)",
+    vqbAddTable: "เพิ่มตาราง",
+    vqbRunQuery: "ประมวลผลคำสั่ง",
+    vqbColumns: "คอลัมน์",
+    vqbFilters: "เงื่อนไข (WHERE)",
+    vqbJoins: "การเชื่อมตาราง (JOIN)",
+    vqbSort: "เรียงลำดับ (ORDER BY)",
+    vqbGroupBy: "จัดกลุ่ม (GROUP BY)",
+    vqbLimit: "จำกัดจำนวนแถว (LIMIT)",
+    vqbGeneratedSql: "คำสั่ง SQL ที่สร้างขึ้น",
+
+    // Schema Diagram
+    erdTitle: "แผนภาพความสัมพันธ์ (ERD)",
+    erdZoomFit: "ปรับมุมมองให้พอดี",
+    erdExportImg: "บันทึกเป็นรูปภาพ",
+    erdFilterTables: "ค้นหาตารางในแผนภาพ...",
+
+    // Admin Panel
+    adminOverview: "ภาพรวมระบบ",
+    adminDatabases: "ฐานข้อมูล",
+    adminProcesses: "โพรเซสที่กำลังทำงาน",
+    adminUsers: "ผู้ใช้งานฐานข้อมูล",
+    adminCreateDb: "สร้างฐานข้อมูลใหม่",
+    adminCreateUser: "สร้างผู้ใช้ใหม่",
+    adminKillProcess: "ยุติการทำงานโพรเซส",
+    adminDropDb: "ลบฐานข้อมูล",
+
     // Settings Modal
     settingsTitle: "การตั้งค่า",
     tabGeneral: "ทั่วไป",
-    tabDisplay: "การแสดงผลและหน้าต่าง",
+    tabDisplay: "การแสดงผลและขนาด",
     tabShortcuts: "แป้นพิมพ์ลัด",
     
     // Settings: General
@@ -174,17 +335,6 @@ export const translations = {
     uiScaleLarge: "ขนาดใหญ่ (125%)",
     uiScaleReset: "คืนค่าขนาดมาตรฐาน (100%)",
     currentScale: "ขนาดปัจจุบัน",
-    
-    windowDimTitle: "ขนาดหน้าต่างโปรแกรม",
-    windowDimDesc: "เลือกขนาดหน้าต่างสำเร็จรูปหรือระบุความกว้างและความสูงตามต้องการ",
-    presetDimensions: "ขนาดหน้าต่างสำเร็จรูป",
-    customResolution: "กำหนดขนาดหน้าต่างเอง (พิกเซล)",
-    widthPx: "ความกว้าง (px)",
-    heightPx: "ความสูง (px)",
-    applySize: "ปรับขนาด",
-    windowSizeUpdated: "ปรับขนาดหน้าต่างเรียบร้อยแล้ว",
-    windowSizeFailed: "ไม่สามารถปรับขนาดหน้าต่างได้",
-    minDimNotice: "ขนาดขั้นต่ำคือ 800 x 550 พิกเซล",
     
     // Settings: Shortcuts
     shortcutsTitle: "แป้นพิมพ์ลัด (Keyboard Shortcuts)",
@@ -227,13 +377,13 @@ export const translations = {
 
 export type TranslationKey = keyof typeof translations.en;
 
-export function t(key: TranslationKey, lang: Language = "en", params?: Record<string, string>): string {
+export function t(key: TranslationKey, lang: Language = "en", params?: Record<string, string | number>): string {
   const dict = translations[lang] || translations.en;
-  let text: string = dict[key] || translations.en[key] || key;
+  let text: string = (dict as any)[key] || (translations.en as any)[key] || key;
   
   if (params) {
     Object.entries(params).forEach(([paramKey, paramVal]) => {
-      text = text.replace(new RegExp(`\\{${paramKey}\\}`, "g"), paramVal);
+      text = text.replace(new RegExp(`\\{${paramKey}\\}`, "g"), String(paramVal));
     });
   }
   return text;

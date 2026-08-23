@@ -16,16 +16,20 @@ import {
   HardDrive
 } from "lucide-react";
 
+import { Language, t } from "../utils/i18n";
+
 interface AboutModalProps {
   isOpen: boolean;
   onClose: () => void;
   version?: string;
+  language?: Language;
 }
 
 export const AboutModal: React.FC<AboutModalProps> = ({
   isOpen,
   onClose,
   version = "0.2.2",
+  language = "en",
 }) => {
   const [copied, setCopied] = useState(false);
 
@@ -43,11 +47,8 @@ export const AboutModal: React.FC<AboutModalProps> = ({
       <div className="about-modal-card" onClick={(e) => e.stopPropagation()}>
         {/* Header decoration with close button */}
         <div className="about-modal-header">
-          <div className="header-badge">
-            <Sparkles size={11} className="badge-sparkle" />
-            <span>Database Studio</span>
-          </div>
-          <button className="icon-close-btn" onClick={onClose} title="Close (Esc)">
+          <div></div>
+          <button className="icon-close-btn" onClick={onClose} title={t("close", language)}>
             <X size={15} />
           </button>
         </div>
@@ -65,7 +66,9 @@ export const AboutModal: React.FC<AboutModalProps> = ({
               <span className="app-version-chip font-mono">v{version}</span>
             </div>
             <p className="app-tagline">
-              Fast, lightweight & native desktop database client
+              {language === "th"
+                ? "Fast, lightweight & native desktop database client"
+                : "Fast, lightweight & native desktop database client"}
             </p>
           </div>
         </div>
@@ -173,7 +176,7 @@ export const AboutModal: React.FC<AboutModalProps> = ({
             <span> by THUTIL Team</span>
           </div>
           <button className="btn btn-secondary btn-sm close-modal-btn" onClick={onClose}>
-            Close
+            {t("close", language)}
           </button>
         </div>
       </div>

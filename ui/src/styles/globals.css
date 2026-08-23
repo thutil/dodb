@@ -100,10 +100,14 @@
   padding: 0;
 }
 
-html, body {
-  width: 100vw;
-  height: 100vh;
+html, body, #__next {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
   overflow: hidden;
+  position: fixed;
+  inset: 0;
   font-family: var(--font-sans);
   background-color: var(--bg-app);
   color: var(--text-main);
