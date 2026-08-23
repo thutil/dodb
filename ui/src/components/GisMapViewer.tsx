@@ -283,7 +283,7 @@ export const GisMapViewer: React.FC<GisMapViewerProps> = ({
     }
 
     map.on("load", () => {
-      renderGeoJsonLayers(map, features);
+      renderGeoJsonLayers(map, featuresRef.current, true);
     });
 
     return () => {
@@ -295,7 +295,12 @@ export const GisMapViewer: React.FC<GisMapViewerProps> = ({
     };
   }, [pickerMode]);
 
-  // Update basemap style
+  const featuresRef = useRef(features);
+  useEffect(() => {
+    featuresRef.current = features;
+  }, [features]);
+
+  // Update basemap style seamlessly without losing polygon vector layers or resetting view
   const handleSwitchBasemap = (newStyle: BasemapStyle) => {
     setBasemap(newStyle);
     if (typeof window !== "undefined") {
@@ -303,18 +308,68 @@ export const GisMapViewer: React.FC<GisMapViewerProps> = ({
         localStorage.setItem(BASEMAP_STORAGE_KEY, newStyle);
       } catch {}
     }
-    if (mapInstanceRef.current) {
-      mapInstanceRef.current.setStyle(getStyleForBasemap(newStyle));
-      mapInstanceRef.current.once("style.load", () => {
-        if (mapInstanceRef.current) {
-          renderGeoJsonLayers(mapInstanceRef.current, features);
-        }
+
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    const bm = BASEMAP_TILES[newStyle];
+    if (!bm) return;
+
+    try {
+      // 1. Remove existing raster basemap layer & source
+      if (map.getLayer("simple-tiles")) {
+        map.removeLayer("simple-tiles");
+      }
+      if (map.getSource("raster-tiles")) {
+        map.removeSource("raster-tiles");
+      }
+
+      // 2. Add new raster source
+      map.addSource("raster-tiles", {
+        type: "raster",
+        tiles: bm.tiles,
+        tileSize: 256,
+        attribution: bm.attribution,
+        maxzoom: bm.maxzoom,
       });
+
+      // 3. Find first vector layer to insert raster behind it
+      const beforeLayerId = map.getLayer("gis-polygons-fill")
+        ? "gis-polygons-fill"
+        : map.getLayer("gis-lines")
+        ? "gis-lines"
+        : undefined;
+
+      map.addLayer(
+        {
+          id: "simple-tiles",
+          type: "raster",
+          source: "raster-tiles",
+          minzoom: 0,
+          maxzoom: bm.maxzoom,
+        },
+        beforeLayerId
+      );
+
+      // 4. Ensure vector layers are still present, re-render if missing
+      if (!map.getSource("gis-features")) {
+        renderGeoJsonLayers(map, featuresRef.current, false);
+      }
+    } catch (err) {
+      console.warn("Dynamic basemap swap fallback to setStyle:", err);
+      // Fallback via setStyle with styledata listener
+      const reAddLayers = () => {
+        if (mapInstanceRef.current && mapInstanceRef.current.isStyleLoaded()) {
+          renderGeoJsonLayers(mapInstanceRef.current, featuresRef.current, false);
+        }
+      };
+      map.once("styledata", reAddLayers);
+      map.setStyle(getStyleForBasemap(newStyle));
     }
   };
 
   // Render vector shapes and point markers
-  const renderGeoJsonLayers = (map: maplibregl.Map, featList: GisFeatureRecord[]) => {
+  const renderGeoJsonLayers = (map: maplibregl.Map, featList: GisFeatureRecord[], autoFit: boolean = true) => {
     // Clear existing markers
     markersRef.current.forEach((m) => m.remove());
     markersRef.current = [];
@@ -443,7 +498,7 @@ export const GisMapViewer: React.FC<GisMapViewerProps> = ({
     }
 
     // Auto fit bounds with comfortable max zoom (prevent tile pixelation)
-    if (hasCoords) {
+    if (autoFit && hasCoords) {
       map.fitBounds(bounds, {
         padding: 60,
         maxZoom: 12.5,
