@@ -15,6 +15,7 @@ import { SchemaDiagram } from "../components/SchemaDiagram";
 import { VisualQueryBuilder } from "../components/VisualQueryBuilder";
 import { CommandPalette } from "../components/CommandPalette";
 import { ImportModal } from "../components/ImportModal";
+import { AboutModal } from "../components/AboutModal";
 import { AlertCircle, X, CheckCircle2, Download, Upload, XCircle } from "lucide-react";
 import { ConnectionProfile, ColumnInfo, TableRowData, QueryExecutionResult, ColumnFilter, DBType } from "../types";
 import { DdlResult } from "../components/tableDesign/draft";
@@ -85,6 +86,7 @@ export default function Home() {
   const [autoUnlockProfileId, setAutoUnlockProfileId] = useState<string | null>(null);
   const [isAuditLogOpen, setIsAuditLogOpen] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
   const [dumpProgress, setDumpProgress] = useState<DumpProgress>(dumpManager.getProgress());
   const [showDumpToast, setShowDumpToast] = useState(false);
   const [importTarget, setImportTarget] = useState<{ table: string | null } | null>(null);
@@ -1044,6 +1046,7 @@ export default function Home() {
           onOpenAuditLogs={() => setIsAuditLogOpen(true)}
           onOpenImport={() => setImportTarget({ table: activeTable })}
           onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+          onOpenAbout={() => setIsAboutModalOpen(true)}
           onViewStructure={(tbl) => setStructureModalTable(tbl)}
           onOpenInSql={(sql) => {
             setActiveView("sql");
@@ -1324,6 +1327,12 @@ export default function Home() {
           tables={tables}
           initialTable={importTarget?.table ?? null}
           onImported={handleImported}
+        />
+
+        <AboutModal
+          isOpen={isAboutModalOpen}
+          onClose={() => setIsAboutModalOpen(false)}
+          version={appVersion}
         />
 
         {/* Import completion toast, so a background import still reports back */}

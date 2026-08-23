@@ -553,7 +553,7 @@ export const Header: React.FC<HeaderProps> = ({
 
       <style jsx>{`
         .app-header {
-          height: var(--header-h);
+          height: var(--header-h, 44px);
           background: var(--bg-header);
           backdrop-filter: blur(16px);
           -webkit-backdrop-filter: blur(16px);
@@ -561,8 +561,8 @@ export const Header: React.FC<HeaderProps> = ({
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 0 10px;
-          gap: 8px;
+          padding: 0 12px;
+          gap: 12px;
           -webkit-app-region: drag;
           user-select: none;
           flex-shrink: 0;
@@ -577,57 +577,64 @@ export const Header: React.FC<HeaderProps> = ({
           align-items: center;
           gap: 8px;
           min-width: 0;
-          flex-shrink: 1;
+          flex: 1 1 auto;
           -webkit-app-region: no-drag;
           overflow: visible;
         }
 
         .brand {
-          display: flex;
+          display: inline-flex;
           align-items: center;
-          gap: 6px;
+          gap: 7px;
           color: var(--text-main);
           -webkit-app-region: no-drag;
           cursor: default;
-          padding: 2px 4px;
-          border-radius: 6px;
-          transition: background 0.15s ease;
+          padding: 3px 6px;
+          height: 28px;
+          border-radius: var(--radius-sm, 6px);
+          border: 1px solid transparent;
+          transition: all 0.15s ease;
           flex-shrink: 0;
+          box-sizing: border-box;
         }
         .brand.clickable {
           cursor: pointer;
         }
         .brand.clickable:hover {
           background: var(--bg-hover);
+          border-color: var(--border-light);
         }
         .brand-mascot-img {
           width: 20px;
           height: 20px;
-          border-radius: 4px;
+          border-radius: 5px;
           object-fit: cover;
-          box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+          box-shadow: 0 2px 5px rgba(0, 0, 0, 0.25);
           flex-shrink: 0;
         }
         .brand-title {
           font-weight: 700;
           font-size: 12px;
           letter-spacing: -0.2px;
+          line-height: 1;
         }
 
         .header-breadcrumb {
-          display: flex;
+          display: inline-flex;
           align-items: center;
-          gap: 3px;
+          gap: 4px;
           font-size: 11px;
           color: var(--text-muted);
           background: var(--bg-tertiary);
           padding: 2px 6px;
-          border-radius: var(--radius-sm);
+          height: 28px;
+          border-radius: var(--radius-sm, 6px);
           border: 1px solid var(--border-light);
           white-space: nowrap;
           position: relative;
           min-width: 0;
           flex-shrink: 1;
+          box-sizing: border-box;
         }
         .bc-divider {
           color: var(--border-medium);
@@ -649,10 +656,11 @@ export const Header: React.FC<HeaderProps> = ({
         .bc-item {
           display: inline-flex;
           align-items: center;
-          gap: 3px;
+          gap: 4px;
           font-size: 11px;
           font-weight: 500;
-          padding: 2px 5px;
+          padding: 0 6px;
+          height: 22px;
           border-radius: 4px;
           border: 1px solid transparent;
           background: transparent;
@@ -662,9 +670,10 @@ export const Header: React.FC<HeaderProps> = ({
           user-select: none;
           font-family: inherit;
           text-decoration: none;
-          line-height: 1.2;
+          line-height: 1;
           min-width: 0;
-          max-width: 130px;
+          max-width: 140px;
+          box-sizing: border-box;
         }
         .bc-item:hover, .bc-item.is-open {
           background: var(--bg-hover);
@@ -688,10 +697,10 @@ export const Header: React.FC<HeaderProps> = ({
         }
         .bc-segment-icon {
           flex-shrink: 0;
-          opacity: 0.8;
+          opacity: 0.85;
         }
         .bc-label {
-          max-width: 100px;
+          max-width: 110px;
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
@@ -809,63 +818,67 @@ export const Header: React.FC<HeaderProps> = ({
           background: transparent;
           border: none;
           outline: none;
-          font-size: 11px;
           color: var(--text-main);
+          font-size: 11px;
+          font-family: var(--font-sans);
           width: 100%;
-          font-family: inherit;
         }
+        .bc-search-input::placeholder {
+          color: var(--text-muted);
+        }
+
         .bc-dropdown-list {
           display: flex;
           flex-direction: column;
-          gap: 1px;
-          max-height: 200px;
+          gap: 2px;
+          max-height: 220px;
           overflow-y: auto;
-          margin: 2px 0;
         }
         .bc-dropdown-list.max-h {
-          max-height: 240px;
+          max-height: 200px;
         }
         .bc-dropdown-actions {
           display: flex;
           flex-direction: column;
-          gap: 1px;
-          margin: 4px 0 2px 0;
+          gap: 2px;
         }
+
         .bc-dropdown-item {
           display: flex;
           align-items: center;
           gap: 8px;
           padding: 5px 8px;
+          border-radius: 4px;
           font-size: 11px;
           color: var(--text-sub);
           background: transparent;
           border: none;
-          border-radius: 4px;
           cursor: pointer;
           text-align: left;
           width: 100%;
+          transition: all 0.12s ease;
+          user-select: none;
           font-family: inherit;
-          transition: all 0.1s ease;
         }
         .bc-dropdown-item:hover {
           background: var(--bg-hover);
           color: var(--text-main);
         }
         .bc-dropdown-item.active {
-          background: rgba(59, 130, 246, 0.12);
-          color: var(--accent-blue);
+          background: var(--bg-hover);
+          color: var(--text-main);
           font-weight: 600;
         }
         .bc-dropdown-item.action-item {
-          font-size: 11px;
           color: var(--text-main);
         }
         .bc-dropdown-item.action-item.danger {
-          color: var(--accent-rose, #ef4444);
+          color: var(--accent-red);
         }
         .bc-dropdown-item.action-item.danger:hover {
           background: rgba(239, 68, 68, 0.12);
         }
+
         .item-icon {
           flex-shrink: 0;
           opacity: 0.75;
@@ -919,7 +932,7 @@ export const Header: React.FC<HeaderProps> = ({
           gap: 6px;
           flex: 0 1 280px;
           min-width: 80px;
-          max-width: 300px;
+          max-width: 320px;
           -webkit-app-region: no-drag;
         }
         .header-quick-search {
@@ -929,15 +942,16 @@ export const Header: React.FC<HeaderProps> = ({
           gap: 6px;
           background: var(--bg-tertiary);
           border: 1px solid var(--border-light);
-          border-radius: var(--radius-sm);
-          padding: 3px 8px;
-          height: 26px;
+          border-radius: var(--radius-sm, 6px);
+          padding: 0 10px;
+          height: 28px;
           color: var(--text-muted);
           font-family: var(--font-sans);
           cursor: pointer;
-          transition: all 0.12s ease;
+          transition: all 0.15s ease;
           user-select: none;
           min-width: 60px;
+          box-sizing: border-box;
         }
         .header-quick-search:hover {
           background: var(--bg-hover);
@@ -963,7 +977,7 @@ export const Header: React.FC<HeaderProps> = ({
           background: var(--bg-card);
           border: 1px solid var(--border-light);
           color: var(--text-sub);
-          padding: 1px 4px;
+          padding: 1px 5px;
           border-radius: 3px;
           box-shadow: var(--shadow-sm);
           flex-shrink: 0;
@@ -972,23 +986,24 @@ export const Header: React.FC<HeaderProps> = ({
         .header-health-pill {
           display: flex;
           align-items: center;
-          gap: 4px;
-          padding: 2px 6px;
-          height: 24px;
+          gap: 5px;
+          padding: 0 8px;
+          height: 28px;
           background: var(--bg-tertiary);
           border: 1px solid var(--border-light);
-          border-radius: var(--radius-sm);
-          font-size: 9.5px;
+          border-radius: var(--radius-sm, 6px);
+          font-size: 10px;
           color: var(--text-muted);
           font-family: var(--font-mono);
           flex-shrink: 0;
+          box-sizing: border-box;
         }
         .health-dot {
-          width: 5px;
-          height: 5px;
+          width: 6px;
+          height: 6px;
           border-radius: 50%;
           background: var(--accent-green);
-          box-shadow: 0 0 5px var(--accent-green);
+          box-shadow: 0 0 6px var(--accent-green);
           transition: all 0.2s ease;
         }
         .header-health-pill.is-connecting .health-dot {
@@ -997,11 +1012,11 @@ export const Header: React.FC<HeaderProps> = ({
         }
         .header-health-pill.is-medium .health-dot {
           background: var(--accent-amber, #f59e0b);
-          box-shadow: 0 0 5px var(--accent-amber, #f59e0b);
+          box-shadow: 0 0 6px var(--accent-amber, #f59e0b);
         }
         .header-health-pill.is-slow .health-dot {
           background: var(--accent-rose, #ef4444);
-          box-shadow: 0 0 5px var(--accent-rose, #ef4444);
+          box-shadow: 0 0 6px var(--accent-rose, #ef4444);
         }
         .health-ping {
           font-weight: 500;
@@ -1011,7 +1026,7 @@ export const Header: React.FC<HeaderProps> = ({
         .header-right {
           display: flex;
           align-items: center;
-          gap: 6px;
+          gap: 8px;
           -webkit-app-region: no-drag;
           flex-shrink: 0;
         }
@@ -1020,17 +1035,19 @@ export const Header: React.FC<HeaderProps> = ({
           display: flex;
           background: var(--bg-tertiary);
           padding: 2px;
-          border-radius: 6px;
+          height: 28px;
+          border-radius: var(--radius-sm, 6px);
           border: 1px solid var(--border-light);
           gap: 2px;
           align-items: center;
+          box-sizing: border-box;
         }
         .tab-btn {
-          display: flex;
+          display: inline-flex;
           align-items: center;
           justify-content: center;
           gap: 4px;
-          padding: 2px 8px;
+          padding: 0 9px;
           font-size: 11px;
           font-weight: 500;
           border: 1px solid transparent;
@@ -1039,12 +1056,13 @@ export const Header: React.FC<HeaderProps> = ({
           border-radius: 4px;
           cursor: pointer;
           transition: all 0.12s ease;
-          height: 24px;
+          height: 22px;
           white-space: nowrap;
+          box-sizing: border-box;
         }
         .tab-icon {
           flex-shrink: 0;
-          opacity: 0.7;
+          opacity: 0.75;
         }
         .tab-btn:hover {
           color: var(--text-main);
@@ -1064,35 +1082,41 @@ export const Header: React.FC<HeaderProps> = ({
 
         .header-divider {
           width: 1px;
-          height: 16px;
+          height: 18px;
           background: var(--border-light);
           margin: 0 1px;
+          flex-shrink: 0;
         }
 
         .action-buttons-group {
           display: flex;
           align-items: center;
-          gap: 4px;
+          gap: 6px;
         }
 
         .header-btn {
-          height: 26px;
-          padding: 0 8px;
+          height: 28px;
+          padding: 0 10px;
           font-size: 11px;
-          border-radius: 5px;
-          gap: 4px;
+          font-weight: 500;
+          border-radius: var(--radius-sm, 6px);
+          gap: 5px;
           display: inline-flex;
           align-items: center;
+          box-sizing: border-box;
+          transition: all 0.12s ease;
         }
 
         .header-icon-btn {
-          height: 26px;
-          width: 26px;
+          height: 28px;
+          width: 28px;
           padding: 0;
-          display: flex;
+          display: inline-flex;
           align-items: center;
           justify-content: center;
-          border-radius: 5px;
+          border-radius: var(--radius-sm, 6px);
+          box-sizing: border-box;
+          transition: all 0.12s ease;
         }
 
         .theme-icon.sun { color: #f59e0b; }
