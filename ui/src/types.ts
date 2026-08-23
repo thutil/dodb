@@ -11,6 +11,8 @@ export interface ConnectionProfile {
   database: string;
   filePath?: string;
   group?: string;
+  keepAlive?: boolean;
+  savePassword?: boolean;
   createdAt?: string;
   updatedAt?: string;
 }

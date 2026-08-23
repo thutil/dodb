@@ -24,6 +24,8 @@ pub fn run() {
         unregister_session_profile,
         delete_profile,
         test_connection,
+        set_runtime_password,
+        clear_runtime_password,
         // Database & Table Operations
         get_databases,
         get_tables,

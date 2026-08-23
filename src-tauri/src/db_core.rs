@@ -15,9 +15,8 @@ pub enum DbPool {
 
 pub struct DbState {
     pub pools: Mutex<HashMap<String, DbPool>>,
-    /// Connections the user is using without saving them. They live only for
-    /// the lifetime of the app process and are never written to profiles.json.
     pub session_profiles: Mutex<HashMap<String, ConnectionProfile>>,
+    pub runtime_passwords: Mutex<HashMap<String, String>>,
 }
 
 impl Default for DbState {
@@ -25,6 +24,7 @@ impl Default for DbState {
         Self {
             pools: Mutex::new(HashMap::new()),
             session_profiles: Mutex::new(HashMap::new()),
+            runtime_passwords: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -50,7 +50,7 @@ pub fn resolve_profile_in(state: &DbState, id: &str) -> Result<ConnectionProfile
             return Ok(p.clone());
         }
     }
-    crate::profiles::load_profiles()?
+    let mut profile = crate::profiles::load_profiles()?
         .into_iter()
         .find(|p| p.id == id)
         .ok_or_else(|| {
@@ -62,10 +62,36 @@ pub fn resolve_profile_in(state: &DbState, id: &str) -> Result<ConnectionProfile
             } else {
                 format!("Connection '{}' not found. It may have been deleted - pick it again in the connection dialog.", id)
             }
-        })
+        })?;
+
+    if profile.password.is_empty() {
+        let runtime = state.runtime_passwords.lock().map_err(|e| e.to_string())?;
+        if let Some(pw) = runtime.get(id) {
+            profile.password = pw.clone();
+        }
+    }
+
+    Ok(profile)
 }
 
 pub const CONNECTION_TIMEOUT_SECS: u64 = 180;
+
+fn tune_pool<DB: sqlx::Database>(
+    opts: sqlx::pool::PoolOptions<DB>,
+    keep_alive: bool,
+) -> sqlx::pool::PoolOptions<DB> {
+    let opts = opts
+        .max_connections(5)
+        .acquire_timeout(std::time::Duration::from_secs(CONNECTION_TIMEOUT_SECS));
+    if keep_alive {
+        opts.min_connections(1)
+            .idle_timeout(None)
+            .max_lifetime(None)
+            .test_before_acquire(true)
+    } else {
+        opts
+    }
+}
 
 impl DbPool {
     pub async fn close(&self) {
@@ -158,8 +184,6 @@ pub async fn get_pool_in(
         }
     }
 
-    let timeout = std::time::Duration::from_secs(CONNECTION_TIMEOUT_SECS);
-
     let pool = match profile.r#type {
         SupportedDB::Postgres => {
             let url = format!(
@@ -178,9 +202,7 @@ pub async fn get_pool_in(
                 });
 
             // Try connecting with Prefer first, fallback to Disable if server fails on SSLRequest
-            let connect_res = sqlx::postgres::PgPoolOptions::new()
-                .max_connections(5)
-                .acquire_timeout(timeout)
+            let connect_res = tune_pool(sqlx::postgres::PgPoolOptions::new(), profile.keep_alive)
                 .connect_with(connect_opts.clone().ssl_mode(sqlx::postgres::PgSslMode::Prefer))
                 .await;
 
@@ -189,9 +211,7 @@ pub async fn get_pool_in(
                 Err(err) => {
                     let err_msg = err.to_string();
                     if err_msg.contains("SSLRequest") || err_msg.contains("tls") || err_msg.contains("ssl") || err_msg.contains("0x5a") {
-                        sqlx::postgres::PgPoolOptions::new()
-                            .max_connections(5)
-                            .acquire_timeout(timeout)
+                        tune_pool(sqlx::postgres::PgPoolOptions::new(), profile.keep_alive)
                             .connect_with(connect_opts.ssl_mode(sqlx::postgres::PgSslMode::Disable))
                             .await
                             .map_err(|e2| format!("Failed to connect to Postgres database '{}': {}", db_name, e2))?
@@ -207,9 +227,7 @@ pub async fn get_pool_in(
                 "mysql://{}:{}@{}:{}/{}",
                 profile.user, profile.password, profile.host, profile.port, db_name
             );
-            let p = sqlx::mysql::MySqlPoolOptions::new()
-                .max_connections(5)
-                .acquire_timeout(timeout)
+            let p = tune_pool(sqlx::mysql::MySqlPoolOptions::new(), profile.keep_alive)
                 .connect(&url)
                 .await
                 .map_err(|e| format!("Failed to connect to MySQL database '{}': {}", db_name, e))?;
@@ -222,9 +240,7 @@ pub async fn get_pool_in(
                 profile.file_path.clone().unwrap_or_else(|| ":memory:".to_string())
             };
             let url = format!("sqlite://{}", path);
-            let p = sqlx::sqlite::SqlitePoolOptions::new()
-                .max_connections(5)
-                .acquire_timeout(timeout)
+            let p = tune_pool(sqlx::sqlite::SqlitePoolOptions::new(), profile.keep_alive)
                 .connect(&url)
                 .await
                 .map_err(|e| format!("Failed to open SQLite database '{}': {}", path, e))?;
@@ -1087,6 +1103,45 @@ mod tests {
         let err = execute_transaction(&pool, &steps).await.unwrap_err();
         assert!(err.contains("SQL: UPDATE t SET nope"), "unexpected error: {err}");
         assert_eq!(name_of(&pool, 1).await.as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn a_profile_that_stores_no_password_still_resolves_with_one() {
+        let dir = std::env::temp_dir().join("dodb-test-runtime-pw");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::env::set_var("DODB_DATA_DIR", &dir);
+
+        let profile = ConnectionProfile {
+            id: "runtime-pw-profile".to_string(),
+            name: "no-store".to_string(),
+            r#type: SupportedDB::Postgres,
+            host: "127.0.0.1".to_string(),
+            port: 5432,
+            user: "postgres".to_string(),
+            password: "typed-at-connect".to_string(),
+            database: "postgres".to_string(),
+            save_password: false,
+            ..Default::default()
+        };
+        crate::profiles::save_profiles(&mut vec![profile.clone()]).unwrap();
+
+        let raw = std::fs::read_to_string(dir.join("profiles.json")).unwrap();
+        assert!(!raw.contains("typed-at-connect"), "password reached disk: {raw}");
+
+        let state = DbState::default();
+        // Without the runtime entry there is nothing to connect with.
+        assert_eq!(resolve_profile_in(&state, &profile.id).unwrap().password, "");
+
+        state
+            .runtime_passwords
+            .lock()
+            .unwrap()
+            .insert(profile.id.clone(), "typed-at-connect".to_string());
+        let resolved = resolve_profile_in(&state, &profile.id).unwrap();
+        assert_eq!(resolved.password, "typed-at-connect");
+        assert!(!resolved.save_password);
+
+        let _ = std::fs::remove_file(dir.join("profiles.json"));
     }
 
     #[test]

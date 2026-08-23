@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useState, useEffect, useCallback } from "react";
 import Head from "next/head";
 import { Header } from "../components/Header";
@@ -25,8 +24,10 @@ import { auditLogger } from "../utils/auditLogger";
 import { dumpManager, DumpProgress } from "../utils/dumpManager";
 import { importManager, ImportProgress, ImportReport } from "../utils/importManager";
 
-const DEFAULT_APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION || "0.1.0";
+const DEFAULT_APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION || "0.2.3";
 const SESSION_ID_PREFIX = "session-";
+const LAST_PROFILE_KEY = "dodb_last_active_profile";
+const RECONNECT_DELAYS_MS = [1000, 2000, 5000, 10000];
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:5820/api";
 
@@ -80,11 +81,12 @@ export default function Home() {
   const [profiles, setProfiles] = useState<ConnectionProfile[]>([]);
   const [activeProfile, setActiveProfile] = useState<ConnectionProfile | null>(null);
   const [isConnModalOpen, setIsConnModalOpen] = useState(true);
+  const [bootstrapping, setBootstrapping] = useState<string | null>(null);
+  const [autoUnlockProfileId, setAutoUnlockProfileId] = useState<string | null>(null);
   const [isAuditLogOpen, setIsAuditLogOpen] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [dumpProgress, setDumpProgress] = useState<DumpProgress>(dumpManager.getProgress());
   const [showDumpToast, setShowDumpToast] = useState(false);
-  // `null` closed; `{ table }` open, with the table preselected from the sidebar.
   const [importTarget, setImportTarget] = useState<{ table: string | null } | null>(null);
   const [importProgress, setImportProgress] = useState<ImportProgress>(importManager.getProgress());
   const [importToast, setImportToast] = useState<ImportReport | null>(null);
@@ -92,36 +94,29 @@ export default function Home() {
   const [isCreateTableOpen, setIsCreateTableOpen] = useState(false);
   const [editTableModalTable, setEditTableModalTable] = useState<string | null>(null);
   const [confirmDdlRequest, setConfirmDdlRequest] = useState<ConfirmDdlRequest | null>(null);
-
   const [databases, setDatabases] = useState<string[]>([]);
   const [activeDatabase, setActiveDatabase] = useState<string>("");
-
   const [tables, setTables] = useState<string[]>([]);
   const [activeTable, setActiveTable] = useState<string | null>(null);
   const [loadingTables, setLoadingTables] = useState(false);
-
   const [columns, setColumns] = useState<ColumnInfo[]>([]);
   const [rows, setRows] = useState<TableRowData[]>([]);
   const [totalRows, setTotalRows] = useState(0);
   const [loadingData, setLoadingData] = useState(false);
   const [tableError, setTableError] = useState<string | null>(null);
-  // Connection-level failures (database/table listing). Rendered as a banner so
-  // a failed connection can never look like an empty database.
   const [connectionError, setConnectionError] = useState<string | null>(null);
-
-  // Pagination & Filtering
   const [page, setPage] = useState(0);
   const [pageSize] = useState(50);
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortOrder, setSortOrder] = useState<"ASC" | "DESC">("ASC");
   const [searchQuery, setSearchQuery] = useState("");
   const [filters, setFilters] = useState<ColumnFilter[]>([]);
-
-  // Real-time Database Ping Latency
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
-
-  // Request sequence ref to prevent table data race condition
   const fetchSeqRef = React.useRef(0);
+  const unlockedIdsRef = React.useRef<Set<string>>(new Set());
+  const reconnectingRef = React.useRef(false);
+  const reconnectExhaustedRef = React.useRef<Set<string>>(new Set());
+  const bootstrappedRef = React.useRef(false);
 
   // Auto-detect OS Theme on mount
   useEffect(() => {
@@ -228,6 +223,15 @@ export default function Home() {
         if (activeProfile.id.startsWith(SESSION_ID_PREFIX)) {
           await apiClient.unregisterSessionProfile(activeProfile.id);
         }
+        if (activeProfile.savePassword === false) {
+          try {
+            await apiClient.clearRuntimePassword(activeProfile.id);
+          } catch (err) {
+            console.warn("Could not clear the remembered password", err);
+          }
+          unlockedIdsRef.current.delete(activeProfile.id);
+        }
+        reconnectExhaustedRef.current.delete(activeProfile.id);
       } else {
         await apiClient.disconnectDatabase();
       }
@@ -249,7 +253,6 @@ export default function Home() {
     fetchProfiles();
   }, [fetchProfiles]);
 
-  // Loads the database list for a profile and returns it. Throws on failure so
   // callers can report it instead of showing an empty list.
   const loadDatabasesFor = useCallback(async (profile: ConnectionProfile) => {
     const dbList = (await apiClient.getDatabases(profile.id)) as string[];
@@ -261,6 +264,39 @@ export default function Home() {
     setConnectionError(null);
     return dbList;
   }, []);
+
+  const reconnectTo = useCallback(
+    async (profile: ConnectionProfile) => {
+      if (reconnectingRef.current || reconnectExhaustedRef.current.has(profile.id)) return;
+      reconnectingRef.current = true;
+      try {
+        for (let attempt = 0; attempt < RECONNECT_DELAYS_MS.length; attempt++) {
+          setConnectionError(
+            `Connection to ${profile.name} dropped - reconnecting (${attempt + 1}/${RECONNECT_DELAYS_MS.length})...`
+          );
+          try {
+            await apiClient.disconnectDatabase(profile.id);
+          } catch {
+            // The pool may already be gone; rebuilding is what matters.
+          }
+          try {
+            fetchSeqRef.current += 1;
+            await loadDatabasesFor(profile);
+            return;
+          } catch {
+            await new Promise((resolve) => setTimeout(resolve, RECONNECT_DELAYS_MS[attempt]));
+          }
+        }
+        reconnectExhaustedRef.current.add(profile.id);
+        setConnectionError(
+          `Could not reconnect to ${profile.name}. Open the connection dialog and connect again.`
+        );
+      } finally {
+        reconnectingRef.current = false;
+      }
+    },
+    [loadDatabasesFor]
+  );
 
   const fetchDatabases = useCallback(async () => {
     if (!activeProfile) return;
@@ -380,7 +416,9 @@ export default function Home() {
     }
   }, [activeDatabase, activeTable, page, sortColumn, sortOrder, searchQuery, filters, fetchTableData]);
 
-  // Real-time Database Ping Heartbeat (measures actual round-trip latency)
+  // Real-time Database Ping Heartbeat (measures actual round-trip latency).
+  // It doubles as the keep-alive: the ping itself keeps the pool warm, and a
+  // failed ping is what triggers a reconnect for keep-alive profiles.
   useEffect(() => {
     if (!activeProfile) {
       setLatencyMs(null);
@@ -391,9 +429,15 @@ export default function Home() {
     const pingServer = async () => {
       try {
         const ms = await apiClient.pingDatabase(activeProfile.id, activeDatabase || undefined);
-        if (isMounted) setLatencyMs(ms);
+        if (!isMounted) return;
+        setLatencyMs(ms);
+        reconnectExhaustedRef.current.delete(activeProfile.id);
       } catch {
-        if (isMounted) setLatencyMs(null);
+        if (!isMounted) return;
+        setLatencyMs(null);
+        if (activeProfile.keepAlive) {
+          void reconnectTo(activeProfile);
+        }
       }
     };
 
@@ -403,7 +447,7 @@ export default function Home() {
       isMounted = false;
       clearInterval(interval);
     };
-  }, [activeProfile?.id, activeDatabase]);
+  }, [activeProfile, activeDatabase, reconnectTo]);
 
   const handleSaveProfile = async (profileData: Partial<ConnectionProfile>) => {
     const previous = activeProfile;
@@ -413,6 +457,10 @@ export default function Home() {
     } catch (err: any) {
       const msg = typeof err === "string" ? err : err?.message || String(err);
       throw new Error(msg || "Save profile failed");
+    }
+
+    if (profileData.savePassword === false && profileData.password) {
+      unlockedIdsRef.current.add(saved.id);
     }
 
     await fetchProfiles();
@@ -506,9 +554,49 @@ export default function Home() {
       return { success: false, error: text };
     }
 
+    if (!target.id.startsWith(SESSION_ID_PREFIX)) {
+      try {
+        localStorage.setItem(LAST_PROFILE_KEY, target.id);
+      } catch {
+        // Storage unavailable; auto-connect simply will not happen next launch.
+      }
+    }
+    reconnectExhaustedRef.current.delete(target.id);
+
     setIsConnModalOpen(false);
     return { success: true };
   };
+
+  const handleUnlockProfile = async (id: string, password: string) => {
+    await apiClient.setRuntimePassword(id, password);
+    unlockedIdsRef.current.add(id);
+    setAutoUnlockProfileId((current) => (current === id ? null : current));
+  };
+
+  const hasRuntimePassword = useCallback((id: string) => unlockedIdsRef.current.has(id), []);
+
+  useEffect(() => {
+    if (bootstrappedRef.current || profiles.length === 0) return;
+    bootstrappedRef.current = true;
+
+    let lastId: string | null = null;
+    try {
+      lastId = localStorage.getItem(LAST_PROFILE_KEY);
+    } catch {
+      return;
+    }
+    const target = lastId ? profiles.find((p) => p.id === lastId) : undefined;
+    if (!target || !target.keepAlive) return;
+
+    if (target.savePassword === false && target.type !== "sqlite") {
+      setAutoUnlockProfileId(target.id);
+      return;
+    }
+
+    setBootstrapping(target.name);
+    handleSwitchProfile(target).finally(() => setBootstrapping(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profiles]);
 
   const handleDeleteProfile = async (id: string) => {
     await apiClient.deleteProfile(id);
@@ -1054,9 +1142,18 @@ export default function Home() {
 
         <ConnectionModal
           isOpen={isConnModalOpen}
-          onClose={() => setIsConnModalOpen(false)}
+          // With nothing connected the app has nothing to show, so the dialog
+          // stays put until there is a live connection.
+          dismissible={!!activeProfile}
+          onClose={() => {
+            if (activeProfile) setIsConnModalOpen(false);
+          }}
           profiles={profiles}
           activeProfile={activeProfile}
+          bootstrappingName={bootstrapping}
+          autoUnlockProfileId={autoUnlockProfileId}
+          hasRuntimePassword={hasRuntimePassword}
+          onUnlockProfile={handleUnlockProfile}
           onSaveProfile={handleSaveProfile}
           onSaveAllProfiles={handleSaveAllProfiles}
           onDeleteProfile={handleDeleteProfile}
