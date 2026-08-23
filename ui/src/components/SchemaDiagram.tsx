@@ -19,7 +19,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import {
   GitFork, Network, Table2, Key, ArrowRight, Search, RefreshCw,
-  Database, Globe, LayoutGrid, Maximize2, Sparkles, X
+  Database, Globe, LayoutGrid, Maximize2, Sparkles, X, Eye, Layers, Filter
 } from "lucide-react";
 import { ConnectionProfile } from "../types";
 import { apiClient } from "../utils/apiClient";
@@ -50,14 +50,40 @@ interface Relation {
   toColumn: string;
 }
 
-// Custom React Flow Table Node Component
-const TableNode: React.FC<NodeProps> = ({ data, selected }) => {
-  const table = data.table as TableData;
-  const relations = (data.relations as Relation[]) || [];
-  const searchQuery = ((data.searchQuery as string) || "").toLowerCase();
+type ViewMode = "all" | "compact" | "keys_only";
+
+interface TableNodeData {
+  table: TableData;
+  fkMap: Record<string, Relation>;
+  searchQuery: string;
+  highlighted: boolean;
+  viewMode: ViewMode;
+  [key: string]: unknown;
+}
+
+// Memoized Custom React Flow Table Node Component for maximum 60fps performance
+const TableNodeComponent: React.FC<NodeProps<Node<TableNodeData>>> = ({ data, selected }) => {
+  const table = data.table;
+  const fkMap = data.fkMap || {};
+  const searchQuery = (data.searchQuery || "").toLowerCase();
   const highlighted = Boolean(data.highlighted);
+  const viewMode: ViewMode = data.viewMode || "all";
+  const [expanded, setExpanded] = useState(false);
 
   const isTableMatch = searchQuery && table.name.toLowerCase().includes(searchQuery);
+
+  const displayedColumns = useMemo(() => {
+    const cols = table.columns || [];
+    if (viewMode === "keys_only") {
+      return cols.filter((c) => c.primaryKey || Boolean(fkMap[c.name]));
+    }
+    if (viewMode === "compact" && !expanded && cols.length > 6) {
+      return cols.slice(0, 6);
+    }
+    return cols;
+  }, [table.columns, viewMode, expanded, fkMap]);
+
+  const hiddenCount = (table.columns?.length || 0) - displayedColumns.length;
 
   return (
     <div className={`react-flow-table-card ${selected ? "is-selected" : ""} ${highlighted ? "is-highlighted" : ""} ${isTableMatch ? "is-match" : ""}`}>
@@ -76,12 +102,9 @@ const TableNode: React.FC<NodeProps> = ({ data, selected }) => {
       </div>
 
       <div className="card-body">
-        {table.columns && table.columns.length > 0 ? (
-          table.columns.map((c) => {
-            const fkRelation = relations.find(
-              (r) => r.fromTable === table.name && r.fromColumn === c.name
-            );
-
+        {displayedColumns.length > 0 ? (
+          displayedColumns.map((c) => {
+            const fkRelation = fkMap[c.name];
             const isGeom = isGeometryColumn(c.type, c.name);
             const isColMatch = searchQuery && c.name.toLowerCase().includes(searchQuery);
 
@@ -113,120 +136,41 @@ const TableNode: React.FC<NodeProps> = ({ data, selected }) => {
             );
           })
         ) : (
-          <div className="no-cols">No columns found</div>
+          <div className="no-cols font-mono">
+            {viewMode === "keys_only" ? "No PK / FK columns" : "No columns found"}
+          </div>
+        )}
+
+        {viewMode === "compact" && hiddenCount > 0 && (
+          <button
+            type="button"
+            className="expand-cols-btn font-mono"
+            onClick={(e) => {
+              e.stopPropagation();
+              setExpanded(true);
+            }}
+          >
+            +{hiddenCount} more columns
+          </button>
+        )}
+        {viewMode === "compact" && expanded && (table.columns?.length || 0) > 6 && (
+          <button
+            type="button"
+            className="expand-cols-btn font-mono"
+            onClick={(e) => {
+              e.stopPropagation();
+              setExpanded(false);
+            }}
+          >
+            Collapse columns
+          </button>
         )}
       </div>
-
-      <style jsx>{`
-        .react-flow-table-card {
-          width: 270px;
-          background: var(--bg-card);
-          border: 1px solid var(--border-light);
-          border-radius: var(--radius-md);
-          box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
-          overflow: hidden;
-          transition: border-color 0.15s ease, box-shadow 0.15s ease;
-        }
-        .react-flow-table-card.is-selected,
-        .react-flow-table-card.is-highlighted {
-          border-color: var(--accent-blue);
-          box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5), 0 8px 24px rgba(0, 0, 0, 0.35);
-        }
-        .react-flow-table-card.is-match {
-          border-color: #f59e0b;
-          box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.45);
-        }
-
-        .card-header {
-          padding: 8px 10px;
-          background: var(--bg-tertiary);
-          border-bottom: 1px solid var(--border-light);
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 6px;
-        }
-        .card-title-group {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          overflow: hidden;
-        }
-        .card-tbl-icon { color: var(--accent-blue); flex-shrink: 0; }
-        .card-tbl-name {
-          font-size: 12px;
-          font-weight: 700;
-          color: var(--text-main);
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-        .card-col-count {
-          font-size: 9.5px;
-          background: rgba(255, 255, 255, 0.08);
-          padding: 1px 5px;
-          border-radius: 3px;
-          color: var(--text-muted);
-          flex-shrink: 0;
-        }
-
-        .card-body {
-          padding: 6px;
-          display: flex;
-          flex-direction: column;
-          gap: 2px;
-          max-height: 280px;
-          overflow-y: auto;
-        }
-
-        .col-row {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 3px 6px;
-          border-radius: 3px;
-          font-size: 10px;
-          transition: background 0.1s ease;
-        }
-        .col-row:hover {
-          background: var(--bg-hover);
-        }
-        .col-match {
-          background: rgba(245, 158, 11, 0.15) !important;
-        }
-        .col-name-group {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          overflow: hidden;
-        }
-        .bullet-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--text-muted); flex-shrink: 0; }
-        .pk-icon { color: #f59e0b; flex-shrink: 0; }
-        .fk-icon { color: var(--accent-blue); flex-shrink: 0; }
-        .pk-row .col-name { font-weight: 700; color: #f59e0b; }
-        .fk-row .col-name { font-weight: 600; color: var(--accent-blue); }
-        .col-name {
-          color: var(--text-main);
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-        .col-type {
-          color: var(--text-muted);
-          font-size: 9px;
-          flex-shrink: 0;
-          margin-left: 6px;
-        }
-        .no-cols {
-          padding: 8px;
-          text-align: center;
-          font-size: 10px;
-          color: var(--text-muted);
-        }
-      `}</style>
     </div>
   );
 };
+
+const TableNode = React.memo(TableNodeComponent);
 
 const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
   activeProfile,
@@ -239,61 +183,68 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedRelationIdx, setSelectedRelationIdx] = useState<number | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>("compact");
+  const [filterConnectedOnly, setFilterConnectedOnly] = useState(false);
 
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node<TableNodeData>>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const { fitView } = useReactFlow();
 
   const nodeTypes = useMemo(() => ({ tableNode: TableNode }), []);
 
-  // Compute Layout: Organizes nodes intelligently into columns based on topology
-  const arrangeLayout = useCallback((tablesList: TableData[], relationsList: Relation[]) => {
-    const tableNames = tablesList.map((t) => t.name);
-    // Calculate in-degree / out-degree for topological column placement
-    const inDegree: Record<string, number> = {};
-    const outDegree: Record<string, number> = {};
-    tableNames.forEach((name) => {
-      inDegree[name] = 0;
-      outDegree[name] = 0;
+  // Compute Layout: Organizes nodes into a clean grid based on topology
+  const arrangeLayout = useCallback((tablesList: TableData[], relationsList: Relation[], currentMode: ViewMode) => {
+    // Precalculate FK map per table
+    const tableFkMaps: Record<string, Record<string, Relation>> = {};
+    tablesList.forEach((t) => {
+      tableFkMaps[t.name] = {};
+    });
+    relationsList.forEach((r) => {
+      if (tableFkMaps[r.fromTable]) {
+        tableFkMaps[r.fromTable][r.fromColumn] = r;
+      }
     });
 
-    relationsList.forEach((rel) => {
-      if (inDegree[rel.toTable] !== undefined) inDegree[rel.toTable]++;
-      if (outDegree[rel.fromTable] !== undefined) outDegree[rel.fromTable]++;
-    });
+    const colsInGrid = Math.max(3, Math.min(6, Math.ceil(Math.sqrt(tablesList.length * 1.6))));
+    const cardWidth = 280;
+    const cardHeight = currentMode === "keys_only" ? 220 : currentMode === "compact" ? 280 : 340;
 
-    const colsInGrid = Math.max(3, Math.min(5, Math.ceil(Math.sqrt(tablesList.length * 1.5))));
-    const newNodes: Node[] = tablesList.map((t, idx) => {
+    const newNodes: Node<TableNodeData>[] = tablesList.map((t, idx) => {
       const col = idx % colsInGrid;
       const row = Math.floor(idx / colsInGrid);
       return {
         id: t.name,
         type: "tableNode",
-        position: { x: col * 330 + 40, y: row * 350 + 40 },
+        position: { x: col * (cardWidth + 60) + 40, y: row * (cardHeight + 60) + 40 },
         data: {
           table: t,
-          relations: relationsList,
+          fkMap: tableFkMaps[t.name] || {},
           searchQuery,
           highlighted: false,
+          viewMode: currentMode,
         },
       };
     });
 
     setNodes(newNodes);
 
+    const isLargeSchema = relationsList.length > 20;
+
     const newEdges: Edge[] = relationsList.map((rel, idx) => ({
       id: `e-${rel.fromTable}-${rel.toTable}-${idx}`,
       source: rel.fromTable,
       target: rel.toTable,
-      animated: true,
+      type: "smoothstep",
+      animated: !isLargeSchema || selectedRelationIdx === idx,
       style: {
         stroke: selectedRelationIdx === idx ? "#60a5fa" : "#3b82f6",
-        strokeWidth: selectedRelationIdx === idx ? 3.5 : 2,
+        strokeWidth: selectedRelationIdx === idx ? 3.5 : 1.8,
+        opacity: selectedRelationIdx === null || selectedRelationIdx === idx ? 0.9 : 0.25,
       },
       label: `${rel.fromColumn} → ${rel.toColumn}`,
       labelStyle: {
         fill: theme === "dark" ? "#cbd5e1" : "#334155",
-        fontSize: 10,
+        fontSize: 9.5,
         fontFamily: "monospace",
         fontWeight: 600,
       },
@@ -307,8 +258,8 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
 
     setEdges(newEdges);
     setTimeout(() => {
-      fitView({ padding: 0.15, duration: 400 });
-    }, 50);
+      fitView({ padding: 0.15, duration: 350 });
+    }, 60);
   }, [searchQuery, selectedRelationIdx, theme, setNodes, setEdges, fitView]);
 
   const fetchSchemaDiagram = useCallback(async () => {
@@ -325,10 +276,14 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
       const fetchedTables: TableData[] = data?.tables || [];
       const fetchedRelations: Relation[] = data?.relations || [];
 
+      // Auto-pick mode: if > 15 tables, default to compact mode to keep diagram smooth
+      const recommendedMode: ViewMode = fetchedTables.length > 15 ? "compact" : "all";
+      setViewMode(recommendedMode);
+
       setTables(fetchedTables);
       setRelations(fetchedRelations);
 
-      arrangeLayout(fetchedTables, fetchedRelations);
+      arrangeLayout(fetchedTables, fetchedRelations, recommendedMode);
     } catch (err: any) {
       console.error("Fetch ER Diagram schema error", err);
       setError(err?.message || String(err));
@@ -341,7 +296,7 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
     fetchSchemaDiagram();
   }, [fetchSchemaDiagram]);
 
-  // Update node data when search query changes
+  // Update node viewMode or search without full remount
   useEffect(() => {
     setNodes((nds) =>
       nds.map((node) => ({
@@ -349,10 +304,11 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
         data: {
           ...node.data,
           searchQuery,
+          viewMode,
         },
       }))
     );
-  }, [searchQuery, setNodes]);
+  }, [searchQuery, viewMode, setNodes]);
 
   // Handle clicking a relation chip in the summary bar
   const handleSelectRelation = (idx: number) => {
@@ -370,7 +326,8 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
       setEdges((eds) =>
         eds.map((e) => ({
           ...e,
-          style: { stroke: "#3b82f6", strokeWidth: 2 },
+          animated: relations.length <= 20,
+          style: { stroke: "#3b82f6", strokeWidth: 1.8, opacity: 0.9 },
         }))
       );
     } else {
@@ -387,25 +344,40 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
       setEdges((eds) =>
         eds.map((e, eIdx) => ({
           ...e,
+          animated: eIdx === idx,
           style: {
-            stroke: eIdx === idx ? "#60a5fa" : "rgba(100, 116, 139, 0.3)",
-            strokeWidth: eIdx === idx ? 3.5 : 1.5,
+            stroke: eIdx === idx ? "#60a5fa" : "rgba(100, 116, 139, 0.2)",
+            strokeWidth: eIdx === idx ? 3.5 : 1,
+            opacity: eIdx === idx ? 1 : 0.2,
           },
         }))
       );
     }
   };
 
+  const connectedTableNames = useMemo(() => {
+    const set = new Set<string>();
+    relations.forEach((r) => {
+      set.add(r.fromTable);
+      set.add(r.toTable);
+    });
+    return set;
+  }, [relations]);
+
   const filteredNodes = useMemo(() => {
-    if (!searchQuery.trim()) return nodes;
+    let result = nodes;
+    if (filterConnectedOnly) {
+      result = result.filter((n) => connectedTableNames.has(n.id));
+    }
+    if (!searchQuery.trim()) return result;
     const q = searchQuery.toLowerCase();
-    return nodes.filter((n) => {
+    return result.filter((n) => {
       const table = (n.data?.table as TableData) || { name: "", columns: [] };
       const tableMatch = table.name.toLowerCase().includes(q);
       const colMatch = table.columns?.some((c) => c.name.toLowerCase().includes(q));
       return tableMatch || colMatch;
     });
-  }, [nodes, searchQuery]);
+  }, [nodes, searchQuery, filterConnectedOnly, connectedTableNames]);
 
   if (!activeProfile || !activeDatabase) {
     return (
@@ -439,17 +411,61 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
           <h2 className="head-title">Database ER Diagram</h2>
           <span className="db-pill font-mono">{activeDatabase}</span>
           <span className="count-tag font-mono">
-            {tables.length} table{tables.length === 1 ? "" : "s"}, {relations.length} foreign key{relations.length === 1 ? "" : "s"}
+            {tables.length} table{tables.length === 1 ? "" : "s"}, {relations.length} FK{relations.length === 1 ? "" : "s"}
           </span>
         </div>
 
         <div className="bar-right">
+          {/* View mode toggle */}
+          <div className="view-mode-selector">
+            <button
+              type="button"
+              className={`mode-btn ${viewMode === "compact" ? "active" : ""}`}
+              onClick={() => setViewMode("compact")}
+              title="Compact: Truncate long column lists (Recommended for 20+ tables)"
+            >
+              <Layers size={11} />
+              <span>Compact</span>
+            </button>
+            <button
+              type="button"
+              className={`mode-btn ${viewMode === "keys_only" ? "active" : ""}`}
+              onClick={() => setViewMode("keys_only")}
+              title="Keys Only: Show PK & FK columns only (High-performance for 50+ tables)"
+            >
+              <Key size={11} />
+              <span>Keys Only</span>
+            </button>
+            <button
+              type="button"
+              className={`mode-btn ${viewMode === "all" ? "active" : ""}`}
+              onClick={() => setViewMode("all")}
+              title="Full: Show all columns"
+            >
+              <Eye size={11} />
+              <span>All Columns</span>
+            </button>
+          </div>
+
+          {/* Connected only filter */}
+          {relations.length > 0 && (
+            <button
+              type="button"
+              className={`btn btn-secondary btn-sm ${filterConnectedOnly ? "active-filter" : ""}`}
+              onClick={() => setFilterConnectedOnly((prev) => !prev)}
+              title="Toggle to show only tables with foreign key relations"
+            >
+              <Filter size={11} />
+              <span>{filterConnectedOnly ? "Linked Only" : "All Tables"}</span>
+            </button>
+          )}
+
           <div className="search-wrap">
             <Search size={12} className="search-icon" />
             <input
               type="text"
-              className="input search-field"
-              placeholder="Search tables & columns..."
+              className="input search-field font-mono"
+              placeholder="Filter tables & columns..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
@@ -462,25 +478,25 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
 
           <button
             className="btn btn-secondary btn-sm"
-            onClick={() => arrangeLayout(tables, relations)}
+            onClick={() => arrangeLayout(tables, relations, viewMode)}
             title="Auto-organize table layout"
           >
             <LayoutGrid size={12} />
-            <span>Auto Layout</span>
+            <span>Layout</span>
           </button>
 
           <button
             className="btn btn-secondary btn-sm"
-            onClick={() => fitView({ padding: 0.15, duration: 400 })}
+            onClick={() => fitView({ padding: 0.15, duration: 350 })}
             title="Zoom to Fit Canvas"
           >
             <Maximize2 size={12} />
-            <span>Fit View</span>
+            <span>Fit</span>
           </button>
 
           <button className="btn btn-primary btn-sm" onClick={fetchSchemaDiagram} disabled={loading} title="Reload schema">
             <RefreshCw size={12} className={loading ? "spin" : ""} />
-            <span>{loading ? "Loading..." : "Refresh"}</span>
+            <span>{loading ? "..." : "Refresh"}</span>
           </button>
         </div>
       </div>
@@ -510,11 +526,11 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
                   onClick={() => handleSelectRelation(idx)}
                   title={`Click to highlight: ${rel.fromTable}.${rel.fromColumn} -> ${rel.toTable}.${rel.toColumn}`}
                 >
-                  <span className="rel-table">{rel.fromTable}</span>
-                  <span className="rel-col">({rel.fromColumn})</span>
+                  <span className="rel-table font-mono">{rel.fromTable}</span>
+                  <span className="rel-col font-mono">({rel.fromColumn})</span>
                   <ArrowRight size={10} className="rel-arrow" />
-                  <span className="rel-table">{rel.toTable}</span>
-                  <span className="rel-col">({rel.toColumn})</span>
+                  <span className="rel-table font-mono">{rel.toTable}</span>
+                  <span className="rel-col font-mono">({rel.toColumn})</span>
                 </button>
               );
             })}
@@ -538,12 +554,15 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
           </div>
         ) : (
           <ReactFlow
-            key={`${activeProfile.id}-${activeDatabase}-${tables.length}`}
+            key={`${activeProfile.id}-${activeDatabase}-${tables.length}-${viewMode}`}
             nodes={filteredNodes}
             edges={edges}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             nodeTypes={nodeTypes}
+            onlyRenderVisibleElements={true}
+            minZoom={0.05}
+            maxZoom={2}
             fitView
             colorMode={theme}
           >
@@ -609,9 +628,47 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
         .count-tag { font-size: 10px; color: var(--text-muted); }
 
         .bar-right { display: flex; align-items: center; gap: 8px; }
+
+        .view-mode-selector {
+          display: flex;
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-light);
+          border-radius: var(--radius-sm);
+          padding: 2px;
+          gap: 2px;
+        }
+        .mode-btn {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          padding: 3px 8px;
+          border: none;
+          background: transparent;
+          color: var(--text-muted);
+          font-size: 10.5px;
+          border-radius: 3px;
+          cursor: pointer;
+          transition: all 0.12s ease;
+        }
+        .mode-btn:hover {
+          color: var(--text-main);
+        }
+        .mode-btn.active {
+          background: var(--bg-card);
+          color: var(--accent-blue);
+          font-weight: 600;
+          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+        }
+
+        .active-filter {
+          background: rgba(59, 130, 246, 0.18) !important;
+          color: var(--accent-blue) !important;
+          border-color: var(--accent-blue) !important;
+        }
+
         .search-wrap { position: relative; display: flex; align-items: center; }
         .search-icon { position: absolute; left: 8px; color: var(--text-muted); }
-        .search-field { padding-left: 26px; padding-right: 22px; width: 190px; font-size: 11px; height: 28px; }
+        .search-field { padding-left: 26px; padding-right: 22px; width: 170px; font-size: 11px; height: 28px; }
         .search-clear-btn {
           position: absolute;
           right: 6px;
@@ -744,6 +801,128 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
           font-size: 12px;
           font-weight: 600;
           color: var(--text-sub);
+        }
+
+        :global(.react-flow-table-card) {
+          width: 270px;
+          background: var(--bg-card);
+          border: 1px solid var(--border-light);
+          border-radius: var(--radius-md);
+          box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+          overflow: hidden;
+          transition: border-color 0.15s ease, box-shadow 0.15s ease;
+        }
+        :global(.react-flow-table-card.is-selected),
+        :global(.react-flow-table-card.is-highlighted) {
+          border-color: var(--accent-blue);
+          box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5), 0 8px 24px rgba(0, 0, 0, 0.35);
+        }
+        :global(.react-flow-table-card.is-match) {
+          border-color: #f59e0b;
+          box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.45);
+        }
+
+        :global(.react-flow-table-card .card-header) {
+          padding: 8px 10px;
+          background: var(--bg-tertiary);
+          border-bottom: 1px solid var(--border-light);
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 6px;
+        }
+        :global(.react-flow-table-card .card-title-group) {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          overflow: hidden;
+        }
+        :global(.react-flow-table-card .card-tbl-icon) { color: var(--accent-blue); flex-shrink: 0; }
+        :global(.react-flow-table-card .card-tbl-name) {
+          font-size: 12px;
+          font-weight: 700;
+          color: var(--text-main);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        :global(.react-flow-table-card .card-col-count) {
+          font-size: 9.5px;
+          background: rgba(255, 255, 255, 0.08);
+          padding: 1px 5px;
+          border-radius: 3px;
+          color: var(--text-muted);
+          flex-shrink: 0;
+        }
+
+        :global(.react-flow-table-card .card-body) {
+          padding: 6px;
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+          max-height: 280px;
+          overflow-y: auto;
+        }
+
+        :global(.react-flow-table-card .col-row) {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 3px 6px;
+          border-radius: 3px;
+          font-size: 10px;
+          transition: background 0.1s ease;
+        }
+        :global(.react-flow-table-card .col-row:hover) {
+          background: var(--bg-hover);
+        }
+        :global(.react-flow-table-card .col-match) {
+          background: rgba(245, 158, 11, 0.15) !important;
+        }
+        :global(.react-flow-table-card .col-name-group) {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          overflow: hidden;
+        }
+        :global(.react-flow-table-card .bullet-dot) { width: 4px; height: 4px; border-radius: 50%; background: var(--text-muted); flex-shrink: 0; }
+        :global(.react-flow-table-card .pk-icon) { color: #f59e0b; flex-shrink: 0; }
+        :global(.react-flow-table-card .fk-icon) { color: var(--accent-blue); flex-shrink: 0; }
+        :global(.react-flow-table-card .pk-row .col-name) { font-weight: 700; color: #f59e0b; }
+        :global(.react-flow-table-card .fk-row .col-name) { font-weight: 600; color: var(--accent-blue); }
+        :global(.react-flow-table-card .col-name) {
+          color: var(--text-main);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        :global(.react-flow-table-card .col-type) {
+          color: var(--text-muted);
+          font-size: 9px;
+          flex-shrink: 0;
+          margin-left: 6px;
+        }
+        :global(.react-flow-table-card .no-cols) {
+          padding: 8px;
+          text-align: center;
+          font-size: 10px;
+          color: var(--text-muted);
+        }
+        :global(.react-flow-table-card .expand-cols-btn) {
+          margin-top: 4px;
+          background: var(--bg-tertiary);
+          border: 1px dashed var(--border-light);
+          color: var(--accent-blue);
+          font-size: 9.5px;
+          padding: 3px 6px;
+          border-radius: 3px;
+          cursor: pointer;
+          text-align: center;
+          width: 100%;
+          transition: background 0.12s ease;
+        }
+        :global(.react-flow-table-card .expand-cols-btn:hover) {
+          background: var(--bg-hover);
         }
       `}</style>
     </div>

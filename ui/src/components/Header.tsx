@@ -43,6 +43,7 @@ interface HeaderProps {
   onOpenAuditLogs?: () => void;
   onOpenImport?: () => void;
   onOpenCommandPalette?: () => void;
+  onOpenAbout?: () => void;
   onViewStructure?: (table: string) => void;
   onOpenInSql?: (sql: string) => void;
   onRefreshDatabases?: () => void;
@@ -68,6 +69,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAuditLogs,
   onOpenImport,
   onOpenCommandPalette,
+  onOpenAbout,
   onViewStructure,
   onOpenInSql,
   onRefreshDatabases,
@@ -140,8 +142,14 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="header-left">
         <div
           className="brand clickable"
-          onClick={() => onChangeView("explorer")}
-          title="dodb Database Manager - Click to go to Data Explorer"
+          onClick={() => {
+            if (onOpenAbout) {
+              onOpenAbout();
+            } else {
+              onChangeView("explorer");
+            }
+          }}
+          title="dodb Database Manager - Click to view About & Version"
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/icon.png" alt="dodb mascot" className="brand-mascot-img" />

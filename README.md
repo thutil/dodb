@@ -176,7 +176,7 @@ dodb/
 
 When opening downloaded `.dmg` or `.app` releases on macOS without Apple Developer ID notarization, Gatekeeper may display a security prompt:
 
-### วิธีแก้ไข / Quick Fix:
+### วิธีแก้ไข / Quick Fix
 
 **Method 1: Terminal (Recommended / แนะนำ)**  
 After copying `dodb.app` into `/Applications`, open **Terminal** and run:
@@ -207,7 +207,7 @@ Then launch **dodb** normally from Applications or Spotlight (`Cmd + Space`).
 
 ```bash
 # Clone the repository
-git clone https://github.com/bankjirapan/dodb.git
+git clone https://github.com/thutil/dodb.git
 cd dodb
 
 # Install dependencies

@@ -90,6 +90,29 @@ export default function Home() {
   const [importTarget, setImportTarget] = useState<{ table: string | null } | null>(null);
   const [importProgress, setImportProgress] = useState<ImportProgress>(importManager.getProgress());
   const [importToast, setImportToast] = useState<ImportReport | null>(null);
+  const [appToast, setAppToast] = useState<{
+    id: string;
+    type: "success" | "error" | "info";
+    title: string;
+    sub?: string;
+    duration?: number;
+  } | null>(null);
+
+  const showToast = useCallback((toast: {
+    type: "success" | "error" | "info";
+    title: string;
+    sub?: string;
+    duration?: number;
+  }) => {
+    const id = Math.random().toString(36).slice(2);
+    setAppToast({ ...toast, id });
+    const dur = toast.duration ?? 4000;
+    if (dur > 0) {
+      setTimeout(() => {
+        setAppToast((curr) => (curr?.id === id ? null : curr));
+      }, dur);
+    }
+  }, []);
   const [structureModalTable, setStructureModalTable] = useState<string | null>(null);
   const [isCreateTableOpen, setIsCreateTableOpen] = useState(false);
   const [editTableModalTable, setEditTableModalTable] = useState<string | null>(null);
@@ -815,6 +838,11 @@ export default function Home() {
     await fetchTables();
     setActiveTable(tableName);
     if (activeView !== "explorer") setActiveView("explorer");
+    showToast({
+      type: "success",
+      title: `Table "${tableName}" created`,
+      sub: "Table schema created and ready",
+    });
   };
 
   const handleTableSaved = async (oldName: string, newName: string) => {
@@ -823,6 +851,11 @@ export default function Home() {
       setActiveTable(newName);
     }
     fetchTableData();
+    showToast({
+      type: "success",
+      title: `Table "${newName}" saved`,
+      sub: oldName !== newName ? `Renamed from "${oldName}"` : "Structure updated successfully",
+    });
   };
 
   const handleImported = (report: ImportReport) => {
@@ -918,17 +951,42 @@ export default function Home() {
     const req = confirmDdlRequest;
     setConfirmDdlRequest(null);
     await fetchTables();
-    if (req && req.title.startsWith("Drop")) {
-      const droppedCurrent =
-        (req.typeToConfirm && req.typeToConfirm === activeTable) ||
-        (activeTable && req.statements.some((s) => s.includes(quoteTableIdent(activeTable, activeProfile?.type === "mariadb" ? "mariadb" : activeProfile?.type === "sqlite" ? "sqlite" : "postgres"))));
-      if (droppedCurrent) {
-        setActiveTable(null);
-        setRows([]);
-        setColumns([]);
-        setTotalRows(0);
+    if (req) {
+      if (req.title.startsWith("Drop")) {
+        const droppedCurrent =
+          (req.typeToConfirm && req.typeToConfirm === activeTable) ||
+          (activeTable && req.statements.some((s) => s.includes(quoteTableIdent(activeTable, activeProfile?.type === "mariadb" ? "mariadb" : activeProfile?.type === "sqlite" ? "sqlite" : "postgres"))));
+        if (droppedCurrent) {
+          setActiveTable(null);
+          setRows([]);
+          setColumns([]);
+          setTotalRows(0);
+        } else {
+          fetchTableData();
+        }
+        showToast({
+          type: "success",
+          title: req.typeToConfirm && req.typeToConfirm !== "DROP"
+            ? `Table "${req.typeToConfirm}" dropped successfully`
+            : `${req.title} completed`,
+          sub: `${req.statements.length} DDL statement(s) executed`,
+        });
+      } else if (req.title.startsWith("Truncate")) {
+        fetchTableData();
+        showToast({
+          type: "success",
+          title: req.typeToConfirm && req.typeToConfirm !== "TRUNCATE"
+            ? `Table "${req.typeToConfirm}" truncated successfully`
+            : `${req.title} completed`,
+          sub: "All rows deleted successfully",
+        });
       } else {
         fetchTableData();
+        showToast({
+          type: "success",
+          title: `${req.title} completed`,
+          sub: `${req.statements.length} statement(s) executed`,
+        });
       }
     } else {
       fetchTableData();
@@ -1308,6 +1366,32 @@ export default function Home() {
                 </button>
               )}
               <button className="toast-dismiss-btn" onClick={() => setImportToast(null)} title="Dismiss">
+                <X size={12} />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Global Action Toast Notification (Drop, Create, Alter, etc.) */}
+        {appToast && (
+          <div className={`global-dump-toast ${appToast.type === "error" ? "failure" : "success"}`}>
+            <div className="toast-left">
+              {appToast.type === "error" ? (
+                <XCircle size={16} className="toast-icon failure" />
+              ) : (
+                <CheckCircle2 size={16} className="toast-icon success" />
+              )}
+              <div className="toast-body">
+                <span className="toast-title">{appToast.title}</span>
+                {appToast.sub && <span className="toast-sub font-mono">{appToast.sub}</span>}
+              </div>
+            </div>
+            <div className="toast-actions">
+              <button
+                className="toast-dismiss-btn"
+                onClick={() => setAppToast(null)}
+                title="Dismiss"
+              >
                 <X size={12} />
               </button>
             </div>

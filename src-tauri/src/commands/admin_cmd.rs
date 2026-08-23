@@ -49,9 +49,18 @@ pub async fn admin_get_processes(id: String, database: String, state: State<'_, 
     let pool = get_pool(&state, profile, Some(&database)).await?;
     
     let query = match profile.r#type {
-        SupportedDB::Postgres => "SELECT pid::text AS pid, COALESCE(usename, '')::text AS user, COALESCE(datname, '')::text AS db, COALESCE(state, 'active')::text AS state, COALESCE(query, '<idle>')::text AS query, COALESCE(ROUND(EXTRACT(EPOCH FROM (now() - query_start)))::text, '0') AS time FROM pg_stat_activity WHERE pid <> pg_backend_pid() ORDER BY query_start DESC NULLS LAST LIMIT 100",
-        SupportedDB::Mariadb => "SELECT id::text AS pid, user, db, command AS state, COALESCE(info, '<idle>') AS query, time::text AS time FROM information_schema.processlist WHERE id <> CONNECTION_ID() ORDER BY time DESC LIMIT 100",
-        SupportedDB::Sqlite => return Ok(vec![]),
+        SupportedDB::Postgres => "SELECT pid::text AS pid, COALESCE(usename, '')::text AS user, COALESCE(datname, '')::text AS db, COALESCE(state, 'active')::text AS state, COALESCE(NULLIF(TRIM(query), ''), '<idle>')::text AS query, COALESCE(ROUND(EXTRACT(EPOCH FROM (clock_timestamp() - query_start)))::text, '0') AS time FROM pg_stat_activity ORDER BY query_start DESC NULLS LAST LIMIT 100",
+        SupportedDB::Mariadb => "SELECT CAST(id AS CHAR) AS pid, user, COALESCE(db, '') AS db, command AS state, COALESCE(info, '<idle>') AS query, CAST(COALESCE(time, 0) AS CHAR) AS time FROM information_schema.processlist ORDER BY time DESC LIMIT 100",
+        SupportedDB::Sqlite => return Ok(vec![
+            serde_json::json!({
+                "pid": "1",
+                "user": "local",
+                "db": database,
+                "state": "active",
+                "query": "<sqlite embedded engine>",
+                "time": "0"
+            })
+        ]),
     };
     
     let rows = execute_query(&pool, query)

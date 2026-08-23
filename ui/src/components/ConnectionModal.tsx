@@ -105,12 +105,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
   const [renamingGroup, setRenamingGroup] = useState<{ oldName: string; newName: string } | null>(null);
   const [deletingGroup, setDeletingGroup] = useState<string | null>(null);
   const [confirmDeleteProfile, setConfirmDeleteProfile] = useState<ConnectionProfile | null>(null);
-  // Set when Connect is pressed on a saved profile that has unsaved edits.
   const [pendingConnect, setPendingConnect] = useState<Partial<ConnectionProfile> | null>(null);
-  // Set when a profile that stores no password needs one before it can connect.
-  // The password is typed into the form's own Password field - which is flagged
-  // red while it is empty - so no second modal is needed. `mode` records which
-  // connect path to resume once the password is supplied.
   const [unlockRequest, setUnlockRequest] = useState<{
     profile: Partial<ConnectionProfile>;
     mode: "form" | "direct";
