@@ -620,7 +620,6 @@ export const Header: React.FC<HeaderProps> = ({
           height: 20px;
           border-radius: 5px;
           object-fit: cover;
-          box-shadow: 0 2px 5px rgba(0, 0, 0, 0.25);
           flex-shrink: 0;
         }
         .brand-title {

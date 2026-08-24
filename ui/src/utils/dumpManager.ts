@@ -60,7 +60,10 @@ class DumpManager {
   }
 
   public cancel() {
-    if (this.currentProgress.status === "running" || this.currentProgress.status === "paused") {
+    if (
+      this.currentProgress.status === "running" ||
+      this.currentProgress.status === "paused"
+    ) {
       this.isCancelled = true;
       this.currentProgress.status = "cancelled";
       this.notify();
@@ -99,7 +102,11 @@ class DumpManager {
   }
 
   private sendDesktopNotification(title: string, body: string) {
-    if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
+    if (
+      typeof window !== "undefined" &&
+      "Notification" in window &&
+      Notification.permission === "granted"
+    ) {
       try {
         new Notification(title, {
           body,
@@ -123,7 +130,10 @@ class DumpManager {
     this.isPaused = false;
 
     const startTime = Date.now();
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const timestamp = new Date()
+      .toISOString()
+      .replace(/[:.]/g, "-")
+      .slice(0, 19);
     const fileName = `${config.database}_dump_${timestamp}.${config.format}`;
 
     this.currentProgress = {
@@ -142,7 +152,9 @@ class DumpManager {
     // Timer to update elapsed seconds
     const timerInterval = setInterval(() => {
       if (this.currentProgress.status === "running") {
-        this.currentProgress.elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
+        this.currentProgress.elapsedSeconds = Math.floor(
+          (Date.now() - startTime) / 1000,
+        );
         this.notify();
       }
     }, 1000);
@@ -151,15 +163,21 @@ class DumpManager {
 
     try {
       if (config.format === "sql") {
-        chunks.push(`-- =========================================================\n`);
+        chunks.push(
+          `-- =========================================================\n`,
+        );
         chunks.push(`-- DODB Database Backup / Dump\n`);
         chunks.push(`-- Database: ${config.database}\n`);
         chunks.push(`-- Generated: ${new Date().toISOString()}\n`);
         chunks.push(`-- Total Tables: ${config.tables.length}\n`);
-        chunks.push(`-- =========================================================\n\n`);
+        chunks.push(
+          `-- =========================================================\n\n`,
+        );
         chunks.push(`SET FOREIGN_KEY_CHECKS = 0;\n\n`);
       } else {
-        chunks.push(`{\n  "database": "${config.database}",\n  "exportedAt": "${new Date().toISOString()}",\n  "tables": {\n`);
+        chunks.push(
+          `{\n  "database": "${config.database}",\n  "exportedAt": "${new Date().toISOString()}",\n  "tables": {\n`,
+        );
       }
 
       let totalRowsExported = 0;
@@ -176,13 +194,19 @@ class DumpManager {
         const table = config.tables[i];
         this.currentProgress.currentTable = table;
         this.currentProgress.currentTableIndex = i + 1;
-        this.currentProgress.percentage = Math.round(((i) / config.tables.length) * 100);
+        this.currentProgress.percentage = Math.round(
+          (i / config.tables.length) * 100,
+        );
         this.notify();
 
         // 1. Fetch table columns
         let cols: ColumnInfo[] = [];
         try {
-          const colData: any = await apiClient.getColumns(config.profileId, config.database, table);
+          const colData: any = await apiClient.getColumns(
+            config.profileId,
+            config.database,
+            table,
+          );
           cols = Array.isArray(colData) ? colData : [];
         } catch {
           cols = [];
@@ -190,9 +214,13 @@ class DumpManager {
 
         // 2. Output Schema / DDL if mode is full or schema_only
         if (config.format === "sql") {
-          chunks.push(`-- ---------------------------------------------------------\n`);
+          chunks.push(
+            `-- ---------------------------------------------------------\n`,
+          );
           chunks.push(`-- Table structure for: ${table}\n`);
-          chunks.push(`-- ---------------------------------------------------------\n`);
+          chunks.push(
+            `-- ---------------------------------------------------------\n`,
+          );
 
           if (config.mode !== "data_only" && cols.length > 0) {
             chunks.push(`DROP TABLE IF EXISTS "${table}";\n`);
@@ -232,7 +260,7 @@ class DumpManager {
               config.database,
               table,
               config.batchSize,
-              offset
+              offset,
             );
 
             const rows: Record<string, any>[] = res?.rows || [];
@@ -248,20 +276,33 @@ class DumpManager {
 
             if (config.format === "sql") {
               // Generate SQL INSERT statements
-              const colNames = cols.length > 0 ? cols.map((c) => `"${c.name}"`).join(", ") : Object.keys(rows[0]).map((k) => `"${k}"`).join(", ");
+              const colNames =
+                cols.length > 0
+                  ? cols.map((c) => `"${c.name}"`).join(", ")
+                  : Object.keys(rows[0])
+                      .map((k) => `"${k}"`)
+                      .join(", ");
               const valueLines: string[] = [];
 
               for (const row of rows) {
-                const values = (cols.length > 0 ? cols.map((c) => row[c.name]) : Object.values(row)).map((val) => {
+                const values = (
+                  cols.length > 0
+                    ? cols.map((c) => row[c.name])
+                    : Object.values(row)
+                ).map((val) => {
                   if (val === null || val === undefined) return "NULL";
-                  if (typeof val === "number" || typeof val === "boolean") return String(val);
-                  if (typeof val === "object") return `'${JSON.stringify(val).replace(/'/g, "''")}'`;
+                  if (typeof val === "number" || typeof val === "boolean")
+                    return String(val);
+                  if (typeof val === "object")
+                    return `'${JSON.stringify(val).replace(/'/g, "''")}'`;
                   return `'${String(val).replace(/'/g, "''")}'`;
                 });
                 valueLines.push(`  (${values.join(", ")})`);
               }
 
-              chunks.push(`INSERT INTO "${table}" (${colNames}) VALUES\n${valueLines.join(",\n")};\n`);
+              chunks.push(
+                `INSERT INTO "${table}" (${colNames}) VALUES\n${valueLines.join(",\n")};\n`,
+              );
             } else {
               // Format as JSON stream
               const jsonLines = rows.map((r) => `      ${JSON.stringify(r)}`);
@@ -296,7 +337,9 @@ class DumpManager {
 
       if (config.format === "sql") {
         chunks.push(`SET FOREIGN_KEY_CHECKS = 1;\n`);
-        chunks.push(`-- Dump complete: ${totalRowsExported} rows exported across ${config.tables.length} tables.\n`);
+        chunks.push(
+          `-- Dump complete: ${totalRowsExported} rows exported across ${config.tables.length} tables.\n`,
+        );
       } else {
         chunks.push(`  }\n}\n`);
       }
@@ -304,7 +347,8 @@ class DumpManager {
       clearInterval(timerInterval);
 
       // Create downloadable blob
-      const mimeType = config.format === "sql" ? "application/sql" : "application/json";
+      const mimeType =
+        config.format === "sql" ? "application/sql" : "application/json";
       const blob = new Blob(chunks, { type: mimeType });
       const downloadUrl = URL.createObjectURL(blob);
 
@@ -321,8 +365,8 @@ class DumpManager {
 
       // Trigger Completion Notification
       this.sendDesktopNotification(
-        "🎉 Database Dump Complete!",
-        `${fileName} (${(blob.size / (1024 * 1024)).toFixed(2)} MB, ${totalRowsExported.toLocaleString()} rows)`
+        "Database Dump Complete",
+        `${fileName} (${(blob.size / (1024 * 1024)).toFixed(2)} MB, ${totalRowsExported.toLocaleString()} rows)`,
       );
     } catch (err: any) {
       clearInterval(timerInterval);
@@ -337,7 +381,8 @@ class DumpManager {
   }
 
   public downloadCurrentBlob() {
-    if (!this.currentProgress.downloadUrl || !this.currentProgress.fileName) return;
+    if (!this.currentProgress.downloadUrl || !this.currentProgress.fileName)
+      return;
     const a = document.createElement("a");
     a.href = this.currentProgress.downloadUrl;
     a.download = this.currentProgress.fileName;

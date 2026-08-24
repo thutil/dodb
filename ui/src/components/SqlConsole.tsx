@@ -849,7 +849,7 @@ const extractTableFromSql = (querySql: string): string | null => {
 
     editor.addAction({
       id: "run-all-queries",
-      label: "⚡ Run All Queries (รันคำสั่งทั้งหมด)",
+      label: "Run All Queries (รันคำสั่งทั้งหมด)",
       keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Enter],
       contextMenuGroupId: "navigation",
       contextMenuOrder: 2,

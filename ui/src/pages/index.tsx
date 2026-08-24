@@ -1546,7 +1546,7 @@ export default function Home() {
             <div className="toast-left">
               <CheckCircle2 size={16} className="toast-icon success" />
               <div className="toast-body">
-                <span className="toast-title">Database Export Complete!</span>
+                <span className="toast-title">Database Export Complete</span>
                 <span className="toast-sub font-mono">
                   {dumpProgress.fileName} ({((dumpProgress.fileSizeBytes || 0) / (1024 * 1024)).toFixed(2)} MB, {dumpProgress.rowsExported.toLocaleString()} rows)
                 </span>

@@ -67,7 +67,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   onRefreshDatabases,
 }) => {
   const [subTab, setSubTab] = useState<"databases" | "users" | "processes" | "dump">("databases");
-  
+
   // Database creation state
   const [newDbName, setNewDbName] = useState("");
   const [dbLoading, setDbLoading] = useState(false);
@@ -793,10 +793,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                               {processesLoading
                                 ? "Loading active processes..."
                                 : processSearchTerm
-                                ? `No processes match "${processSearchTerm}"`
-                                : activeProfile.type === "sqlite"
-                                ? "SQLite is an embedded database (single local process)"
-                                : "No active query processes running"}
+                                  ? `No processes match "${processSearchTerm}"`
+                                  : activeProfile.type === "sqlite"
+                                    ? "SQLite is an embedded database (single local process)"
+                                    : "No active query processes running"}
                             </td>
                           </tr>
                         );
@@ -879,7 +879,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       className={`dump-pill ${dumpMode === "full" ? "active" : ""}`}
                       onClick={() => setDumpMode("full")}
                     >
-                      <Sparkles size={12} />
+                      <Layers size={12} />
                       <span>Full Backup (Schema + Data)</span>
                     </button>
                     <button
@@ -1022,14 +1022,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         {dumpProgress.status === "running"
                           ? "Exporting in Background..."
                           : dumpProgress.status === "paused"
-                          ? "Paused"
-                          : dumpProgress.status === "completed"
-                          ? "Completed 🎉"
-                          : dumpProgress.status === "error"
-                          ? "Error"
-                          : dumpProgress.status === "cancelled"
-                          ? "Cancelled"
-                          : "Ready to Dump"}
+                            ? "Paused"
+                            : dumpProgress.status === "completed"
+                              ? "Completed"
+                              : dumpProgress.status === "error"
+                                ? "Error"
+                                : dumpProgress.status === "cancelled"
+                                  ? "Cancelled"
+                                  : "Ready to Dump"}
                       </span>
                     </div>
                     {dumpProgress.status === "running" && (
