@@ -360,6 +360,20 @@ fn is_boolean_column<C: Column>(column: &C) -> bool {
     column.type_info().name().eq_ignore_ascii_case("BOOLEAN")
 }
 
+fn unique_col_name(map: &serde_json::Map<String, serde_json::Value>, raw_name: &str) -> String {
+    if !map.contains_key(raw_name) {
+        return raw_name.to_string();
+    }
+    let mut suffix = 1;
+    loop {
+        let candidate = format!("{}_{}", raw_name, suffix);
+        if !map.contains_key(&candidate) {
+            return candidate;
+        }
+        suffix += 1;
+    }
+}
+
 pub async fn execute_query(pool: &DbPool, query: &str) -> Result<Vec<serde_json::Value>, String> {
     match pool {
         DbPool::Postgres(p) => {
@@ -368,71 +382,72 @@ pub async fn execute_query(pool: &DbPool, query: &str) -> Result<Vec<serde_json:
             for row in rows {
                 let mut map = serde_json::Map::new();
                 for (i, column) in row.columns().iter().enumerate() {
+                    let col_name = unique_col_name(&map, column.name());
                     if let Ok(raw) = row.try_get_raw(i) {
                         if raw.is_null() {
-                            map.insert(column.name().to_string(), serde_json::Value::Null);
+                            map.insert(col_name, serde_json::Value::Null);
                             continue;
                         }
                     }
 
                     if let Ok(v) = row.try_get::<String, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::String(v));
+                        map.insert(col_name, serde_json::Value::String(v));
                     } else if let Ok(v) = row.try_get::<bool, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::Bool(v));
+                        map.insert(col_name, serde_json::Value::Bool(v));
                     } else if let Ok(v) = row.try_get::<i64, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
+                        map.insert(col_name, serde_json::Value::Number(v.into()));
                     } else if let Ok(v) = row.try_get::<i32, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
+                        map.insert(col_name, serde_json::Value::Number(v.into()));
                     } else if let Ok(v) = row.try_get::<i16, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
+                        map.insert(col_name, serde_json::Value::Number(v.into()));
                     } else if let Ok(v) = row.try_get::<i8, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
+                        map.insert(col_name, serde_json::Value::Number(v.into()));
                     } else if let Ok(v) = row.try_get::<f64, _>(i) {
                         if let Some(num) = serde_json::Number::from_f64(v) {
-                            map.insert(column.name().to_string(), serde_json::Value::Number(num));
+                            map.insert(col_name, serde_json::Value::Number(num));
                         } else {
-                            map.insert(column.name().to_string(), serde_json::Value::Null);
+                            map.insert(col_name, serde_json::Value::Null);
                         }
                     } else if let Ok(v) = row.try_get::<f32, _>(i) {
                         if let Some(num) = serde_json::Number::from_f64(v as f64) {
-                            map.insert(column.name().to_string(), serde_json::Value::Number(num));
+                            map.insert(col_name, serde_json::Value::Number(num));
                         } else {
-                            map.insert(column.name().to_string(), serde_json::Value::Null);
+                            map.insert(col_name, serde_json::Value::Null);
                         }
                     } else if let Ok(v) = row.try_get::<rust_decimal::Decimal, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::String(v.to_string()));
+                        map.insert(col_name, serde_json::Value::String(v.to_string()));
                     } else if let Ok(v) = row.try_get::<bigdecimal::BigDecimal, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::String(v.to_string()));
+                        map.insert(col_name, serde_json::Value::String(v.to_string()));
                     } else if let Ok(v) = row.try_get::<chrono::DateTime<chrono::Utc>, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::String(v.to_rfc3339()));
+                        map.insert(col_name, serde_json::Value::String(v.to_rfc3339()));
                     } else if let Ok(v) = row.try_get::<chrono::DateTime<chrono::FixedOffset>, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::String(v.to_rfc3339()));
+                        map.insert(col_name, serde_json::Value::String(v.to_rfc3339()));
                     } else if let Ok(v) = row.try_get::<chrono::NaiveDateTime, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::String(v.to_string()));
+                        map.insert(col_name, serde_json::Value::String(v.to_string()));
                     } else if let Ok(v) = row.try_get::<chrono::NaiveDate, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::String(v.to_string()));
+                        map.insert(col_name, serde_json::Value::String(v.to_string()));
                     } else if let Ok(v) = row.try_get::<chrono::NaiveTime, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::String(v.to_string()));
+                        map.insert(col_name, serde_json::Value::String(v.to_string()));
                     } else if let Ok(v) = row.try_get::<uuid::Uuid, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::String(v.to_string()));
+                        map.insert(col_name, serde_json::Value::String(v.to_string()));
                     } else if let Ok(v) = row.try_get::<serde_json::Value, _>(i) {
-                        map.insert(column.name().to_string(), v);
+                        map.insert(col_name, v);
                     } else if let Ok(v) = row.try_get::<Vec<String>, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::json!(v));
+                        map.insert(col_name, serde_json::json!(v));
                     } else if let Ok(v) = row.try_get::<Vec<i64>, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::json!(v));
+                        map.insert(col_name, serde_json::json!(v));
                     } else if let Ok(v) = row.try_get::<Vec<i32>, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::json!(v));
+                        map.insert(col_name, serde_json::json!(v));
                     } else if let Ok(v) = row.try_get::<Vec<u8>, _>(i) {
                         let s = decode_bytes_or_hex(&v);
-                        map.insert(column.name().to_string(), serde_json::Value::String(s));
+                        map.insert(col_name, serde_json::Value::String(s));
                     } else if let Ok(v) = row.try_get_unchecked::<Vec<u8>, _>(i) {
                         let s = decode_bytes_or_hex(&v);
-                        map.insert(column.name().to_string(), serde_json::Value::String(s));
+                        map.insert(col_name, serde_json::Value::String(s));
                     } else if let Ok(v) = row.try_get_unchecked::<String, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::String(v));
+                        map.insert(col_name, serde_json::Value::String(v));
                     } else {
-                        map.insert(column.name().to_string(), serde_json::Value::Null);
+                        map.insert(col_name, serde_json::Value::Null);
                     }
                 }
                 result.push(serde_json::Value::Object(map));
@@ -445,9 +460,10 @@ pub async fn execute_query(pool: &DbPool, query: &str) -> Result<Vec<serde_json:
             for row in rows {
                 let mut map = serde_json::Map::new();
                 for (i, column) in row.columns().iter().enumerate() {
+                    let col_name = unique_col_name(&map, column.name());
                     if let Ok(raw) = row.try_get_raw(i) {
                         if raw.is_null() {
-                            map.insert(column.name().to_string(), serde_json::Value::Null);
+                            map.insert(col_name, serde_json::Value::Null);
                             continue;
                         }
                     }
@@ -457,67 +473,67 @@ pub async fn execute_query(pool: &DbPool, query: &str) -> Result<Vec<serde_json:
                     // falls through to the generic chain below.
                     if is_boolean_column(column) {
                         if let Ok(v) = row.try_get::<bool, _>(i) {
-                            map.insert(column.name().to_string(), serde_json::Value::Bool(v));
+                            map.insert(col_name, serde_json::Value::Bool(v));
                             continue;
                         }
                     }
 
                     if let Ok(v) = row.try_get::<String, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::String(v));
+                        map.insert(col_name, serde_json::Value::String(v));
                     } else if let Ok(v) = row.try_get::<i64, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
+                        map.insert(col_name, serde_json::Value::Number(v.into()));
                     } else if let Ok(v) = row.try_get::<u64, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
+                        map.insert(col_name, serde_json::Value::Number(v.into()));
                     } else if let Ok(v) = row.try_get::<i32, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
+                        map.insert(col_name, serde_json::Value::Number(v.into()));
                     } else if let Ok(v) = row.try_get::<u32, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
+                        map.insert(col_name, serde_json::Value::Number(v.into()));
                     } else if let Ok(v) = row.try_get::<i16, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
+                        map.insert(col_name, serde_json::Value::Number(v.into()));
                     } else if let Ok(v) = row.try_get::<u16, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
+                        map.insert(col_name, serde_json::Value::Number(v.into()));
                     } else if let Ok(v) = row.try_get::<i8, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
+                        map.insert(col_name, serde_json::Value::Number(v.into()));
                     } else if let Ok(v) = row.try_get::<u8, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
+                        map.insert(col_name, serde_json::Value::Number(v.into()));
                     } else if let Ok(v) = row.try_get::<f64, _>(i) {
                         if let Some(num) = serde_json::Number::from_f64(v) {
-                            map.insert(column.name().to_string(), serde_json::Value::Number(num));
+                            map.insert(col_name, serde_json::Value::Number(num));
                         } else {
-                            map.insert(column.name().to_string(), serde_json::Value::Null);
+                            map.insert(col_name, serde_json::Value::Null);
                         }
                     } else if let Ok(v) = row.try_get::<f32, _>(i) {
                         if let Some(num) = serde_json::Number::from_f64(v as f64) {
-                            map.insert(column.name().to_string(), serde_json::Value::Number(num));
+                            map.insert(col_name, serde_json::Value::Number(num));
                         } else {
-                            map.insert(column.name().to_string(), serde_json::Value::Null);
+                            map.insert(col_name, serde_json::Value::Null);
                         }
                     } else if let Ok(v) = row.try_get::<rust_decimal::Decimal, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::String(v.to_string()));
+                        map.insert(col_name, serde_json::Value::String(v.to_string()));
                     } else if let Ok(v) = row.try_get::<bigdecimal::BigDecimal, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::String(v.to_string()));
+                        map.insert(col_name, serde_json::Value::String(v.to_string()));
                     } else if let Ok(v) = row.try_get::<chrono::DateTime<chrono::Utc>, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::String(v.to_rfc3339()));
+                        map.insert(col_name, serde_json::Value::String(v.to_rfc3339()));
                     } else if let Ok(v) = row.try_get::<chrono::NaiveDateTime, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::String(v.to_string()));
+                        map.insert(col_name, serde_json::Value::String(v.to_string()));
                     } else if let Ok(v) = row.try_get::<chrono::NaiveDate, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::String(v.to_string()));
+                        map.insert(col_name, serde_json::Value::String(v.to_string()));
                     } else if let Ok(v) = row.try_get::<chrono::NaiveTime, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::String(v.to_string()));
+                        map.insert(col_name, serde_json::Value::String(v.to_string()));
                     } else if let Ok(v) = row.try_get::<serde_json::Value, _>(i) {
-                        map.insert(column.name().to_string(), v);
+                        map.insert(col_name, v);
                     } else if let Ok(v) = row.try_get::<Vec<u8>, _>(i) {
                         let s = decode_bytes_or_hex(&v);
-                        map.insert(column.name().to_string(), serde_json::Value::String(s));
+                        map.insert(col_name, serde_json::Value::String(s));
                     } else if let Ok(v) = row.try_get_unchecked::<Vec<u8>, _>(i) {
                         // Same unchecked fallback as the Postgres branch: spatial and other
                         // driver-unknown types would otherwise be dropped as null.
                         let s = decode_bytes_or_hex(&v);
-                        map.insert(column.name().to_string(), serde_json::Value::String(s));
+                        map.insert(col_name, serde_json::Value::String(s));
                     } else if let Ok(v) = row.try_get_unchecked::<String, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::String(v));
+                        map.insert(col_name, serde_json::Value::String(v));
                     } else {
-                        map.insert(column.name().to_string(), serde_json::Value::Null);
+                        map.insert(col_name, serde_json::Value::Null);
                     }
                 }
                 result.push(serde_json::Value::Object(map));
@@ -530,9 +546,10 @@ pub async fn execute_query(pool: &DbPool, query: &str) -> Result<Vec<serde_json:
             for row in rows {
                 let mut map = serde_json::Map::new();
                 for (i, column) in row.columns().iter().enumerate() {
+                    let col_name = unique_col_name(&map, column.name());
                     if let Ok(raw) = row.try_get_raw(i) {
                         if raw.is_null() {
-                            map.insert(column.name().to_string(), serde_json::Value::Null);
+                            map.insert(col_name, serde_json::Value::Null);
                             continue;
                         }
                     }
@@ -542,41 +559,41 @@ pub async fn execute_query(pool: &DbPool, query: &str) -> Result<Vec<serde_json:
                     // falls through to the generic chain below.
                     if is_boolean_column(column) {
                         if let Ok(v) = row.try_get::<bool, _>(i) {
-                            map.insert(column.name().to_string(), serde_json::Value::Bool(v));
+                            map.insert(col_name, serde_json::Value::Bool(v));
                             continue;
                         }
                     }
 
                     if let Ok(v) = row.try_get::<String, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::String(v));
+                        map.insert(col_name, serde_json::Value::String(v));
                     } else if let Ok(v) = row.try_get::<i64, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
+                        map.insert(col_name, serde_json::Value::Number(v.into()));
                     } else if let Ok(v) = row.try_get::<i32, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::Number(v.into()));
+                        map.insert(col_name, serde_json::Value::Number(v.into()));
                     } else if let Ok(v) = row.try_get::<f64, _>(i) {
                         if let Some(num) = serde_json::Number::from_f64(v) {
-                            map.insert(column.name().to_string(), serde_json::Value::Number(num));
+                            map.insert(col_name, serde_json::Value::Number(num));
                         } else {
-                            map.insert(column.name().to_string(), serde_json::Value::Null);
+                            map.insert(col_name, serde_json::Value::Null);
                         }
                     } else if let Ok(v) = row.try_get::<chrono::NaiveDateTime, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::String(v.to_string()));
+                        map.insert(col_name, serde_json::Value::String(v.to_string()));
                     } else if let Ok(v) = row.try_get::<chrono::NaiveDate, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::String(v.to_string()));
+                        map.insert(col_name, serde_json::Value::String(v.to_string()));
                     } else if let Ok(v) = row.try_get::<serde_json::Value, _>(i) {
-                        map.insert(column.name().to_string(), v);
+                        map.insert(col_name, v);
                     } else if let Ok(v) = row.try_get::<Vec<u8>, _>(i) {
                         let s = decode_bytes_or_hex(&v);
-                        map.insert(column.name().to_string(), serde_json::Value::String(s));
+                        map.insert(col_name, serde_json::Value::String(s));
                     } else if let Ok(v) = row.try_get_unchecked::<Vec<u8>, _>(i) {
                         // Same unchecked fallback as the Postgres branch: spatial and other
                         // driver-unknown types would otherwise be dropped as null.
                         let s = decode_bytes_or_hex(&v);
-                        map.insert(column.name().to_string(), serde_json::Value::String(s));
+                        map.insert(col_name, serde_json::Value::String(s));
                     } else if let Ok(v) = row.try_get_unchecked::<String, _>(i) {
-                        map.insert(column.name().to_string(), serde_json::Value::String(v));
+                        map.insert(col_name, serde_json::Value::String(v));
                     } else {
-                        map.insert(column.name().to_string(), serde_json::Value::Null);
+                        map.insert(col_name, serde_json::Value::Null);
                     }
                 }
                 result.push(serde_json::Value::Object(map));
@@ -1577,5 +1594,15 @@ mod tests {
         assert_eq!(name_of(&pool, 3).await.as_deref(), Some("c"));
     }
 
+    #[tokio::test]
+    async fn execute_query_duplicate_column_names_are_not_overwritten() {
+        let pool = sqlite_pool().await;
+        let rows = execute_query(&pool, "SELECT 1 AS col, 2 AS col, 3 AS col").await.unwrap();
+        assert_eq!(rows.len(), 1);
+        let obj = rows[0].as_object().unwrap();
+        assert_eq!(obj.get("col"), Some(&serde_json::json!(1)));
+        assert_eq!(obj.get("col_1"), Some(&serde_json::json!(2)));
+        assert_eq!(obj.get("col_2"), Some(&serde_json::json!(3)));
+    }
 }
 

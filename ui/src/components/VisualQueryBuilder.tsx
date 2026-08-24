@@ -1868,28 +1868,34 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
     joinsList: VisualJoinInfo[],
     baseTable: string
   ): unknown => {
-    // 1. If this is the base table, direct pkCol in origRow is the primary key
+    if (origRow[`${targetTable}_${pkCol}`] !== undefined && origRow[`${targetTable}_${pkCol}`] !== null) {
+      return origRow[`${targetTable}_${pkCol}`];
+    }
+    if (origRow[`${targetTable}.${pkCol}`] !== undefined && origRow[`${targetTable}.${pkCol}`] !== null) {
+      return origRow[`${targetTable}.${pkCol}`];
+    }
     if (targetTable === baseTable && origRow[pkCol] !== undefined && origRow[pkCol] !== null) {
       return origRow[pkCol];
     }
-    // 2. Check if this table is joined via a foreign key on another table
     for (const j of joinsList) {
       if (j.toTable === targetTable && j.toColumn === pkCol) {
         if (origRow[j.fromColumn] !== undefined && origRow[j.fromColumn] !== null) {
           return origRow[j.fromColumn];
+        }
+        if (origRow[`${j.fromTable}_${j.fromColumn}`] !== undefined && origRow[`${j.fromTable}_${j.fromColumn}`] !== null) {
+          return origRow[`${j.fromTable}_${j.fromColumn}`];
         }
       }
       if (j.fromTable === targetTable && j.fromColumn === pkCol) {
         if (origRow[j.toColumn] !== undefined && origRow[j.toColumn] !== null) {
           return origRow[j.toColumn];
         }
+        if (origRow[`${j.toTable}_${j.toColumn}`] !== undefined && origRow[`${j.toTable}_${j.toColumn}`] !== null) {
+          return origRow[`${j.toTable}_${j.toColumn}`];
+        }
       }
     }
-    // 3. Check aliased table_column key (e.g. provinces_id)
-    if (origRow[`${targetTable}_${pkCol}`] !== undefined && origRow[`${targetTable}_${pkCol}`] !== null) {
-      return origRow[`${targetTable}_${pkCol}`];
-    }
-    // 4. Fallback to direct pkCol in origRow
+    // 5. Fallback to direct pkCol in origRow
     if (origRow[pkCol] !== undefined && origRow[pkCol] !== null) {
       return origRow[pkCol];
     }
@@ -1913,24 +1919,40 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
       const baseTable = canvasTableNames[0] || tables[0] || "";
       const updateStatements: string[] = [];
 
-      // Process updates grouped by owner table
       for (const [rIdxStr, fields] of Object.entries(editedCells)) {
         const rIdx = Number(rIdxStr);
         if (deletedRowIndices.has(rIdx)) continue; // Deleted rows take precedence
         const origRow = queryResult.rows[rIdx];
         if (!origRow) continue;
 
-        // Group edited fields for this row by their owner table
         const editsByTable: Record<string, Record<string, unknown>> = {};
 
         for (const [colName, val] of Object.entries(fields)) {
-          // Check which table on canvas owns this column
-          let ownerTable = canvasTableNames.find((t) =>
-            tableSchemas[t]?.some((c) => c.name === colName)
-          );
+          let ownerTable = "";
+          let actualColName = colName;
+          for (const t of canvasTableNames) {
+            if (colName.startsWith(`${t}_`)) {
+              const stripped = colName.slice(t.length + 1);
+              if (tableSchemas[t]?.some((c) => c.name === stripped)) {
+                ownerTable = t;
+                actualColName = stripped;
+                break;
+              }
+            } else if (colName.startsWith(`${t}.`)) {
+              const stripped = colName.slice(t.length + 1);
+              if (tableSchemas[t]?.some((c) => c.name === stripped)) {
+                ownerTable = t;
+                actualColName = stripped;
+                break;
+              }
+            }
+          }
+
           if (!ownerTable) {
-            // Search all database tables
             ownerTable =
+              canvasTableNames.find((t) =>
+                tableSchemas[t]?.some((c) => c.name === colName)
+              ) ||
               tables.find((t) => tableSchemas[t]?.some((c) => c.name === colName)) ||
               baseTable;
           }
@@ -1938,18 +1960,15 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
           if (!editsByTable[ownerTable]) {
             editsByTable[ownerTable] = {};
           }
-          editsByTable[ownerTable][colName] = val;
+          editsByTable[ownerTable][actualColName] = val;
         }
 
-        // Generate targeted UPDATE statement for each owner table
         for (const [tblName, tblFields] of Object.entries(editsByTable)) {
           if (!tblName || Object.keys(tblFields).length === 0) continue;
           const tableCols = tableSchemas[tblName] || [];
           const pkCols = tableCols.filter((c) => c.primaryKey).map((c) => c.name);
 
           const whereConditions: string[] = [];
-
-          // Find primary key value(s) for tblName
           if (pkCols.length > 0) {
             for (const pk of pkCols) {
               const pkVal = resolveTablePkValue(tblName, pk, origRow, joins, baseTable);

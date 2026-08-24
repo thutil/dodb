@@ -48,9 +48,15 @@ export function buildVisualSql({
     return "-- Drag or add tables onto the canvas to start building your query";
   }
 
-  // 1. SELECT clause
   const selectItems: string[] = [];
   let hasMultipleTables = tables.length > 1;
+
+  const colNameCount: Record<string, number> = {};
+  for (const tbl of tables) {
+    for (const col of tbl.selectedColumns) {
+      colNameCount[col] = (colNameCount[col] || 0) + 1;
+    }
+  }
 
   for (const tbl of tables) {
     if (tbl.selectedColumns.length === 0) continue;
@@ -58,30 +64,30 @@ export function buildVisualSql({
       const qTbl = quoteIdent(tbl.tableName, dbType);
       const qCol = quoteIdent(col, dbType);
       if (hasMultipleTables) {
-        selectItems.push(`${qTbl}.${qCol}`);
+        if (colNameCount[col] > 1) {
+          const alias = `${tbl.tableName}_${col}`;
+          selectItems.push(`${qTbl}.${qCol} AS ${quoteIdent(alias, dbType)}`);
+        } else {
+          selectItems.push(`${qTbl}.${qCol}`);
+        }
       } else {
         selectItems.push(`${qCol}`);
       }
     }
   }
 
-  const selectClause =
-    selectItems.length > 0 ? selectItems.join(",\n  ") : "*";
+  const selectClause = selectItems.length > 0 ? selectItems.join(",\n  ") : "*";
 
-  // 2. FROM & JOIN clauses
-  // Build adjacency/graph of joins
   const joinedTableSet = new Set<string>();
   let fromClause = "";
 
   if (tables.length === 1) {
     fromClause = quoteIdent(tables[0].tableName, dbType);
   } else {
-    // Start with the first table that appears in joins or first table
     const startTable = tables[0].tableName;
     fromClause = quoteIdent(startTable, dbType);
     joinedTableSet.add(startTable);
 
-    // Iteratively resolve joins
     const remainingJoins = [...joins];
     let progress = true;
 
@@ -97,10 +103,10 @@ export function buildVisualSql({
             j.joinType === "INNER"
               ? "INNER JOIN"
               : j.joinType === "LEFT"
-              ? "LEFT JOIN"
-              : j.joinType === "RIGHT"
-              ? "RIGHT JOIN"
-              : "FULL OUTER JOIN";
+                ? "LEFT JOIN"
+                : j.joinType === "RIGHT"
+                  ? "RIGHT JOIN"
+                  : "FULL OUTER JOIN";
 
           fromClause += `\n${joinKeyword} ${quoteIdent(j.toTable, dbType)} ON ${quoteIdent(j.fromTable, dbType)}.${quoteIdent(j.fromColumn, dbType)} = ${quoteIdent(j.toTable, dbType)}.${quoteIdent(j.toColumn, dbType)}`;
           joinedTableSet.add(j.toTable);
@@ -112,10 +118,10 @@ export function buildVisualSql({
             j.joinType === "INNER"
               ? "INNER JOIN"
               : j.joinType === "LEFT"
-              ? "LEFT JOIN"
-              : j.joinType === "RIGHT"
-              ? "RIGHT JOIN"
-              : "FULL OUTER JOIN";
+                ? "LEFT JOIN"
+                : j.joinType === "RIGHT"
+                  ? "RIGHT JOIN"
+                  : "FULL OUTER JOIN";
 
           fromClause += `\n${joinKeyword} ${quoteIdent(j.fromTable, dbType)} ON ${quoteIdent(j.toTable, dbType)}.${quoteIdent(j.toColumn, dbType)} = ${quoteIdent(j.fromTable, dbType)}.${quoteIdent(j.fromColumn, dbType)}`;
           joinedTableSet.add(j.fromTable);
@@ -142,7 +148,7 @@ export function buildVisualSql({
 
   // 3. WHERE clause
   const validFilters = (filters || []).filter(
-    (f) => f.table && f.column && f.operator
+    (f) => f.table && f.column && f.operator,
   );
 
   let whereClause = "";
@@ -167,9 +173,7 @@ export function buildVisualSql({
         // Numeric or String comparison
         const isNum =
           f.value !== "" && !isNaN(Number(f.value)) && !f.value.includes(" ");
-        const formattedVal = isNum
-          ? f.value
-          : `'${escapeSqlString(f.value)}'`;
+        const formattedVal = isNum ? f.value : `'${escapeSqlString(f.value)}'`;
         cond = `${qCol} ${f.operator} ${formattedVal}`;
       }
 
@@ -245,10 +249,21 @@ export function toSingular(word: string): string {
   if (w.endsWith("ies") && w.length > 4) {
     return w.slice(0, -3) + "y"; // categories -> category, companies -> company
   }
-  if (w.endsWith("ses") || w.endsWith("xes") || w.endsWith("shes") || w.endsWith("ches")) {
+  if (
+    w.endsWith("ses") ||
+    w.endsWith("xes") ||
+    w.endsWith("shes") ||
+    w.endsWith("ches")
+  ) {
     return w.slice(0, -2); // statuses -> status, boxes -> box
   }
-  if (w.endsWith("s") && !w.endsWith("ss") && !w.endsWith("is") && !w.endsWith("us") && w.length > 2) {
+  if (
+    w.endsWith("s") &&
+    !w.endsWith("ss") &&
+    !w.endsWith("is") &&
+    !w.endsWith("us") &&
+    w.length > 2
+  ) {
     return w.slice(0, -1); // users -> user, orders -> order, items -> item
   }
   return w;
@@ -257,7 +272,9 @@ export function toSingular(word: string): string {
 /**
  * Determine broad data type category for compatibility check
  */
-export function getTypeCategory(typeStr?: string): "number" | "text" | "datetime" | "boolean" | "geom" | "other" {
+export function getTypeCategory(
+  typeStr?: string,
+): "number" | "text" | "datetime" | "boolean" | "geom" | "other" {
   if (!typeStr) return "other";
   const t = typeStr.toLowerCase();
 
@@ -324,9 +341,15 @@ export function findSmartJoinMatch(
   tableA: string,
   colsA: ColumnInfoLike[],
   tableB: string,
-  colsB: ColumnInfoLike[]
+  colsB: ColumnInfoLike[],
 ): SmartJoinMatch | null {
-  if (!tableA || !tableB || tableA === tableB || !colsA?.length || !colsB?.length) {
+  if (
+    !tableA ||
+    !tableB ||
+    tableA === tableB ||
+    !colsA?.length ||
+    !colsB?.length
+  ) {
     return null;
   }
 
@@ -356,38 +379,56 @@ export function findSmartJoinMatch(
 
       // Rule 1: TableA PK -> TableB with singular TableA + _id
       // e.g. users.id <-> orders.user_id
-      if (isPkA && (nameB === `${singA}_id` || nameB === `${rawA}_id` || nameB === `id_${singA}` || nameB === `id_${rawA}`)) {
+      if (
+        isPkA &&
+        (nameB === `${singA}_id` ||
+          nameB === `${rawA}_id` ||
+          nameB === `id_${singA}` ||
+          nameB === `id_${rawA}`)
+      ) {
         score = 100;
         reason = `Matches ${tableA} primary key with foreign key ${cb.name}`;
       }
       // Reverse: TableB PK -> TableA with singular TableB + _id
-      else if (isPkB && (nameA === `${singB}_id` || nameA === `${rawB}_id` || nameA === `id_${singB}` || nameA === `id_${rawB}`)) {
+      else if (
+        isPkB &&
+        (nameA === `${singB}_id` ||
+          nameA === `${rawB}_id` ||
+          nameA === `id_${singB}` ||
+          nameA === `id_${rawB}`)
+      ) {
         score = 100;
         reason = `Matches ${tableB} primary key with foreign key ${ca.name}`;
       }
       // Rule 2: TableA PK -> TableB with prefixed/suffixed foreign key (e.g. parent_user_id, customer_user_id)
-      else if (isPkA && (nameB.endsWith(`_${singA}_id`) || nameB.endsWith(`_${rawA}_id`))) {
+      else if (
+        isPkA &&
+        (nameB.endsWith(`_${singA}_id`) || nameB.endsWith(`_${rawA}_id`))
+      ) {
         score = 88;
         reason = `Contextual foreign key (${cb.name}) references ${tableA}`;
-      }
-      else if (isPkB && (nameA.endsWith(`_${singB}_id`) || nameA.endsWith(`_${rawB}_id`))) {
+      } else if (
+        isPkB &&
+        (nameA.endsWith(`_${singB}_id`) || nameA.endsWith(`_${rawB}_id`))
+      ) {
         score = 88;
         reason = `Contextual foreign key (${ca.name}) references ${tableB}`;
       }
       // Rule 3: Exact same column name with identifying key suffixes (_id, _code, _no, _key, _uuid, _ref, _num, sku)
-      else if (nameA === nameB && (
-        nameA.endsWith("_id") ||
-        nameA.endsWith("_code") ||
-        nameA.endsWith("_no") ||
-        nameA.endsWith("_key") ||
-        nameA.endsWith("_uuid") ||
-        nameA.endsWith("_guid") ||
-        nameA.endsWith("_ref") ||
-        nameA.endsWith("_num") ||
-        nameA === "sku" ||
-        nameA === "code" ||
-        nameA === "ref_no"
-      )) {
+      else if (
+        nameA === nameB &&
+        (nameA.endsWith("_id") ||
+          nameA.endsWith("_code") ||
+          nameA.endsWith("_no") ||
+          nameA.endsWith("_key") ||
+          nameA.endsWith("_uuid") ||
+          nameA.endsWith("_guid") ||
+          nameA.endsWith("_ref") ||
+          nameA.endsWith("_num") ||
+          nameA === "sku" ||
+          nameA === "code" ||
+          nameA === "ref_no")
+      ) {
         score = 80;
         reason = `Identical identifier column name: ${ca.name}`;
       }
@@ -397,11 +438,22 @@ export function findSmartJoinMatch(
         reason = `Both tables share primary key: ${ca.name}`;
       }
       // Rule 5: TableA PK -> TableB with singular TableA + _code or _no (e.g. customer_code)
-      else if (isPkA && (nameB === `${singA}_code` || nameB === `${singA}_no` || nameB === `${rawA}_code` || nameB === `${rawA}_no`)) {
+      else if (
+        isPkA &&
+        (nameB === `${singA}_code` ||
+          nameB === `${singA}_no` ||
+          nameB === `${rawA}_code` ||
+          nameB === `${rawA}_no`)
+      ) {
         score = 70;
         reason = `Code/Number identifier (${cb.name}) references ${tableA}`;
-      }
-      else if (isPkB && (nameA === `${singB}_code` || nameA === `${singB}_no` || nameA === `${rawB}_code` || nameA === `${rawB}_no`)) {
+      } else if (
+        isPkB &&
+        (nameA === `${singB}_code` ||
+          nameA === `${singB}_no` ||
+          nameA === `${rawB}_code` ||
+          nameA === `${rawB}_no`)
+      ) {
         score = 70;
         reason = `Code/Number identifier (${ca.name}) references ${tableB}`;
       }
@@ -468,7 +520,7 @@ function cleanIdentifier(s: string): string {
  */
 export function parseSqlToVisual(
   sqlStr: string,
-  tableSchemas: Record<string, ColumnInfoLike[]> = {}
+  tableSchemas: Record<string, ColumnInfoLike[]> = {},
 ): ParsedVisualSql | null {
   if (!sqlStr || !sqlStr.trim()) return null;
 
@@ -498,7 +550,13 @@ export function parseSqlToVisual(
   const limitIndex = fromAndBeyond.search(/\bLIMIT\b/i);
 
   // Determine boundaries
-  const fromEnd = [whereIndex, groupIndex, orderIndex, limitIndex, fromAndBeyond.length]
+  const fromEnd = [
+    whereIndex,
+    groupIndex,
+    orderIndex,
+    limitIndex,
+    fromAndBeyond.length,
+  ]
     .filter((pos) => pos !== -1)
     .sort((a, b) => a - b)[0];
 
@@ -523,7 +581,9 @@ export function parseSqlToVisual(
   let limitVal = 50;
   let offsetVal = 0;
   if (limitIndex !== -1) {
-    const limitMatch = fromAndBeyond.slice(limitIndex).match(/\bLIMIT\s+(\d+)(?:\s+OFFSET\s+(\d+))?/i);
+    const limitMatch = fromAndBeyond
+      .slice(limitIndex)
+      .match(/\bLIMIT\s+(\d+)(?:\s+OFFSET\s+(\d+))?/i);
     if (limitMatch) {
       limitVal = parseInt(limitMatch[1], 10);
       if (limitMatch[2]) {
@@ -538,15 +598,24 @@ export function parseSqlToVisual(
   const joins: VisualJoinInfo[] = [];
 
   // Match all JOIN occurrences using lookahead for the next clause
-  const joinRegex = /\b(INNER|LEFT|RIGHT|FULL(?:\s+OUTER)?)?\s*JOIN\s+([`"a-zA-Z0-9_.]+)(?:\s+(?:AS\s+)?([`"a-zA-Z0-9_]+))?\s+ON\s+([\s\S]+?)(?=\s+\b(?:INNER|LEFT|RIGHT|FULL(?:\s+OUTER)?\s+)?JOIN\b|\s+\bWHERE\b|\s+\bGROUP\s+BY\b|\s+\bORDER\s+BY\b|\s+\bLIMIT\b|;|$)/gi;
-  
-  const firstJoinMatch = fromAndJoinPart.match(/\b(?:(?:INNER|LEFT|RIGHT|FULL(?:\s+OUTER)?)\s+)?JOIN\b/i);
+  const joinRegex =
+    /\b(INNER|LEFT|RIGHT|FULL(?:\s+OUTER)?)?\s*JOIN\s+([`"a-zA-Z0-9_.]+)(?:\s+(?:AS\s+)?([`"a-zA-Z0-9_]+))?\s+ON\s+([\s\S]+?)(?=\s+\b(?:INNER|LEFT|RIGHT|FULL(?:\s+OUTER)?\s+)?JOIN\b|\s+\bWHERE\b|\s+\bGROUP\s+BY\b|\s+\bORDER\s+BY\b|\s+\bLIMIT\b|;|$)/gi;
+
+  const firstJoinMatch = fromAndJoinPart.match(
+    /\b(?:(?:INNER|LEFT|RIGHT|FULL(?:\s+OUTER)?)\s+)?JOIN\b/i,
+  );
   const firstJoinIdx = firstJoinMatch ? firstJoinMatch.index! : -1;
 
-  const baseFromPart = firstJoinIdx !== -1 ? fromAndJoinPart.slice(0, firstJoinIdx).trim() : fromAndJoinPart;
+  const baseFromPart =
+    firstJoinIdx !== -1
+      ? fromAndJoinPart.slice(0, firstJoinIdx).trim()
+      : fromAndJoinPart;
 
   // Handle multiple comma-separated tables in base FROM
-  const fromTables = baseFromPart.split(",").map((t) => t.trim()).filter(Boolean);
+  const fromTables = baseFromPart
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean);
   for (const ft of fromTables) {
     const parts = ft.split(/\s+(?:AS\s+)?/i);
     const rawTbl = cleanIdentifier(parts[0]);
@@ -562,8 +631,12 @@ export function parseSqlToVisual(
   // Parse each JOIN
   let joinMatch: RegExpExecArray | null;
   while ((joinMatch = joinRegex.exec(fromAndJoinPart)) !== null) {
-    const rawType = (joinMatch[1] || "INNER").toUpperCase().replace(/\s+OUTER/, "");
-    const joinType: JoinType = (["LEFT", "RIGHT", "FULL"].includes(rawType) ? rawType : "INNER") as JoinType;
+    const rawType = (joinMatch[1] || "INNER")
+      .toUpperCase()
+      .replace(/\s+OUTER/, "");
+    const joinType: JoinType = (
+      ["LEFT", "RIGHT", "FULL"].includes(rawType) ? rawType : "INNER"
+    ) as JoinType;
     const rawTbl = cleanIdentifier(joinMatch[2]);
     const alias = joinMatch[3] ? cleanIdentifier(joinMatch[3]) : "";
     const onCond = joinMatch[4].trim();
@@ -593,7 +666,9 @@ export function parseSqlToVisual(
       let toCol = "";
 
       if (leftParts.length === 2) {
-        const t = aliasMap[cleanIdentifier(leftParts[0]).toLowerCase()] || cleanIdentifier(leftParts[0]);
+        const t =
+          aliasMap[cleanIdentifier(leftParts[0]).toLowerCase()] ||
+          cleanIdentifier(leftParts[0]);
         const c = cleanIdentifier(leftParts[1]);
         if (t.toLowerCase() === rawTbl.toLowerCase()) {
           toCol = c;
@@ -604,7 +679,9 @@ export function parseSqlToVisual(
       }
 
       if (rightParts.length === 2) {
-        const t = aliasMap[cleanIdentifier(rightParts[0]).toLowerCase()] || cleanIdentifier(rightParts[0]);
+        const t =
+          aliasMap[cleanIdentifier(rightParts[0]).toLowerCase()] ||
+          cleanIdentifier(rightParts[0]);
         const c = cleanIdentifier(rightParts[1]);
         if (t.toLowerCase() === rawTbl.toLowerCase()) {
           toCol = c;
@@ -637,7 +714,10 @@ export function parseSqlToVisual(
     tableColumnSelections[t] = new Set();
   });
 
-  const selectItems = selectPart.split(",").map((s) => s.trim()).filter(Boolean);
+  const selectItems = selectPart
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
   const isSelectAll = selectItems.some((s) => s === "*");
 
   if (isSelectAll) {
@@ -647,10 +727,14 @@ export function parseSqlToVisual(
     });
   } else {
     for (const item of selectItems) {
-      const cleanItem = item.replace(/\s+(?:AS\s+)?[`"a-zA-Z0-9_]+$/i, "").trim(); // strip alias
+      const cleanItem = item
+        .replace(/\s+(?:AS\s+)?[`"a-zA-Z0-9_]+$/i, "")
+        .trim(); // strip alias
       if (cleanItem.includes(".")) {
         const [rawT, rawC] = cleanItem.split(".");
-        const t = aliasMap[cleanIdentifier(rawT).toLowerCase()] || cleanIdentifier(rawT);
+        const t =
+          aliasMap[cleanIdentifier(rawT).toLowerCase()] ||
+          cleanIdentifier(rawT);
         const c = cleanIdentifier(rawC);
 
         if (tableColumnSelections[t]) {
@@ -701,7 +785,9 @@ export function parseSqlToVisual(
       }
 
       // Parse individual filter condition: col OP val
-      const opMatch = token.match(/^(.*?)\s+(=|!=|<>|>=|<=|>|<|NOT\s+LIKE|LIKE|IN|IS\s+NOT\s+NULL|IS\s+NULL)\s*(.*)$/i);
+      const opMatch = token.match(
+        /^(.*?)\s+(=|!=|<>|>=|<=|>|<|NOT\s+LIKE|LIKE|IN|IS\s+NOT\s+NULL|IS\s+NULL)\s*(.*)$/i,
+      );
       if (opMatch) {
         let rawColStr = cleanIdentifier(opMatch[1]);
         let rawOp = opMatch[2].toUpperCase().replace(/\s+/, " ");
@@ -709,12 +795,29 @@ export function parseSqlToVisual(
 
         let op: VisualFilterOperator = "=";
         if (rawOp === "<>") op = "!=";
-        else if (["=", "!=", ">", "<", ">=", "<=", "LIKE", "NOT LIKE", "IN", "IS NULL", "IS NOT NULL"].includes(rawOp)) {
+        else if (
+          [
+            "=",
+            "!=",
+            ">",
+            "<",
+            ">=",
+            "<=",
+            "LIKE",
+            "NOT LIKE",
+            "IN",
+            "IS NULL",
+            "IS NOT NULL",
+          ].includes(rawOp)
+        ) {
           op = rawOp as VisualFilterOperator;
         }
 
         if (op === "IN") {
-          rawVal = rawVal.replace(/^\(|\)$/g, "").replace(/['"]/g, "").trim();
+          rawVal = rawVal
+            .replace(/^\(|\)$/g, "")
+            .replace(/['"]/g, "")
+            .trim();
         }
 
         let targetTable = tableOrder[0] || "";
@@ -722,7 +825,9 @@ export function parseSqlToVisual(
 
         if (rawColStr.includes(".")) {
           const [tPart, cPart] = rawColStr.split(".");
-          targetTable = aliasMap[cleanIdentifier(tPart).toLowerCase()] || cleanIdentifier(tPart);
+          targetTable =
+            aliasMap[cleanIdentifier(tPart).toLowerCase()] ||
+            cleanIdentifier(tPart);
           targetCol = cleanIdentifier(cPart);
         } else {
           // Find table containing this column
@@ -750,18 +855,24 @@ export function parseSqlToVisual(
   // 6. Parse ORDER BY
   const sorts: VisualSortCondition[] = [];
   if (orderPart) {
-    const sortItems = orderPart.split(",").map((s) => s.trim()).filter(Boolean);
+    const sortItems = orderPart
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
     for (const item of sortItems) {
       const parts = item.split(/\s+/);
       const rawCol = parts[0];
-      const dir: "ASC" | "DESC" = parts[1] && /^DESC$/i.test(parts[1]) ? "DESC" : "ASC";
+      const dir: "ASC" | "DESC" =
+        parts[1] && /^DESC$/i.test(parts[1]) ? "DESC" : "ASC";
 
       let targetTable = tableOrder[0] || "";
       let targetCol = cleanIdentifier(rawCol);
 
       if (rawCol.includes(".")) {
         const [tPart, cPart] = rawCol.split(".");
-        targetTable = aliasMap[cleanIdentifier(tPart).toLowerCase()] || cleanIdentifier(tPart);
+        targetTable =
+          aliasMap[cleanIdentifier(tPart).toLowerCase()] ||
+          cleanIdentifier(tPart);
         targetCol = cleanIdentifier(cPart);
       }
 

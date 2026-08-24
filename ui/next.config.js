@@ -70,7 +70,7 @@ function resolveAppVersion() {
     if (uiPkg.version) return uiPkg.version.trim();
   } catch (e) {}
 
-  return "0.2.2";
+  return "0.2.3";
 }
 
 const appVersion = resolveAppVersion();
