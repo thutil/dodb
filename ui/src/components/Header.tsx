@@ -51,6 +51,7 @@ interface HeaderProps {
   onOpenInSql?: (sql: string) => void;
   onRefreshDatabases?: () => void;
   latencyMs?: number | null;
+  isConnecting?: boolean;
   theme: "dark" | "light";
   onToggleTheme: () => void;
   language?: Language;
@@ -79,6 +80,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenInSql,
   onRefreshDatabases,
   latencyMs,
+  isConnecting = false,
   theme,
   onToggleTheme,
   language = "en",
@@ -257,76 +259,95 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="bc-segment-wrap">
               <button
                 type="button"
-                className={`bc-item bc-db bc-interactive ${openMenu === "db" ? "is-open" : ""}`}
+                className={`bc-item bc-db bc-interactive ${openMenu === "db" ? "is-open" : ""} ${isConnecting ? "is-connecting" : ""}`}
                 onClick={() => {
+                  if (isConnecting) return;
                   setOpenMenu((prev) => (prev === "db" ? null : "db"));
                   setDbSearch("");
                   setTableSearch("");
                 }}
-                title={`Database: ${activeDatabase || "default"} - Click to switch database`}
+                title={isConnecting ? t("connecting", language) : `Database: ${activeDatabase || "default"} - Click to switch database`}
               >
-                <Database size={11} className="bc-segment-icon" />
-                <span className="bc-label">{activeDatabase || "default"}</span>
-                <ChevronDown size={9} className={`bc-caret ${openMenu === "db" ? "caret-up" : ""}`} />
+                {isConnecting ? (
+                  <RefreshCw size={11} className="bc-segment-icon spin" />
+                ) : (
+                  <Database size={11} className="bc-segment-icon" />
+                )}
+                <span className="bc-label">{isConnecting ? t("connecting", language) : (activeDatabase || "default")}</span>
+                {!isConnecting && (
+                  <ChevronDown size={9} className={`bc-caret ${openMenu === "db" ? "caret-up" : ""}`} />
+                )}
               </button>
 
               {openMenu === "db" && (
                 <div className="bc-dropdown-popover">
                   <div className="bc-dropdown-header">
-                    <div className="bc-dropdown-title">{t("databases", language)} ({databases.length})</div>
+                    <div className="bc-dropdown-title">
+                      {t("databases", language)} {isConnecting ? "" : `(${databases.length})`}
+                    </div>
                     {onRefreshDatabases && (
                       <button
                         type="button"
                         className="bc-icon-btn-inline"
+                        disabled={isConnecting}
                         onClick={(e) => {
                           e.stopPropagation();
                           onRefreshDatabases();
                         }}
                         title={t("refresh", language)}
                       >
-                        <RefreshCw size={10} />
+                        <RefreshCw size={10} className={isConnecting ? "spin" : ""} />
                       </button>
                     )}
                   </div>
 
-                  {databases.length > 5 && (
-                    <div className="bc-dropdown-search">
-                      <Search size={11} className="search-inline-icon" />
-                      <input
-                        type="text"
-                        placeholder={t("filterDatabases", language)}
-                        value={dbSearch}
-                        onChange={(e) => setDbSearch(e.target.value)}
-                        autoFocus
-                        className="bc-search-input"
-                      />
+                  {isConnecting ? (
+                    <div className="bc-dropdown-empty" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", padding: "12px 0" }}>
+                      <RefreshCw size={12} className="spin" />
+                      <span>{t("connecting", language)}</span>
                     </div>
-                  )}
+                  ) : (
+                    <>
+                      {databases.length > 5 && (
+                        <div className="bc-dropdown-search">
+                          <Search size={11} className="search-inline-icon" />
+                          <input
+                            type="text"
+                            placeholder={t("filterDatabases", language)}
+                            value={dbSearch}
+                            onChange={(e) => setDbSearch(e.target.value)}
+                            autoFocus
+                            className="bc-search-input"
+                          />
+                        </div>
+                      )}
 
-                  <div className="bc-dropdown-list">
-                    {filteredDatabases.length === 0 ? (
-                      <div className="bc-dropdown-empty">{t("noDbFound", language)}</div>
-                    ) : (
-                      filteredDatabases.map((db) => (
-                        <button
-                          key={db}
-                          type="button"
-                          className={`bc-dropdown-item ${db === activeDatabase ? "active" : ""}`}
-                          onClick={() => {
-                            setOpenMenu(null);
-                            onSelectDatabase(db);
-                            if (activeView !== "explorer") {
-                              onChangeView("explorer");
-                            }
-                          }}
-                        >
-                          <Database size={12} className="item-icon" />
-                          <span className="item-text">{db}</span>
-                          {db === activeDatabase && <Check size={12} className="check-icon" />}
-                        </button>
-                      ))
-                    )}
-                  </div>
+                      <div className="bc-dropdown-list">
+                        {filteredDatabases.length === 0 ? (
+                          <div className="bc-dropdown-empty">{t("noDbFound", language)}</div>
+                        ) : (
+                          filteredDatabases.map((db) => (
+                            <button
+                              key={db}
+                              type="button"
+                              className={`bc-dropdown-item ${db === activeDatabase ? "active" : ""}`}
+                              onClick={() => {
+                                setOpenMenu(null);
+                                onSelectDatabase(db);
+                                if (activeView !== "explorer") {
+                                  onChangeView("explorer");
+                                }
+                              }}
+                            >
+                              <Database size={12} className="item-icon" />
+                              <span className="item-text">{db}</span>
+                              {db === activeDatabase && <Check size={12} className="check-icon" />}
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -704,6 +725,13 @@ export const Header: React.FC<HeaderProps> = ({
         .bc-item.bc-table {
           color: var(--accent-blue);
           font-weight: 600;
+        }
+        .bc-item.is-connecting {
+          color: var(--accent-amber, #f59e0b);
+          cursor: wait;
+        }
+        .bc-item.is-connecting .bc-segment-icon {
+          color: var(--accent-amber, #f59e0b);
         }
         .bc-segment-icon {
           flex-shrink: 0;

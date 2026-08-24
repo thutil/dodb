@@ -32,6 +32,8 @@ export const translations = {
     filterTables: "Filter tables...",
     noDbFound: "No database found",
     noTableFound: "No table found",
+    connecting: "Connecting...",
+    loadingDatabases: "Loading databases...",
 
     // DataGrid & Table Actions
     gridFilter: "Filter",
@@ -218,6 +220,8 @@ export const translations = {
     filterTables: "กรองรายชื่อตาราง...",
     noDbFound: "ไม่พบฐานข้อมูล",
     noTableFound: "ไม่พบตาราง",
+    connecting: "กำลังเชื่อมต่อ...",
+    loadingDatabases: "กำลังโหลดฐานข้อมูล...",
 
     // DataGrid & Table Actions
     gridFilter: "ตัวกรอง",

@@ -24,6 +24,7 @@ interface SidebarExplorerProps {
   onImportIntoTable?: (table: string) => void;
   onRefresh: () => void;
   loading: boolean;
+  isConnecting?: boolean;
   dbType?: string;
   language?: Language;
 }
@@ -53,6 +54,7 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
   onImportIntoTable,
   onRefresh,
   loading,
+  isConnecting = false,
   dbType,
   language = "en",
 }) => {
@@ -237,17 +239,22 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
             <HardDrive size={12} />
             <span>{t("sidebarDatabase", language)}</span>
           </div>
-          <button className="icon-action-btn" onClick={onRefresh} title={t("shortcutRefresh", language)}>
-            <RefreshCw size={11} className={loading ? "spin" : ""} />
+          <button className="icon-action-btn" onClick={onRefresh} disabled={isConnecting} title={t("shortcutRefresh", language)}>
+            <RefreshCw size={11} className={loading || isConnecting ? "spin" : ""} />
           </button>
         </div>
         <div className="select-container">
           <select
             className="select db-dropdown"
-            value={activeDatabase}
+            value={isConnecting ? "" : activeDatabase}
             onChange={(e) => onSelectDatabase(e.target.value)}
+            disabled={isConnecting}
           >
-            {databases.length === 0 && <option value="">{t("noDbFound", language)}</option>}
+            {isConnecting ? (
+              <option value="">{t("connecting", language)}</option>
+            ) : databases.length === 0 ? (
+              <option value="">{t("noDbFound", language)}</option>
+            ) : null}
             {databases.map((db) => (
               <option key={db} value={db}>
                 {db}
@@ -359,7 +366,12 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
           </div>
         </div>
 
-        {loading ? (
+        {isConnecting ? (
+          <div className="sidebar-message">
+            <RefreshCw size={14} className="spin loading-icon" />
+            <span>{t("connecting", language)}</span>
+          </div>
+        ) : loading ? (
           <div className="sidebar-message">
             <RefreshCw size={14} className="spin loading-icon" />
             <span>{t("loading", language)}</span>

@@ -129,6 +129,7 @@ export default function Home() {
   const [tables, setTables] = useState<string[]>([]);
   const [activeTable, setActiveTable] = useState<string | null>(null);
   const [loadingTables, setLoadingTables] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
   const [columns, setColumns] = useState<ColumnInfo[]>([]);
   const [rows, setRows] = useState<TableRowData[]>([]);
   const [totalRows, setTotalRows] = useState(0);
@@ -441,11 +442,14 @@ export default function Home() {
 
   const fetchDatabases = useCallback(async () => {
     if (!activeProfile) return;
+    setIsConnecting(true);
     try {
       await loadDatabasesFor(activeProfile);
     } catch (err) {
       const msg = typeof err === "string" ? err : (err as Error)?.message || String(err);
       setConnectionError(`Could not list databases: ${msg}`);
+    } finally {
+      setIsConnecting(false);
     }
   }, [activeProfile, loadDatabasesFor]);
 
@@ -671,6 +675,7 @@ export default function Home() {
       }
     }
 
+    setIsConnecting(true);
     fetchSeqRef.current += 1;
     setActiveProfile(target);
     setActiveDatabase("");
@@ -693,6 +698,8 @@ export default function Home() {
       const text = `Connected, but the database list could not be loaded: ${msg}`;
       setConnectionError(text);
       return { success: false, error: text };
+    } finally {
+      setIsConnecting(false);
     }
 
     if (!target.id.startsWith(SESSION_ID_PREFIX)) {
@@ -1171,6 +1178,7 @@ export default function Home() {
           }}
           onRefreshDatabases={fetchDatabases}
           latencyMs={latencyMs}
+          isConnecting={isConnecting}
           theme={theme}
           onToggleTheme={toggleTheme}
           language={language}
@@ -1227,6 +1235,7 @@ export default function Home() {
                 fetchTableData();
               }}
               loading={loadingTables}
+              isConnecting={isConnecting}
               dbType={activeProfile?.type}
               language={language}
             />
