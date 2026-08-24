@@ -11,7 +11,7 @@ import { QueryExecutionResult, ColumnInfo } from "../types";
 import { PendingChanges, CommitResult } from "./DataGrid";
 import { isGeometryColumn, isGisData, formatGisSummary, parseGisToGeoJson } from "../utils/gisUtils";
 import { GisMapViewer, GisFeatureRecord } from "./GisMapViewer";
-import { splitSqlStatements, getStatementAtLine, stripCommentsAndTrim } from "../utils/sqlUtils";
+import { splitSqlStatements, getStatementAtLine, stripCommentsAndTrim, extractTableFromSql, extractColumnMappingsFromSql } from "../utils/sqlUtils";
 
 interface SqlConsoleProps {
   activeDatabase: string;
@@ -323,41 +323,6 @@ const quoteTableIdentifier = (tbl: string): string => {
     .join(".");
 };
 
-// Helper to extract table name from a SQL query string
-const extractTableFromSql = (querySql: string): string | null => {
-  if (!querySql) return null;
-  const clean = querySql
-    .replace(/--.*$/gm, "")
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .trim();
-
-  // Match SELECT ... FROM [schema.]table
-  const fromMatch = clean.match(/\bFROM\s+(?:ONLY\s+)?([`"\[]?([a-zA-Z0-9_]+)[`"\]]?(?:\.[`"\[]?([a-zA-Z0-9_]+)[`"\]]?)?)/i);
-  if (fromMatch) {
-    return fromMatch[1].trim();
-  }
-
-  // Match UPDATE [schema.]table
-  const updateMatch = clean.match(/\bUPDATE\s+(?:ONLY\s+)?([`"\[]?([a-zA-Z0-9_]+)[`"\]]?(?:\.[`"\[]?([a-zA-Z0-9_]+)[`"\]]?)?)/i);
-  if (updateMatch) {
-    return updateMatch[1].trim();
-  }
-
-  // Match INSERT INTO [schema.]table
-  const insertMatch = clean.match(/\bINSERT\s+INTO\s+([`"\[]?([a-zA-Z0-9_]+)[`"\]]?(?:\.[`"\[]?([a-zA-Z0-9_]+)[`"\]]?)?)/i);
-  if (insertMatch) {
-    return insertMatch[1].trim();
-  }
-
-  // Match DELETE FROM [schema.]table
-  const deleteMatch = clean.match(/\bDELETE\s+FROM\s+(?:ONLY\s+)?([`"\[]?([a-zA-Z0-9_]+)[`"\]]?(?:\.[`"\[]?([a-zA-Z0-9_]+)[`"\]]?)?)/i);
-  if (deleteMatch) {
-    return deleteMatch[1].trim();
-  }
-
-  return null;
-};
-
   // Discard / Rollback changes
   const handleRollback = () => {
     setEditedCells({});
@@ -389,28 +354,44 @@ const extractTableFromSql = (querySql: string): string | null => {
   // Generate UPDATE and DELETE SQL statements
   const generateChangesSql = useCallback((): string[] => {
     if (!result?.rows) return [];
+    const currentTabSql = statementResults[activeResultTab]?.sql;
+    const currentCode = editorRef.current ? editorRef.current.getValue() : sql;
+    const activeSql = currentTabSql || currentCode || "";
+    const colMappings = extractColumnMappingsFromSql(activeSql);
+
     const rawTbl = getTargetTable() || "table_name";
     const tbl = quoteTableIdentifier(rawTbl);
     const statements: string[] = [];
 
     const getKeyCols = (orig: Record<string, unknown>): string[] => {
       const rowKeys = Object.keys(orig);
-      // 1. Check if column metadata has PKs that actually exist in this row
-      const pkCols = columns.filter((c) => c.primaryKey && orig[c.name] !== undefined).map((c) => c.name);
+      // 1. Check if column metadata has PKs that actually exist in this row or mapped alias
+      const pkCols = columns
+        .filter((c) => c.primaryKey && (orig[c.name] !== undefined || Object.values(colMappings).some((m) => m.realColumn === c.name && orig[m.alias] !== undefined)))
+        .map((c) => {
+          if (orig[c.name] !== undefined) return c.name;
+          const mapped = Object.values(colMappings).find((m) => m.realColumn === c.name && orig[m.alias] !== undefined);
+          return mapped ? mapped.alias : c.name;
+        });
       if (pkCols.length > 0) return pkCols;
 
       // 2. Check common PK column naming patterns in the row itself (id, pk, uuid, poi_id, etc.)
-      const idCol = rowKeys.find((k) => /^(id|pk|uuid|_id)$/i.test(k) || /(^.*_id$)/i.test(k));
+      const idCol = rowKeys.find((k) => {
+        const realName = colMappings[k]?.realColumn || k;
+        return (/^(id|pk|uuid|_id)$/i.test(realName) || /(^.*_id$)/i.test(realName)) && !colMappings[k]?.isExpression;
+      });
       if (idCol && orig[idCol] !== undefined && orig[idCol] !== null) {
         return [idCol];
       }
 
-      // 3. Fallback to scalar non-geometry, non-blob, non-null columns (up to 3)
+      // 3. Fallback to scalar non-geometry, non-blob, non-null, non-expression columns (up to 3)
       const candidateCols = rowKeys.filter((k) => {
+        if (colMappings[k]?.isExpression) return false;
         const v = orig[k];
         if (v === null || v === undefined) return false;
         if (typeof v === "object") return false;
-        if (isGeometryColumn("", k) || isGisData(v)) return false;
+        const realName = colMappings[k]?.realColumn || k;
+        if (isGeometryColumn("", realName) || isGisData(v)) return false;
         if (typeof v === "string" && v.length > 255) return false;
         return true;
       });
@@ -418,7 +399,7 @@ const extractTableFromSql = (querySql: string): string | null => {
         return candidateCols.slice(0, Math.min(3, candidateCols.length));
       }
 
-      return rowKeys.slice(0, 1);
+      return rowKeys.filter((k) => !colMappings[k]?.isExpression).slice(0, 1);
     };
 
     // 1. Deletes
@@ -427,13 +408,17 @@ const extractTableFromSql = (querySql: string): string | null => {
       if (!orig) return;
       const whereParts: string[] = [];
       const keyCols = getKeyCols(orig);
-      keyCols.forEach((col) => {
-        const v = orig[col];
-        if (v === null || v === undefined) whereParts.push(`"${col}" IS NULL`);
-        else if (typeof v === "number" || typeof v === "boolean") whereParts.push(`"${col}" = ${v}`);
-        else whereParts.push(`"${col}" = '${String(v).replace(/'/g, "''")}'`);
+      keyCols.forEach((colKey) => {
+        const mapping = colMappings[colKey];
+        const realCol = mapping?.realColumn || colKey;
+        const v = orig[colKey];
+        if (v === null || v === undefined) whereParts.push(`"${realCol}" IS NULL`);
+        else if (typeof v === "number" || typeof v === "boolean") whereParts.push(`"${realCol}" = ${v}`);
+        else whereParts.push(`"${realCol}" = '${String(v).replace(/'/g, "''")}'`);
       });
-      statements.push(`DELETE FROM ${tbl} WHERE ${whereParts.join(" AND ")};`);
+      if (whereParts.length > 0) {
+        statements.push(`DELETE FROM ${tbl} WHERE ${whereParts.join(" AND ")};`);
+      }
     });
 
     // 2. Updates
@@ -445,29 +430,40 @@ const extractTableFromSql = (querySql: string): string | null => {
       if (!orig || !edits) return;
 
       const setParts: string[] = [];
-      Object.keys(edits).forEach((col) => {
-        const v = edits[col];
-        if (v === null || v === undefined) setParts.push(`"${col}" = NULL`);
-        else if (typeof v === "number" || typeof v === "boolean") setParts.push(`"${col}" = ${v}`);
-        else setParts.push(`"${col}" = '${String(v).replace(/'/g, "''")}'`);
+      Object.keys(edits).forEach((colKey) => {
+        const mapping = colMappings[colKey];
+        if (mapping?.isExpression) {
+          throw new Error(`Cannot update computed/expression column "${colKey}".`);
+        }
+        const realCol = mapping?.realColumn || colKey;
+        const v = edits[colKey];
+        if (v === null || v === undefined) setParts.push(`"${realCol}" = NULL`);
+        else if (typeof v === "number" || typeof v === "boolean") setParts.push(`"${realCol}" = ${v}`);
+        else setParts.push(`"${realCol}" = '${String(v).replace(/'/g, "''")}'`);
       });
 
       if (setParts.length === 0) return;
 
       const whereParts: string[] = [];
       const keyCols = getKeyCols(orig);
-      keyCols.forEach((col) => {
-        const v = orig[col];
-        if (v === null || v === undefined) whereParts.push(`"${col}" IS NULL`);
-        else if (typeof v === "number" || typeof v === "boolean") whereParts.push(`"${col}" = ${v}`);
-        else whereParts.push(`"${col}" = '${String(v).replace(/'/g, "''")}'`);
+      keyCols.forEach((colKey) => {
+        const mapping = colMappings[colKey];
+        const realCol = mapping?.realColumn || colKey;
+        const v = orig[colKey];
+        if (v === null || v === undefined) whereParts.push(`"${realCol}" IS NULL`);
+        else if (typeof v === "number" || typeof v === "boolean") whereParts.push(`"${realCol}" = ${v}`);
+        else whereParts.push(`"${realCol}" = '${String(v).replace(/'/g, "''")}'`);
       });
+
+      if (whereParts.length === 0) {
+        throw new Error(`Cannot identify matching row for table ${tbl}.`);
+      }
 
       statements.push(`UPDATE ${tbl} SET ${setParts.join(", ")} WHERE ${whereParts.join(" AND ")};`);
     });
 
     return statements;
-  }, [result?.rows, getTargetTable, deletedRowIndices, columns, editedCells]);
+  }, [result?.rows, statementResults, activeResultTab, sql, getTargetTable, deletedRowIndices, columns, editedCells]);
 
   // Copy SQL changes
   const handleCopyChangesSql = () => {

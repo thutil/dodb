@@ -67,6 +67,7 @@ import { apiClient } from "../utils/apiClient";
 import { buildVisualSql, VisualTableSelection, findSmartJoinMatch, parseSqlToVisual } from "../utils/visualSqlBuilder";
 import { quoteIdent, quoteTableIdent } from "../utils/ddlBuilder";
 import { isGeometryColumn } from "../utils/gisUtils";
+import { extractColumnMappingsFromSql } from "../utils/sqlUtils";
 import { PendingChanges, CommitResult } from "./DataGrid";
 
 interface VisualQueryBuilderProps {
@@ -885,6 +886,7 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
   // Query Execution State
   const [isExecuting, setIsExecuting] = useState(false);
   const [queryResult, setQueryResult] = useState<QueryExecutionResult | null>(null);
+  const [lastExecutedSql, setLastExecutedSql] = useState<string>("");
   const [executionTimeMs, setExecutionTimeMs] = useState<number | null>(null);
   const [copiedSql, setCopiedSql] = useState(false);
 
@@ -1767,6 +1769,7 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
     const startTime = performance.now();
 
     try {
+      setLastExecutedSql(queryToRun);
       const res = await onExecuteSql(queryToRun);
       const duration = performance.now() - startTime;
       setExecutionTimeMs(Math.round(duration));
@@ -1918,6 +1921,7 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
 
       const baseTable = canvasTableNames[0] || tables[0] || "";
       const updateStatements: string[] = [];
+      const colMappings = extractColumnMappingsFromSql(lastExecutedSql || sqlText || generatedSql);
 
       for (const [rIdxStr, fields] of Object.entries(editedCells)) {
         const rIdx = Number(rIdxStr);
@@ -1928,22 +1932,38 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
         const editsByTable: Record<string, Record<string, unknown>> = {};
 
         for (const [colName, val] of Object.entries(fields)) {
-          let ownerTable = "";
-          let actualColName = colName;
-          for (const t of canvasTableNames) {
-            if (colName.startsWith(`${t}_`)) {
-              const stripped = colName.slice(t.length + 1);
-              if (tableSchemas[t]?.some((c) => c.name === stripped)) {
-                ownerTable = t;
-                actualColName = stripped;
-                break;
-              }
-            } else if (colName.startsWith(`${t}.`)) {
-              const stripped = colName.slice(t.length + 1);
-              if (tableSchemas[t]?.some((c) => c.name === stripped)) {
-                ownerTable = t;
-                actualColName = stripped;
-                break;
+          const mapping = colMappings[colName];
+          if (mapping?.isExpression) {
+            throw new Error(`Cannot update computed/expression column "${colName}".`);
+          }
+          let ownerTable = mapping?.tableName || "";
+          let actualColName = mapping?.realColumn || colName;
+
+          if (ownerTable) {
+            if (!tableSchemas[ownerTable]) {
+              const matched = canvasTableNames.find(
+                (t) => t.toLowerCase() === ownerTable.toLowerCase() || t.startsWith(ownerTable)
+              );
+              if (matched) ownerTable = matched;
+            }
+          }
+
+          if (!ownerTable) {
+            for (const t of canvasTableNames) {
+              if (actualColName.startsWith(`${t}_`)) {
+                const stripped = actualColName.slice(t.length + 1);
+                if (tableSchemas[t]?.some((c) => c.name === stripped)) {
+                  ownerTable = t;
+                  actualColName = stripped;
+                  break;
+                }
+              } else if (actualColName.startsWith(`${t}.`)) {
+                const stripped = actualColName.slice(t.length + 1);
+                if (tableSchemas[t]?.some((c) => c.name === stripped)) {
+                  ownerTable = t;
+                  actualColName = stripped;
+                  break;
+                }
               }
             }
           }
@@ -1951,9 +1971,9 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
           if (!ownerTable) {
             ownerTable =
               canvasTableNames.find((t) =>
-                tableSchemas[t]?.some((c) => c.name === colName)
+                tableSchemas[t]?.some((c) => c.name === actualColName)
               ) ||
-              tables.find((t) => tableSchemas[t]?.some((c) => c.name === colName)) ||
+              tables.find((t) => tableSchemas[t]?.some((c) => c.name === actualColName)) ||
               baseTable;
           }
 
@@ -1971,7 +1991,13 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
           const whereConditions: string[] = [];
           if (pkCols.length > 0) {
             for (const pk of pkCols) {
-              const pkVal = resolveTablePkValue(tblName, pk, origRow, joins, baseTable);
+              let pkVal = resolveTablePkValue(tblName, pk, origRow, joins, baseTable);
+              if (pkVal === undefined || pkVal === null) {
+                const mapped = Object.values(colMappings).find(
+                  (m) => m.realColumn === pk && (!m.tableName || m.tableName === tblName) && origRow[m.alias] !== undefined
+                );
+                if (mapped) pkVal = origRow[mapped.alias];
+              }
               if (pkVal !== undefined && pkVal !== null) {
                 const qCol = quoteIdent(pk, dialect);
                 if (typeof pkVal === "number") {
@@ -1987,12 +2013,23 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
 
           // Fallback if no PK could be resolved: match all available original columns belonging to this table
           if (whereConditions.length === 0) {
-            const matchingCols = tableCols.filter(
-              (c) => origRow[c.name] !== undefined && origRow[c.name] !== null
-            );
+            const matchingCols = tableCols.filter((c) => {
+              const isDirect = origRow[c.name] !== undefined && origRow[c.name] !== null;
+              const isMapped = Object.values(colMappings).some(
+                (m) => m.realColumn === c.name && (!m.tableName || m.tableName === tblName) && origRow[m.alias] !== undefined && origRow[m.alias] !== null
+              );
+              return isDirect || isMapped;
+            });
+
             if (matchingCols.length > 0) {
               matchingCols.forEach((c) => {
-                const v = origRow[c.name];
+                let v = origRow[c.name];
+                if (v === undefined || v === null) {
+                  const mapped = Object.values(colMappings).find(
+                    (m) => m.realColumn === c.name && (!m.tableName || m.tableName === tblName) && origRow[m.alias] !== undefined
+                  );
+                  if (mapped) v = origRow[mapped.alias];
+                }
                 const qCol = quoteIdent(c.name, dialect);
                 if (typeof v === "number") {
                   whereConditions.push(`${qCol} = ${v}`);
