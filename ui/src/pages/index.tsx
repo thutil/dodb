@@ -1287,6 +1287,7 @@ export default function Home() {
                 />
               ) : activeView === "sql" ? (
                 <SqlConsole
+                  activeProfile={activeProfile}
                   activeDatabase={activeDatabase}
                   activeTable={activeTable}
                   tables={tables}

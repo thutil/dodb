@@ -7,13 +7,22 @@ import {
   Edit2, Edit3, Trash2, RotateCcw, Eye, Search, X, Plus, Key, Zap,
   GripHorizontal, ListFilter
 } from "lucide-react";
-import { QueryExecutionResult, ColumnInfo } from "../types";
+import { QueryExecutionResult, ColumnInfo, ConnectionProfile } from "../types";
 import { PendingChanges, CommitResult } from "./DataGrid";
 import { isGeometryColumn, isGisData, formatGisSummary, parseGisToGeoJson } from "../utils/gisUtils";
 import { GisMapViewer, GisFeatureRecord } from "./GisMapViewer";
 import { splitSqlStatements, getStatementAtLine, stripCommentsAndTrim, extractTableFromSql, extractColumnMappingsFromSql } from "../utils/sqlUtils";
+import { apiClient } from "../utils/apiClient";
+import {
+  DatabaseSchemaInfo,
+  SchemaRelation,
+  extractTableAliasesFromSql,
+  getAutocompleteContext,
+  predictInlineSqlCompletion,
+} from "../utils/sqlAutocomplete";
 
 interface SqlConsoleProps {
+  activeProfile?: ConnectionProfile | null;
   activeDatabase: string;
   activeTable: string | null;
   tables?: string[];
@@ -62,7 +71,10 @@ const SQL_FUNCTIONS = [
   { name: "CAST", snippet: "CAST(${1:expr} AS ${2:TYPE})" }
 ];
 
+const schemaCache = new Map<string, DatabaseSchemaInfo>();
+
 export const SqlConsole: React.FC<SqlConsoleProps> = ({
+  activeProfile,
   activeDatabase,
   activeTable,
   tables = [],
@@ -148,12 +160,115 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<Monaco | null>(null);
   const completionProviderRef = useRef<any>(null);
+  const inlineCompletionProviderRef = useRef<any>(null);
 
-  // Keep references to tables and columns for completion provider
+  // Schema state for intelligent autocomplete
+  const [schemaInfo, setSchemaInfo] = useState<DatabaseSchemaInfo>(() => {
+    const key = `${activeProfile?.id || "default"}:${activeDatabase || "default"}`;
+    return (
+      schemaCache.get(key) || {
+        tables,
+        tableColumns: new Map<string, ColumnInfo[]>(),
+      }
+    );
+  });
+
+  const activeDatabaseRef = useRef(activeDatabase);
+  const activeTableRef = useRef(activeTable);
   const tablesRef = useRef(tables);
   const columnsRef = useRef(columns);
+  const schemaInfoRef = useRef(schemaInfo);
+  const activeProfileRef = useRef(activeProfile);
+
+  activeDatabaseRef.current = activeDatabase;
+  activeTableRef.current = activeTable;
   tablesRef.current = tables;
   columnsRef.current = columns;
+  schemaInfoRef.current = schemaInfo;
+  activeProfileRef.current = activeProfile;
+
+  // Background Schema Indexing for active profile + database
+  useEffect(() => {
+    if (!activeProfile?.id || !activeDatabase) return;
+    const cacheKey = `${activeProfile.id}:${activeDatabase}`;
+    if (schemaCache.has(cacheKey)) {
+      setSchemaInfo(schemaCache.get(cacheKey)!);
+      return;
+    }
+
+    let alive = true;
+    apiClient
+      .getSchemaDiagram(activeProfile.id, activeDatabase)
+      .then((data: any) => {
+        if (!alive) return;
+        const tMap = new Map<string, ColumnInfo[]>();
+        const tList: string[] = [];
+        const rels: SchemaRelation[] = [];
+
+        if (data && Array.isArray(data.tables)) {
+          data.tables.forEach((t: any) => {
+            tList.push(t.name);
+            const cols: ColumnInfo[] = Array.isArray(t.columns)
+              ? t.columns.map((c: any) => ({
+                  name: c.name,
+                  type: c.type || "text",
+                  nullable: !!c.nullable,
+                  primaryKey: !!c.primaryKey,
+                  defaultValue: c.default || null,
+                  autoIncrement: !!c.autoIncrement,
+                }))
+              : [];
+            tMap.set(t.name.toLowerCase(), cols);
+            if (t.name.includes(".")) {
+              const bareName = t.name.split(".").pop();
+              if (bareName && !tMap.has(bareName.toLowerCase())) {
+                tMap.set(bareName.toLowerCase(), cols);
+              }
+            }
+          });
+        }
+
+        if (data && Array.isArray(data.relations)) {
+          data.relations.forEach((r: any) => {
+            rels.push({
+              fromTable: r.fromTable || r.sourceTable,
+              fromColumn: r.fromColumn || r.sourceColumn,
+              toTable: r.toTable || r.targetTable,
+              toColumn: r.toColumn || r.targetColumn,
+            });
+          });
+        }
+
+        const info: DatabaseSchemaInfo = {
+          tables: tList.length > 0 ? tList : tables,
+          tableColumns: tMap,
+          relations: rels,
+        };
+        schemaCache.set(cacheKey, info);
+        setSchemaInfo(info);
+      })
+      .catch((err) => {
+        console.warn("Could not load schema diagram for SQL autocomplete:", err);
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [activeProfile?.id, activeDatabase, tables]);
+
+  // Clean up Monaco completion providers on unmount
+  useEffect(() => {
+    return () => {
+      if (completionProviderRef.current) {
+        completionProviderRef.current.dispose();
+        completionProviderRef.current = null;
+      }
+      if (inlineCompletionProviderRef.current) {
+        inlineCompletionProviderRef.current.dispose();
+        inlineCompletionProviderRef.current = null;
+      }
+    };
+  }, []);
 
   const numUpdates = Object.keys(editedCells).length;
   const numDeletes = deletedRowIndices.size;
@@ -694,11 +809,19 @@ const quoteTableIdentifier = (tbl: string): string => {
   const setupCompletion = useCallback((monaco: Monaco) => {
     if (completionProviderRef.current) {
       completionProviderRef.current.dispose();
+      completionProviderRef.current = null;
     }
 
     completionProviderRef.current = monaco.languages.registerCompletionItemProvider("sql", {
       triggerCharacters: [" ", ".", "(", ",", '"', "'", "`"],
       provideCompletionItems: (model: any, position: any) => {
+        const lineUntilCursor: string = model.getValueInRange({
+          startLineNumber: position.lineNumber,
+          startColumn: 1,
+          endLineNumber: position.lineNumber,
+          endColumn: position.column,
+        });
+        const fullSql: string = model.getValue();
         const word = model.getWordUntilPosition(position);
 
         const range = {
@@ -708,50 +831,268 @@ const quoteTableIdentifier = (tbl: string): string => {
           endColumn: word.endColumn,
         };
 
+        const currentActiveDb = activeDatabaseRef.current;
+        const currentSchema = schemaInfoRef.current;
+        const currentTables = currentSchema.tables && currentSchema.tables.length > 0
+          ? currentSchema.tables
+          : tablesRef.current;
+        const tableAliases = extractTableAliasesFromSql(fullSql);
+        const context = getAutocompleteContext(lineUntilCursor);
+
+        // CASE 1: Dot Completion (e.g. "p." or "provinces." or "r.id")
+        if (context.type === "dot") {
+          const prefixLower = context.prefix.toLowerCase();
+          // Find which physical table name this prefix maps to
+          const matchedAlias = tableAliases.find((a) => a.alias.toLowerCase() === prefixLower);
+          const targetTableName = matchedAlias ? matchedAlias.tableName : context.prefix;
+          const targetTableLower = targetTableName.toLowerCase();
+
+          let targetCols = currentSchema.tableColumns.get(targetTableLower);
+          if (!targetCols && targetTableLower === activeTableRef.current?.toLowerCase()) {
+            targetCols = columnsRef.current;
+          }
+          if (!targetCols) {
+            for (const [tName, cols] of currentSchema.tableColumns.entries()) {
+              if (tName === targetTableLower || tName.endsWith("." + targetTableLower)) {
+                targetCols = cols;
+                break;
+              }
+            }
+          }
+
+          const suggestions: any[] = [];
+          const colFilter = context.columnPrefix.toLowerCase();
+          const colRange = {
+            startLineNumber: position.lineNumber,
+            endLineNumber: position.lineNumber,
+            startColumn: position.column - context.columnPrefix.length,
+            endColumn: position.column,
+          };
+
+          if (targetCols && targetCols.length > 0) {
+            targetCols.forEach((col) => {
+              if (!colFilter || col.name.toLowerCase().includes(colFilter)) {
+                suggestions.push({
+                  label: {
+                    label: col.name,
+                    detail: ` [${col.type}]`,
+                    description: targetTableName,
+                  },
+                  kind: col.primaryKey
+                    ? monaco.languages.CompletionItemKind.Property
+                    : monaco.languages.CompletionItemKind.Field,
+                  insertText: col.name,
+                  range: colRange,
+                  sortText: (col.primaryKey ? "00_" : "01_") + col.name,
+                });
+              }
+            });
+          }
+
+          // Also suggest wildcard '*' for table (e.g. p.*)
+          suggestions.push({
+            label: {
+              label: "*",
+              detail: ` (All columns of ${targetTableName})`,
+            },
+            kind: monaco.languages.CompletionItemKind.Value,
+            insertText: "*",
+            range: colRange,
+            sortText: "00_*",
+          });
+
+          return { suggestions };
+        }
+
+        // CASE 2: Table Specification Context (After FROM, JOIN, INTO, UPDATE, TABLE)
+        if (context.type === "table") {
+          const suggestions: any[] = [];
+          currentTables.forEach((tbl) => {
+            suggestions.push({
+              label: {
+                label: tbl,
+                detail: " [Table]",
+                description: currentActiveDb,
+              },
+              kind: monaco.languages.CompletionItemKind.Class,
+              insertText: tbl,
+              range,
+              sortText: "00_" + tbl,
+            });
+          });
+          return { suggestions };
+        }
+
+        // CASE 3: Join ON Condition Context (After ON)
+        if (context.type === "on") {
+          const suggestions: any[] = [];
+
+          // Intelligent Foreign Key & Smart Join Suggestions
+          if (tableAliases.length >= 2) {
+            const lastAlias = tableAliases[tableAliases.length - 1];
+            const prevAliases = tableAliases.slice(0, -1);
+            const lastTableCols = currentSchema.tableColumns.get(lastAlias.tableName.toLowerCase()) || [];
+
+            for (const prevAlias of prevAliases) {
+              const prevTableCols = currentSchema.tableColumns.get(prevAlias.tableName.toLowerCase()) || [];
+
+              // 1. Check known Foreign Key relations from schema diagram
+              if (currentSchema.relations) {
+                for (const rel of currentSchema.relations) {
+                  if (
+                    rel.fromTable.toLowerCase() === lastAlias.tableName.toLowerCase() &&
+                    rel.toTable.toLowerCase() === prevAlias.tableName.toLowerCase()
+                  ) {
+                    suggestions.push({
+                      label: {
+                        label: `${lastAlias.alias}.${rel.fromColumn} = ${prevAlias.alias}.${rel.toColumn}`,
+                        detail: " (Foreign Key Join)",
+                      },
+                      kind: monaco.languages.CompletionItemKind.Snippet,
+                      insertText: `${lastAlias.alias}.${rel.fromColumn} = ${prevAlias.alias}.${rel.toColumn}`,
+                      range,
+                      sortText: "00_fk",
+                    });
+                  } else if (
+                    rel.toTable.toLowerCase() === lastAlias.tableName.toLowerCase() &&
+                    rel.fromTable.toLowerCase() === prevAlias.tableName.toLowerCase()
+                  ) {
+                    suggestions.push({
+                      label: {
+                        label: `${lastAlias.alias}.${rel.toColumn} = ${prevAlias.alias}.${rel.fromColumn}`,
+                        detail: " (Foreign Key Join)",
+                      },
+                      kind: monaco.languages.CompletionItemKind.Snippet,
+                      insertText: `${lastAlias.alias}.${rel.toColumn} = ${prevAlias.alias}.${rel.fromColumn}`,
+                      range,
+                      sortText: "00_fk",
+                    });
+                  }
+                }
+              }
+
+              // 2. Intelligent join condition heuristic: <tableSingular>_id == id
+              const lastSingular = lastAlias.tableName.replace(/s$/, "").toLowerCase();
+              const prevSingular = prevAlias.tableName.replace(/s$/, "").toLowerCase();
+
+              for (const lc of lastTableCols) {
+                for (const pc of prevTableCols) {
+                  const lName = lc.name.toLowerCase();
+                  const pName = pc.name.toLowerCase();
+                  if (
+                    (lName === `${prevSingular}_id` && pName === "id") ||
+                    (pName === `${lastSingular}_id` && lName === "id") ||
+                    (lName === pName && lName.includes("_id")) ||
+                    (lName === pName && lName === "code")
+                  ) {
+                    const joinExpr = `${lastAlias.alias}.${lc.name} = ${prevAlias.alias}.${pc.name}`;
+                    if (!suggestions.some((s) => s.label.label === joinExpr)) {
+                      suggestions.push({
+                        label: {
+                          label: joinExpr,
+                          detail: " (Smart Join Condition)",
+                        },
+                        kind: monaco.languages.CompletionItemKind.Snippet,
+                        insertText: joinExpr,
+                        range,
+                        sortText: "01_smart",
+                      });
+                    }
+                  }
+                }
+              }
+            }
+
+            // Suggest table aliases
+            tableAliases.forEach((a) => {
+              suggestions.push({
+                label: {
+                  label: a.alias,
+                  detail: ` [Alias -> ${a.tableName}]`,
+                },
+                kind: monaco.languages.CompletionItemKind.Variable,
+                insertText: a.alias,
+                range,
+                sortText: "02_" + a.alias,
+              });
+            });
+          }
+
+          if (suggestions.length > 0) {
+            return { suggestions };
+          }
+        }
+
+        // CASE 4: General Context (SELECT, WHERE, GROUP BY, ORDER BY, etc.)
         const suggestions: any[] = [];
 
-        // 1. Dynamic Tables from Active Database
-        tablesRef.current.forEach((tbl) => {
+        // 1. Table Aliases in current query (r, p)
+        tableAliases.forEach((a) => {
+          if (a.alias !== a.tableName) {
+            suggestions.push({
+              label: {
+                label: a.alias,
+                detail: ` [Alias -> ${a.tableName}]`,
+              },
+              kind: monaco.languages.CompletionItemKind.Variable,
+              insertText: a.alias,
+              range,
+              sortText: "00_" + a.alias,
+            });
+          }
+        });
+
+        // 2. Columns of tables referenced in query
+        tableAliases.forEach((a) => {
+          const cols = currentSchema.tableColumns.get(a.tableName.toLowerCase()) || [];
+          cols.forEach((col) => {
+            suggestions.push({
+              label: {
+                label: col.name,
+                detail: ` [${col.type}]`,
+                description: a.alias,
+              },
+              kind: monaco.languages.CompletionItemKind.Field,
+              insertText: col.name,
+              range,
+              sortText: (col.primaryKey ? "01_" : "02_") + col.name,
+            });
+          });
+        });
+
+        // If no table aliases in query yet, suggest columns from active table
+        if (tableAliases.length === 0) {
+          columnsRef.current.forEach((col) => {
+            suggestions.push({
+              label: {
+                label: col.name,
+                detail: ` [Column: ${col.type}]`,
+                description: col.primaryKey ? "PK" : "",
+              },
+              kind: monaco.languages.CompletionItemKind.Field,
+              insertText: col.name,
+              range,
+              sortText: "02_" + col.name,
+            });
+          });
+        }
+
+        // 3. Tables from active database
+        currentTables.forEach((tbl) => {
           suggestions.push({
             label: {
               label: tbl,
               detail: " [Table]",
-              description: activeDatabase,
+              description: currentActiveDb,
             },
             kind: monaco.languages.CompletionItemKind.Class,
             insertText: tbl,
             range,
-            sortText: "00_" + tbl,
+            sortText: "03_" + tbl,
           });
         });
 
-        // 2. Dynamic Columns from Active Table
-        columnsRef.current.forEach((col) => {
-          suggestions.push({
-            label: {
-              label: col.name,
-              detail: ` [Column: ${col.type}]`,
-              description: col.primaryKey ? "PK" : "",
-            },
-            kind: monaco.languages.CompletionItemKind.Field,
-            insertText: col.name,
-            range,
-            sortText: "01_" + col.name,
-          });
-        });
-
-        // 3. SQL Keywords
-        SQL_KEYWORDS.forEach((kw) => {
-          suggestions.push({
-            label: kw,
-            kind: monaco.languages.CompletionItemKind.Keyword,
-            insertText: kw,
-            range,
-            sortText: "02_" + kw,
-          });
-        });
-
-        // 4. SQL Built-in Functions with Snippets
+        // 4. SQL Functions
         SQL_FUNCTIONS.forEach((fn) => {
           suggestions.push({
             label: {
@@ -762,20 +1103,76 @@ const quoteTableIdentifier = (tbl: string): string => {
             insertText: fn.snippet,
             insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
             range,
-            sortText: "03_" + fn.name,
+            sortText: "04_" + fn.name,
+          });
+        });
+
+        // 5. SQL Keywords
+        SQL_KEYWORDS.forEach((kw) => {
+          suggestions.push({
+            label: kw,
+            kind: monaco.languages.CompletionItemKind.Keyword,
+            insertText: kw,
+            range,
+            sortText: "05_" + kw,
           });
         });
 
         return { suggestions };
       },
     });
-  }, [activeDatabase]);
+
+    if (inlineCompletionProviderRef.current) {
+      inlineCompletionProviderRef.current.dispose();
+      inlineCompletionProviderRef.current = null;
+    }
+
+    // Register Inline Ghost-Text Provider (100% Offline, Instant Heuristic Engine)
+    if (monaco.languages.registerInlineCompletionsProvider) {
+      inlineCompletionProviderRef.current = monaco.languages.registerInlineCompletionsProvider("sql", {
+        provideInlineCompletions: async (model: any, position: any) => {
+          const lineUntilCursor: string = model.getValueInRange({
+            startLineNumber: position.lineNumber,
+            startColumn: 1,
+            endLineNumber: position.lineNumber,
+            endColumn: position.column,
+          });
+          const fullSql: string = model.getValue();
+
+          const predicted = predictInlineSqlCompletion(
+            fullSql,
+            lineUntilCursor,
+            schemaInfoRef.current,
+            activeTableRef.current
+          );
+
+          if (!predicted) {
+            return { items: [] };
+          }
+
+          return {
+            items: [
+              {
+                insertText: predicted,
+                range: {
+                  startLineNumber: position.lineNumber,
+                  startColumn: position.column,
+                  endLineNumber: position.lineNumber,
+                  endColumn: position.column,
+                },
+              },
+            ],
+          };
+        },
+        freeInlineCompletions: () => {},
+      });
+    }
+  }, []);
 
   const handleEditorDidMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
     monacoRef.current = monaco;
 
-    // Define custom dark theme
     monaco.editor.defineTheme("dodb-dark", {
       base: "vs-dark",
       inherit: true,
@@ -797,9 +1194,22 @@ const quoteTableIdentifier = (tbl: string): string => {
     });
 
     monaco.editor.setTheme(theme === "dark" ? "dodb-dark" : "light");
+
+    // Enable inline suggestions (ghost text) & smart tab completion
+    editor.updateOptions({
+      inlineSuggest: {
+        enabled: true,
+        mode: "subwordSmart",
+      },
+      tabCompletion: "on",
+      suggest: {
+        preview: true,
+        showInlineDetails: true,
+      },
+    });
+
     setupCompletion(monaco);
 
-    // Track text selection changes in editor
     editor.onDidChangeCursorSelection(() => {
       const sel = editor.getSelection();
       const model = editor.getModel();
@@ -816,12 +1226,10 @@ const quoteTableIdentifier = (tbl: string): string => {
       }
     });
 
-    // Track cursor line & column
     editor.onDidChangeCursorPosition((e) => {
       setCursorPos({ line: e.position.lineNumber, column: e.position.column });
     });
 
-    // Keyboard shortcut: Cmd/Ctrl + Enter to run selection or current query
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
       handleRunSelectionOrCurrent();
     });
