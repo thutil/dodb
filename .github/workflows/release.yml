@@ -104,34 +104,34 @@ jobs:
 
           mkdir -p Casks
           cat <<EOF > Casks/dodb.rb
-cask "dodb" do
-  version "${VERSION}"
-  sha256 "${SHA256}"
+          cask "dodb" do
+            version "${VERSION}"
+            sha256 "${SHA256}"
 
-  url "https://github.com/thutil/dodb/releases/download/v#{version}/dodb_#{version}_universal.dmg"
-  name "dodb"
-  desc "Modern Multi-Platform Database Manager for Postgres, MySQL, MariaDB & SQLite"
-  homepage "https://github.com/thutil/dodb"
+            url "https://github.com/thutil/dodb/releases/download/v#{version}/dodb_#{version}_universal.dmg"
+            name "dodb"
+            desc "Modern Multi-Platform Database Manager for Postgres, MySQL, MariaDB & SQLite"
+            homepage "https://github.com/thutil/dodb"
 
-  livecheck do
-    url :url
-    strategy :github_latest
-  end
+            livecheck do
+              url :url
+              strategy :github_latest
+            end
 
-  auto_updates true
-  depends_on macos: ">= :big_sur"
+            auto_updates true
+            depends_on macos: ">= :big_sur"
 
-  app "dodb.app"
+            app "dodb.app"
 
-  zap trash: [
-    "~/Library/Application Support/com.thutil.dodb",
-    "~/Library/Caches/com.thutil.dodb",
-    "~/Library/Preferences/com.thutil.dodb.plist",
-    "~/Library/Saved Application State/com.thutil.dodb.savedState",
-    "~/Library/WebKit/com.thutil.dodb",
-  ]
-end
-EOF
+            zap trash: [
+              "~/Library/Application Support/com.thutil.dodb",
+              "~/Library/Caches/com.thutil.dodb",
+              "~/Library/Preferences/com.thutil.dodb.plist",
+              "~/Library/Saved Application State/com.thutil.dodb.savedState",
+              "~/Library/WebKit/com.thutil.dodb",
+            ]
+          end
+          EOF
 
           echo "Generated Casks/dodb.rb:"
           cat Casks/dodb.rb
