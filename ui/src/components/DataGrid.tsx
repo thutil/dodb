@@ -1354,13 +1354,15 @@ export const DataGrid: React.FC<DataGridProps> = ({
                       title={`Click to sort by ${c.name} (Shift-click to clear)`}
                     >
                       <div className="th-content">
-                        {isPk && (
-                          <span title="Primary Key">
-                            <Key size={11} className="pk-icon" />
-                          </span>
-                        )}
-                        <span className="col-name">{c.name}</span>
-                        <span className="col-type">{c.type}</span>
+                        <div className="th-col-main">
+                          {isPk && (
+                            <span title="Primary Key" className="pk-badge">
+                              <Key size={11} className="pk-icon" />
+                            </span>
+                          )}
+                          <span className="col-name">{c.name}</span>
+                          <span className="col-type">{c.type}</span>
+                        </div>
                         <span className="sort-icon-wrap">
                           {isSorted ? (
                             sortOrder === "ASC" ? (
@@ -2663,38 +2665,120 @@ export const DataGrid: React.FC<DataGridProps> = ({
           background: var(--bg-tertiary);
           color: var(--text-sub);
           text-align: left;
-          padding: 7px 10px;
+          padding: 8px 12px;
           border-bottom: 1px solid var(--border-light);
           border-right: 1px solid var(--border-light);
           z-index: 10;
           font-weight: 600;
+          user-select: none;
         }
 
-        .hdr-flex {
+        .th-index {
+          width: 48px;
+          min-width: 48px;
+          max-width: 48px;
+          text-align: center;
+        }
+
+        .th-actions {
+          width: 76px;
+          min-width: 76px;
+          max-width: 76px;
+          text-align: center;
+        }
+
+        .th-column {
+          min-width: 140px;
+          cursor: pointer;
+          transition: background 0.15s ease;
+        }
+
+        .th-column:hover {
+          background: var(--bg-hover);
+        }
+
+        .th-column.sorted {
+          background: var(--bg-hover);
+          color: var(--text-main);
+        }
+
+        .th-content {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+          min-height: 18px;
+        }
+
+        .th-col-main {
           display: flex;
           align-items: center;
           gap: 6px;
-          min-height: 18px;
+          min-width: 0;
+          overflow: hidden;
         }
-        .pk-icon { color: var(--text-muted); flex-shrink: 0; }
-        .col-title {
-          font-weight: 500;
+
+        .pk-badge {
+          display: inline-flex;
+          align-items: center;
+          flex-shrink: 0;
+        }
+
+        .pk-icon {
+          color: #eab308;
+          flex-shrink: 0;
+        }
+
+        .col-name {
+          font-weight: 600;
           color: var(--text-main);
           font-size: 11.5px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
-        .col-type-tag {
+
+        .col-type {
           font-size: 9px;
           color: var(--text-muted);
           font-family: var(--font-mono);
           background: var(--bg-card);
-          padding: 1px 4px;
+          padding: 1.5px 5px;
           border-radius: 3px;
           border: 1px solid var(--border-light);
           white-space: nowrap;
+          flex-shrink: 0;
+          text-transform: lowercase;
+          font-weight: 500;
+          line-height: 1.2;
         }
 
-        .num-col { width: 44px; min-width: 44px; text-align: center; }
-        .action-col { width: 80px; min-width: 80px; text-align: center; }
+        .sort-icon-wrap {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+          margin-left: 2px;
+        }
+
+        .sort-idle {
+          color: var(--text-muted);
+          opacity: 0.35;
+          transition: opacity 0.15s ease, color 0.15s ease;
+        }
+
+        .th-column:hover .sort-idle {
+          opacity: 0.85;
+          color: var(--text-main);
+        }
+
+        .sort-active {
+          color: var(--accent-primary, #3b82f6);
+          opacity: 1;
+        }
+
+        .num-col { width: 48px; min-width: 48px; text-align: center; }
+        .action-col { width: 76px; min-width: 76px; text-align: center; }
 
         .row-index {
           text-align: center;
