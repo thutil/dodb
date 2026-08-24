@@ -5,11 +5,11 @@
 <h1 align="center">dodb</h1>
 
 <p align="center">
-  <strong>A modern, native database manager for macOS with Visual Query Builder, PostGIS Maps, and ER Diagrams.</strong>
+  <strong>A modern, native database manager for macOS & Windows with Visual Query Builder, PostGIS Maps, and ER Diagrams.</strong>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Platform-macOS%20(Apple%20Silicon%20%26%20Intel)-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Platform macOS" />
+  <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Windows-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Platform macOS and Windows" />
   <img src="https://img.shields.io/badge/Tauri-v2-24C8D8?style=for-the-badge&logo=tauri&logoColor=white" alt="Tauri 2" />
   <img src="https://img.shields.io/badge/Rust-SQLx-DEA584?style=for-the-badge&logo=rust&logoColor=white" alt="Rust" />
   <img src="https://img.shields.io/badge/Next.js-16%20Turbopack-000000?style=for-the-badge&logo=next.js&logoColor=white" alt="Next.js" />
@@ -21,11 +21,12 @@
 </p>
 
 > **dodb — “ดู DB”** _(Doo DB)_  
+> 💡 **Fun Fact:** The name **dodb** comes from the Thai word **“ดู” (do)**, which translates to **“to see / look at”** — together with **DB**, it literally means **“See your DB”** (ดู DB).  
 > _See your data. Understand your database. Build queries visually._
 
-**dodb** is a blazing-fast, lightweight native macOS database client built around a core philosophy: **working with a database should start with seeing it clearly.**
+**dodb** is a blazing-fast, lightweight native database client for **macOS & Windows** built around a core philosophy: **working with a database should start with seeing it clearly.**
 
-No bloated Java runtimes, no slow Electron shells, and no hidden cloud proxies. Just pure Rust performance, crisp macOS aesthetics, and modern visual workflow tools.
+No bloated Java runtimes, no slow Electron shells, and no hidden cloud proxies. Just pure Rust performance, crisp native aesthetics, and modern visual workflow tools.
 
 ---
 
@@ -163,7 +164,7 @@ dodb/
     └── src/pages/
 ```
 
-- **Desktop Shell**: Tauri 2 (Lightweight, low memory footprint, native WebKit)
+- **Desktop Shell**: Tauri 2 (Lightweight, low memory footprint, native WebKit on macOS / WebView2 on Windows)
 - **Application Core**: Rust · Tokio · SQLx (Direct async pooling)
 - **Visual Canvas**: `@xyflow/react` (React Flow)
 - **Map Engine**: MapLibre GL + Custom Offline Tile Cache Protocol
@@ -172,17 +173,22 @@ dodb/
 
 ---
 
-## 🍏 macOS Installation & Gatekeeper Fix
+## 📦 Installation & Setup
+
+### 🪟 Windows
+Download the `.msi` or `.exe` installer from the latest [Releases](../../releases) and run setup.
+
+### 🍏 macOS & Gatekeeper Fix
 
 When opening downloaded `.dmg` or `.app` releases on macOS without Apple Developer ID notarization, Gatekeeper may display a security prompt:
 
-### วิธีแก้ไข / Quick Fix
+#### Quick Fix / Workaround
 
-**Method 1: Terminal (Recommended / แนะนำ)**  
+**Method 1: Terminal (Recommended)**  
 After copying `dodb.app` into `/Applications`, open **Terminal** and run:
 
 ```bash
-xattr -cr /Applications/dodb.app
+xattr -dr com.apple.quarantine /Applications/dodb.app
 ```
 
 Then launch **dodb** normally from Applications or Spotlight (`Cmd + Space`).
@@ -199,7 +205,8 @@ Then launch **dodb** normally from Applications or Spotlight (`Cmd + Space`).
 
 ### Prerequisites
 
-- macOS 11.0+ (Apple Silicon `aarch64` or Intel `x86_64`)
+- **macOS**: macOS 11.0+ (Apple Silicon `aarch64` or Intel `x86_64`)
+- **Windows**: Windows 10/11 (64-bit)
 - Rust Toolchain: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
 - Node.js 18+ and `pnpm`: `npm install -g pnpm`
 
@@ -217,13 +224,13 @@ pnpm install
 pnpm dev
 ```
 
-### Build Production Release (.dmg & .app)
+### Build Production Release (.dmg & .app on macOS / .msi & .exe on Windows)
 
 ```bash
 pnpm build
 ```
 
-The compiled bundles will be generated under `src-tauri/target/release/bundle/dmg/` and `src-tauri/target/release/bundle/macos/`.
+The compiled bundles will be generated under `src-tauri/target/release/bundle/`.
 
 ---
 
