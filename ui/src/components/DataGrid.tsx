@@ -1150,6 +1150,18 @@ export const DataGrid: React.FC<DataGridProps> = ({
                 onPageChange(0);
               }}
             />
+            {searchQuery && (
+              <button
+                className="search-clear-btn"
+                onClick={() => {
+                  if (onSearchChange) onSearchChange("");
+                  onPageChange(0);
+                }}
+                title={t("close", language)}
+              >
+                <X size={11} />
+              </button>
+            )}
           </div>
           <button
             className="btn btn-secondary refresh-table-btn"

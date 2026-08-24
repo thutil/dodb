@@ -1,6 +1,6 @@
 use tauri::{command, State};
 use crate::models::SupportedDB;
-use crate::db_core::{get_pool, execute_query, execute_command_raw, execute_transaction, escape_sql_literal, resolve_profile, DbState, TxStep};
+use crate::db_core::{get_pool, execute_query, execute_command_raw, execute_transaction, escape_sql_literal, resolve_profile, DbPool, DbState, TxStep};
 
 // ==========================================
 // Dialect Helpers (Postgres / MariaDB / SQLite)
@@ -380,6 +380,64 @@ pub async fn get_columns(id: String, database: String, table: String, state: Sta
     Ok(serde_json::json!({ "columns": columns }))
 }
 
+async fn get_table_column_names_internal(
+    pool: &DbPool,
+    db_type: SupportedDB,
+    table: &str,
+) -> Vec<String> {
+    let query = match db_type {
+        SupportedDB::Postgres => {
+            let (schema_part, table_part) = if table.contains('.') {
+                let parts: Vec<&str> = table.splitn(2, '.').collect();
+                (parts[0].replace('"', ""), parts[1].replace('"', ""))
+            } else {
+                ("public".to_string(), table.replace('"', ""))
+            };
+            format!(
+                "SELECT column_name::text AS name FROM information_schema.columns WHERE (table_schema = '{0}' OR LOWER(table_schema) = LOWER('{0}')) AND (table_name = '{1}' OR LOWER(table_name) = LOWER('{1}')) ORDER BY ordinal_position",
+                schema_part, table_part
+            )
+        }
+        SupportedDB::Mariadb => format!("SHOW COLUMNS FROM `{}`", table.replace('`', "")),
+        SupportedDB::Sqlite => format!("PRAGMA table_info(\"{}\")", table.replace('"', "")),
+    };
+
+    if let Ok(rows) = execute_query(pool, &query).await {
+        let mut cols = Vec::new();
+        for row in rows {
+            if let Some(obj) = row.as_object() {
+                if let Some(name) = obj.get("name").or_else(|| obj.get("Field")).and_then(|v| v.as_str()) {
+                    cols.push(name.to_string());
+                }
+            }
+        }
+        if !cols.is_empty() {
+            return cols;
+        }
+    }
+
+    // Fallback: probe with LIMIT 1
+    let probe_query = match db_type {
+        SupportedDB::Postgres => {
+            if table.contains('.') {
+                let parts: Vec<&str> = table.splitn(2, '.').collect();
+                format!("SELECT * FROM \"{}\".\"{}\" LIMIT 1", parts[0].replace('"', ""), parts[1].replace('"', ""))
+            } else {
+                format!("SELECT * FROM \"{}\" LIMIT 1", table.replace('"', ""))
+            }
+        }
+        SupportedDB::Mariadb => format!("SELECT * FROM `{}` LIMIT 1", table.replace('`', "")),
+        SupportedDB::Sqlite => format!("SELECT * FROM \"{}\" LIMIT 1", table.replace('"', "")),
+    };
+    if let Ok(rows) = execute_query(pool, &probe_query).await {
+        if let Some(obj) = rows.first().and_then(|r| r.as_object()) {
+            return obj.keys().cloned().collect();
+        }
+    }
+
+    Vec::new()
+}
+
 #[command]
 pub async fn get_rows(
     id: String, 
@@ -389,11 +447,12 @@ pub async fn get_rows(
     offset: u32,
     sort_column: Option<String>,
     sort_order: Option<String>,
-    _search_query: Option<String>,
+    search_query: Option<String>,
     filters: Option<Vec<serde_json::Value>>,
     state: State<'_, DbState>
 ) -> Result<serde_json::Value, String> {
     let profile = &resolve_profile(&state, &id)?;
+    let pool = get_pool(&state, profile, Some(&database)).await?;
     
     let table_ident = quote_table_ident(profile.r#type, &table);
     
@@ -407,6 +466,30 @@ pub async fn get_rows(
             let val = obj.get("value").cloned().unwrap_or(serde_json::Value::Null);
 
             where_clauses.push(build_filter_clause(profile.r#type, col, op, &val)?);
+        }
+    }
+
+    // Apply quick search across table columns if search_query is provided
+    if let Some(q) = search_query {
+        let q_trim = q.trim();
+        if !q_trim.is_empty() {
+            let cols = get_table_column_names_internal(&pool, profile.r#type, &table).await;
+            if !cols.is_empty() {
+                let escaped_val = escape_sql_literal(profile.r#type, q_trim);
+                let mut search_parts = Vec::new();
+                for col in cols {
+                    let col_ident = quote_column_ident(profile.r#type, &col);
+                    let part = match profile.r#type {
+                        SupportedDB::Postgres => format!("CAST({} AS TEXT) ILIKE '%{}%'", col_ident, escaped_val),
+                        SupportedDB::Mariadb => format!("CAST({} AS CHAR) LIKE '%{}%'", col_ident, escaped_val),
+                        SupportedDB::Sqlite => format!("CAST({} AS TEXT) LIKE '%{}%'", col_ident, escaped_val),
+                    };
+                    search_parts.push(part);
+                }
+                if !search_parts.is_empty() {
+                    where_clauses.push(format!("({})", search_parts.join(" OR ")));
+                }
+            }
         }
     }
     
@@ -432,8 +515,6 @@ pub async fn get_rows(
     
     let query = format!("SELECT * FROM {} {} {} LIMIT {} OFFSET {}", table_ident, where_sql, order_sql, limit, offset);
     let count_query = format!("SELECT COUNT(*) AS total FROM {} {}", table_ident, where_sql);
-    
-    let pool = get_pool(&state, profile, Some(&database)).await?;
     
     // Try querying with quoted identifier first; fallback to unquoted if identifier casing mismatch occurs (e.g. Postgres lowercase tables)
     let (rows, count_rows) = match tokio::join!(
@@ -844,4 +925,17 @@ mod tests {
             assert!(!statement_returns_rows(sql), "should not return rows: {sql}");
         }
     }
+
+    #[tokio::test]
+    async fn test_get_table_column_names_internal() {
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::query("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let db_pool = DbPool::Sqlite(pool);
+        let cols = get_table_column_names_internal(&db_pool, SupportedDB::Sqlite, "users").await;
+        assert_eq!(cols, vec!["id", "name", "email"]);
+    }
 }
+

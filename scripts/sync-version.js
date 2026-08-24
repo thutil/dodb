@@ -30,7 +30,7 @@ function getTargetVersion() {
     const rootPkg = JSON.parse(fs.readFileSync(rootPkgPath, "utf8"));
     if (rootPkg.version) return rootPkg.version;
   }
-  return "0.2.3";
+  return "0.2.4";
 }
 
 const version = getTargetVersion();

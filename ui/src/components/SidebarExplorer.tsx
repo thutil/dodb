@@ -98,7 +98,7 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
   const quoteIdent = (name: string) => quoteTableIdent(name, dialect);
 
   const filteredTables = tables.filter((table) =>
-    table.toLowerCase().includes(searchTerm.toLowerCase())
+    table.toLowerCase().includes(searchTerm.trim().toLowerCase())
   );
 
   const handleTableClick = (e: React.MouseEvent, table: string) => {
@@ -269,6 +269,11 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
             placeholder={t("sidebarFilterTables", language)}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && filteredTables.length > 0) {
+                onSelectTable(filteredTables[0]);
+              }
+            }}
             autoCapitalize="none"
             autoCorrect="off"
             spellCheck={false}
