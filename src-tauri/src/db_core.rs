@@ -1604,5 +1604,17 @@ mod tests {
         assert_eq!(obj.get("col_1"), Some(&serde_json::json!(2)));
         assert_eq!(obj.get("col_2"), Some(&serde_json::json!(3)));
     }
+
+    #[tokio::test]
+    async fn execute_query_preserves_selected_column_order() {
+        let pool = sqlite_pool().await;
+        // Query with columns intentionally out of alphabetical order (name_th before name_en)
+        let rows = execute_query(&pool, "SELECT 'Bangkok' AS name_th, 'Bangkok' AS name_en, 1 AS z_col, 2 AS a_col").await.unwrap();
+        assert_eq!(rows.len(), 1);
+        let obj = rows[0].as_object().unwrap();
+        let keys: Vec<&str> = obj.keys().map(|k| k.as_str()).collect();
+        assert_eq!(keys, vec!["name_th", "name_en", "z_col", "a_col"]);
+    }
 }
+
 
