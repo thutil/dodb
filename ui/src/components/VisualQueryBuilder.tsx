@@ -2252,7 +2252,9 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
               <span>Tables ({tables.length})</span>
             </div>
             <div className="search-wrap">
-              <Search size={11} className="search-icon" />
+              <span className="search-icon-wrap">
+                <Search size={11} />
+              </span>
               <input
                 type="text"
                 placeholder="Filter tables..."
@@ -3342,11 +3344,15 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
           align-items: center;
         }
 
-        :global(.search-icon) {
+        .search-icon-wrap {
           position: absolute;
           left: 8px;
           color: var(--text-muted);
           pointer-events: none;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 2;
         }
 
         .search-field {

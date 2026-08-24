@@ -27,7 +27,7 @@ import { auditLogger } from "../utils/auditLogger";
 import { dumpManager, DumpProgress } from "../utils/dumpManager";
 import { importManager, ImportProgress, ImportReport } from "../utils/importManager";
 
-const DEFAULT_APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION || "0.2.3";
+const DEFAULT_APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION || "0.0.0-dev";
 const SESSION_ID_PREFIX = "session-";
 const LAST_PROFILE_KEY = "dodb_last_active_profile";
 const RECONNECT_DELAYS_MS = [1000, 2000, 5000, 10000];
@@ -1466,6 +1466,7 @@ export default function Home() {
           onChangeUiScale={setUiScale}
           theme={theme}
           onToggleTheme={toggleTheme}
+          version={appVersion}
         />
 
         {/* Import completion toast, so a background import still reports back */}

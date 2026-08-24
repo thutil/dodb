@@ -175,29 +175,53 @@ dodb/
 
 ## 📦 Installation & Setup
 
-### 🪟 Windows
-Download the `.msi` or `.exe` installer from the latest [Releases](../../releases) and run setup.
+### 🍺 Homebrew Cask (macOS — Recommended)
 
-### 🍏 macOS & Gatekeeper Fix
+Install **dodb** with a single command via [Homebrew](https://brew.sh):
 
-When opening downloaded `.dmg` or `.app` releases on macOS without Apple Developer ID notarization, Gatekeeper may display a security prompt:
+```bash
+# Direct one-line install
+brew install --cask thutil/tap/dodb
+```
 
-#### Quick Fix / Workaround
+Or add the tap first and install:
 
-**Method 1: Terminal (Recommended)**  
-After copying `dodb.app` into `/Applications`, open **Terminal** and run:
+```bash
+brew tap thutil/tap
+brew install --cask dodb
+```
 
+To upgrade in the future:
+
+```bash
+brew upgrade --cask dodb
+```
+
+---
+
+### 🍏 macOS (Manual Download)
+
+1. Download the latest Universal `.dmg` (supports both Apple Silicon & Intel) from [GitHub Releases](https://github.com/thutil/dodb/releases/latest).
+2. Open the `.dmg` and drag **dodb** to your `/Applications` folder.
+
+#### 🛡️ macOS Gatekeeper Notice
+If macOS displays a warning that the app cannot be opened because it is from an unidentified developer:
+
+**Method 1: Terminal (Fastest)**
 ```bash
 xattr -dr com.apple.quarantine /Applications/dodb.app
 ```
 
-Then launch **dodb** normally from Applications or Spotlight (`Cmd + Space`).
-
 **Method 2: Right-Click Open**
-
 1. Open **Finder** → `/Applications`.
-2. **Right-click** (or `Control + Click`) on **dodb.app**.
-3. Click **Open** and confirm in the dialog.
+2. **Right-click** (or `Control + Click`) on **dodb.app** and select **Open**.
+3. Click **Open** in the confirmation dialog.
+
+---
+
+### 🪟 Windows
+
+Download the `.msi` or `.exe` installer from [GitHub Releases](https://github.com/thutil/dodb/releases/latest) and follow the installation wizard.
 
 ---
 

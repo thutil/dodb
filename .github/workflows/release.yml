@@ -44,14 +44,124 @@ jobs:
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
+      - name: Sync Version from Git Tag
+        run: node scripts/sync-version.js "${{ github.ref_name }}"
+
       - name: Build Tauri App & Create Release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEXT_PUBLIC_APP_VERSION: ${{ github.ref_name }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'dodb ${{ github.ref_name }}'
           releaseBody: 'dodb Database Manager for Windows (.exe / .msi) and macOS (.dmg)'
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
+
+  update-homebrew-cask:
+    name: Update Homebrew Cask
+    needs: build-and-release
+    permissions:
+      contents: write
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Generate & Update Homebrew Cask
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN || secrets.GH_PAT }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG_NAME#v}"
+          echo "Processing version: ${VERSION}"
+
+          DMG_URL="https://github.com/thutil/dodb/releases/download/${TAG_NAME}/dodb_${VERSION}_universal.dmg"
+
+          # Retry fetching DMG to calculate SHA256 checksum
+          MAX_RETRIES=15
+          COUNT=0
+          SHA256=""
+
+          while [ $COUNT -lt $MAX_RETRIES ]; do
+            echo "Attempt $((COUNT+1)) to fetch DMG for SHA256..."
+            if curl --fail -sL "$DMG_URL" -o dodb.dmg; then
+              SHA256=$(shasum -a 256 dodb.dmg | awk '{print $1}')
+              echo "Calculated SHA256: $SHA256"
+              break
+            fi
+            COUNT=$((COUNT+1))
+            sleep 10
+          done
+
+          if [ -z "$SHA256" ]; then
+            echo "Failed to download DMG to compute SHA256"
+            exit 1
+          fi
+
+          mkdir -p Casks
+          cat <<EOF > Casks/dodb.rb
+cask "dodb" do
+  version "${VERSION}"
+  sha256 "${SHA256}"
+
+  url "https://github.com/thutil/dodb/releases/download/v#{version}/dodb_#{version}_universal.dmg"
+  name "dodb"
+  desc "Modern Multi-Platform Database Manager for Postgres, MySQL, MariaDB & SQLite"
+  homepage "https://github.com/thutil/dodb"
+
+  livecheck do
+    url :url
+    strategy :github_latest
+  end
+
+  auto_updates true
+  depends_on macos: ">= :big_sur"
+
+  app "dodb.app"
+
+  zap trash: [
+    "~/Library/Application Support/com.thutil.dodb",
+    "~/Library/Caches/com.thutil.dodb",
+    "~/Library/Preferences/com.thutil.dodb.plist",
+    "~/Library/Saved Application State/com.thutil.dodb.savedState",
+    "~/Library/WebKit/com.thutil.dodb",
+  ]
+end
+EOF
+
+          echo "Generated Casks/dodb.rb:"
+          cat Casks/dodb.rb
+
+          # Upload dodb.rb to GitHub Release assets
+          if command -v gh >/dev/null 2>&1; then
+            echo "Uploading Casks/dodb.rb to GitHub Release ${TAG_NAME}..."
+            gh release upload "${TAG_NAME}" Casks/dodb.rb --clobber || true
+          fi
+
+          # If tap token is provided, automatically push to Homebrew tap repository
+          if [ -n "$TAP_TOKEN" ]; then
+            echo "Pushing updated cask to thutil/homebrew-tap..."
+            git config --global user.name "github-actions[bot]"
+            git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+            git clone "https://x-access-token:${TAP_TOKEN}@github.com/thutil/homebrew-tap.git" tap_repo || \
+            git clone "https://x-access-token:${TAP_TOKEN}@github.com/thutil/tap.git" tap_repo
+
+            if [ -d "tap_repo" ]; then
+              mkdir -p tap_repo/Casks
+              cp Casks/dodb.rb tap_repo/Casks/dodb.rb
+              cd tap_repo
+              git add Casks/dodb.rb
+              git commit -m "feat(cask): update dodb to v${VERSION}" || echo "No changes to commit"
+              git push origin main || git push origin master
+              echo "Successfully updated Homebrew tap repository!"
+            else
+              echo "Warning: Could not clone tap repository. Please ensure thutil/homebrew-tap or thutil/tap exists."
+            fi
+          else
+            echo "HOMEBREW_TAP_TOKEN not configured. Skipping tap push."
+          fi

@@ -11,7 +11,8 @@
     "build:ui": "pnpm --filter dodb-ui build",
     "ui:dev": "pnpm --filter dodb-ui dev",
     "dev": "tauri dev",
-    "build": "tauri build"
+    "build": "tauri build",
+    "version:sync": "node scripts/sync-version.js"
   },
   "dependencies": {
     "uuid": "^14.0.2"

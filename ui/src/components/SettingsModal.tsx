@@ -29,6 +29,7 @@ interface SettingsModalProps {
   onChangeUiScale: (scale: number) => void;
   theme: "dark" | "light";
   onToggleTheme: () => void;
+  version?: string;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -40,6 +41,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onChangeUiScale,
   theme,
   onToggleTheme,
+  version = process.env.NEXT_PUBLIC_APP_VERSION || "0.0.0-dev",
 }) => {
   const [activeTab, setActiveTab] = useState<"general" | "display" | "shortcuts">("general");
 
@@ -330,7 +332,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         {/* Footer */}
         <div className="modal-footer">
-          <div className="footer-meta">dodb Studio • v0.2.3</div>
+          <div className="footer-meta">dodb Studio • v{version}</div>
           <button type="button" className="btn btn-secondary close-btn" onClick={onClose}>
             {t("close", language)}
           </button>

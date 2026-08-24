@@ -461,7 +461,9 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
           )}
 
           <div className="search-wrap">
-            <Search size={12} className="search-icon" />
+            <span className="search-icon-wrap">
+              <Search size={12} />
+            </span>
             <input
               type="text"
               className="input search-field font-mono"
@@ -667,7 +669,16 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
         }
 
         .search-wrap { position: relative; display: flex; align-items: center; }
-        .search-icon { position: absolute; left: 8px; color: var(--text-muted); }
+        .search-icon-wrap {
+          position: absolute;
+          left: 8px;
+          color: var(--text-muted);
+          pointer-events: none;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 2;
+        }
         .search-field { padding-left: 26px; padding-right: 22px; width: 170px; font-size: 11px; height: 28px; }
         .search-clear-btn {
           position: absolute;
@@ -679,6 +690,7 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
           padding: 2px;
           display: flex;
           align-items: center;
+          z-index: 2;
         }
         .search-clear-btn:hover { color: var(--text-main); }
 

@@ -190,7 +190,9 @@ export const AuditLogDrawer: React.FC<AuditLogDrawerProps> = ({
 
         <div className="filter-bar">
           <div className="search-input-wrapper">
-            <Search size={13} className="search-icon" />
+            <span className="search-icon-wrap">
+              <Search size={13} />
+            </span>
             <input
               type="text"
               className="input search-field"
@@ -427,10 +429,15 @@ export const AuditLogDrawer: React.FC<AuditLogDrawerProps> = ({
           align-items: center;
         }
 
-        .search-icon {
+        .search-icon-wrap {
           position: absolute;
           left: 10px;
           color: var(--text-muted);
+          pointer-events: none;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 2;
         }
 
         .search-field {

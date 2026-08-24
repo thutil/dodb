@@ -678,7 +678,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <div className="proc-controls-group">
                   {/* Search input */}
                   <div className="proc-search-wrap">
-                    <Search size={12} className="proc-search-icon" />
+                    <span className="proc-search-icon-wrap">
+                      <Search size={12} />
+                    </span>
                     <input
                       type="text"
                       className="input form-control proc-search-input font-mono"
@@ -956,7 +958,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   </div>
 
                   <div className="table-filter-wrap">
-                    <Search size={12} className="table-filter-icon" />
+                    <span className="table-filter-icon-wrap">
+                      <Search size={12} />
+                    </span>
                     <input
                       type="text"
                       className="input table-filter-input"
@@ -1615,11 +1619,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           display: flex;
           align-items: center;
         }
-        .proc-search-icon {
+        .proc-search-icon-wrap {
           position: absolute;
           left: 8px;
           color: var(--text-muted);
           pointer-events: none;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 2;
         }
         .proc-search-input {
           padding-left: 26px;
@@ -2179,11 +2187,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           align-items: center;
           margin-top: 4px;
         }
-        .table-filter-icon {
+        .table-filter-icon-wrap {
           position: absolute;
           left: 8px;
           color: var(--text-muted);
           pointer-events: none;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 2;
         }
         .table-filter-input {
           padding-left: 26px;
