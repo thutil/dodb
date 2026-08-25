@@ -68,6 +68,7 @@ import { buildVisualSql, VisualTableSelection, findSmartJoinMatch, parseSqlToVis
 import { quoteIdent, quoteTableIdent } from "../utils/ddlBuilder";
 import { isGeometryColumn } from "../utils/gisUtils";
 import { extractColumnMappingsFromSql } from "../utils/sqlUtils";
+import { setSharedSql, useSharedSql } from "../utils/queryWorkspaceStore";
 import { PendingChanges, CommitResult } from "./DataGrid";
 
 interface VisualQueryBuilderProps {
@@ -75,8 +76,6 @@ interface VisualQueryBuilderProps {
   activeDatabase: string;
   tables: string[];
   theme?: "dark" | "light";
-  initialSql?: string;
-  onSqlChange?: (sql: string) => void;
   onExecuteSql: (sql: string) => Promise<QueryExecutionResult>;
   onCommitChanges?: (changes: PendingChanges) => Promise<CommitResult>;
   onOpenInSqlConsole: (sql: string) => void;
@@ -108,7 +107,7 @@ interface FilterNodeData {
 }
 
 // 1. Custom ReactFlow Table Node (Clean Minimalist Native dodb Style)
-const VisualTableNode: React.FC<NodeProps> = ({ data, selected }) => {
+const VisualTableNode: React.FC<NodeProps> = React.memo(function VisualTableNode({ data, selected }: NodeProps) {
   const nodeData = data as unknown as TableNodeData;
   const {
     tableName,
@@ -509,10 +508,10 @@ const VisualTableNode: React.FC<NodeProps> = ({ data, selected }) => {
       `}</style>
     </div>
   );
-};
+});
 
 // 2. Custom Filter Block Node (Clean Minimalist dodb Style)
-const FilterBlockNode: React.FC<NodeProps> = ({ data, selected }) => {
+const FilterBlockNode: React.FC<NodeProps> = React.memo(function FilterBlockNode({ data, selected }: NodeProps) {
   const filterData = data as unknown as FilterNodeData;
   const {
     filterId,
@@ -528,6 +527,13 @@ const FilterBlockNode: React.FC<NodeProps> = ({ data, selected }) => {
   } = filterData;
 
   const cols = tableSchemas[table] || [];
+
+  // Buffer the value locally and commit on blur/Enter: committing per keystroke fans out
+  // to setFilters + setNodes + setEdges and rebuilds every node on the canvas.
+  const [draftValue, setDraftValue] = useState(value);
+  useEffect(() => {
+    setDraftValue(value);
+  }, [value]);
 
   return (
     <div className={`filter-block-card ${selected ? "is-selected" : ""}`}>
@@ -645,8 +651,14 @@ const FilterBlockNode: React.FC<NodeProps> = ({ data, selected }) => {
             <input
               type="text"
               placeholder={operator === "IN" ? "val1, val2" : "Value..."}
-              value={value}
-              onChange={(e) => onUpdateFilter(filterId, { value: e.target.value })}
+              value={draftValue}
+              onChange={(e) => setDraftValue(e.target.value)}
+              onBlur={() => {
+                if (draftValue !== value) onUpdateFilter(filterId, { value: draftValue });
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+              }}
               onMouseDown={(e) => e.stopPropagation()}
               className="filter-input value-input font-mono nodrag"
             />
@@ -842,11 +854,17 @@ const FilterBlockNode: React.FC<NodeProps> = ({ data, selected }) => {
       `}</style>
     </div>
   );
-};
+});
 
 const nodeTypes = {
   visualTable: VisualTableNode,
   visualFilter: FilterBlockNode,
+};
+
+// Module-level so React Flow does not see a new object on every render.
+const DEFAULT_EDGE_OPTIONS = {
+  animated: true,
+  style: { stroke: "var(--accent-blue)", strokeWidth: 2 },
 };
 
 export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
@@ -854,8 +872,6 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
   activeDatabase,
   tables,
   theme = "dark",
-  initialSql,
-  onSqlChange,
   onExecuteSql,
   onCommitChanges,
   onOpenInSqlConsole,
@@ -905,6 +921,19 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
   const numDeletes = deletedRowIndices.size;
   const totalPending = numUpdates + numDeletes;
 
+  // "Latest value" refs. Callbacks that end up inside node `data` must not depend on
+  // `nodes`/`filters`/`tableSchemas` directly, or their identity churns on every canvas
+  // change and drags the whole rebuild chain along with it.
+  const schemaFetchAttemptedRef = useRef<Set<string>>(new Set());
+  const nodesRef = useRef(nodes);
+  const tableSchemasRef = useRef(tableSchemas);
+  const tablesRef = useRef(tables);
+  useEffect(() => {
+    nodesRef.current = nodes;
+    tableSchemasRef.current = tableSchemas;
+    tablesRef.current = tables;
+  });
+
   // Load schemas and reset canvas when activeDatabase or activeProfile changes
   useEffect(() => {
     // Reset canvas elements for the new database
@@ -921,6 +950,7 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
     setDeletedRowIndices(new Set());
     setEditingCell(null);
     setCommitMessage(null);
+    schemaFetchAttemptedRef.current = new Set();
 
     if (!activeDatabase || !activeProfile) return;
 
@@ -943,7 +973,7 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
         }
 
         // Fallback for any missing tables
-        for (const tbl of tables) {
+        for (const tbl of tablesRef.current) {
           if (!schemaMap[tbl]) {
             try {
               const colData: any = await apiClient.getColumns(activeProfile.id, activeDatabase, tbl);
@@ -970,7 +1000,39 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [activeDatabase, activeProfile, tables, setNodes, setEdges]);
+    // Deliberately keyed on the profile id, not the profile object or the `tables` array:
+    // the parent re-creates both, and depending on them silently wiped the canvas.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProfile?.id, activeDatabase, setNodes, setEdges]);
+
+  // The reset effect above is deliberately not keyed on `tables`. Tables that show up
+  // afterwards (or that getSchemaDiagram missed) get their columns filled in here —
+  // without wiping the canvas the way the combined effect used to.
+  useEffect(() => {
+    if (!activeProfile || !activeDatabase || loadingSchemas) return;
+    const missing = tables.filter(
+      (t) => !tableSchemas[t] && !schemaFetchAttemptedRef.current.has(t)
+    );
+    if (missing.length === 0) return;
+
+    let alive = true;
+    missing.forEach((t) => schemaFetchAttemptedRef.current.add(t));
+    (async () => {
+      for (const tbl of missing) {
+        try {
+          const colData: any = await apiClient.getColumns(activeProfile.id, activeDatabase, tbl);
+          if (alive && colData?.columns) {
+            setTableSchemas((prev) => (prev[tbl] ? prev : { ...prev, [tbl]: colData.columns }));
+          }
+        } catch (e) {
+          console.warn(`Failed to fetch schema for ${tbl}:`, e);
+        }
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [tables, activeProfile, activeDatabase, tableSchemas, loadingSchemas]);
 
   // Selected table names on canvas
   const canvasTableNames = useMemo(() => {
@@ -978,6 +1040,53 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
       .filter((n) => n.type === "visualTable")
       .map((n) => (n.data as any).tableName as string);
   }, [nodes]);
+
+  // Stable handler indirection: everything stored in a node's `data` keeps its
+  // referential identity forever, so rebuilding nodes never invalidates memoized
+  // node components (and never re-triggers effects that depend on these callbacks).
+  const handlersRef = useRef({
+    toggleColumnSelection: (_t: string, _c: string) => {},
+    selectAllColumns: (_t: string) => {},
+    clearColumns: (_t: string) => {},
+    removeTable: (_t: string) => {},
+    addFilterFromColumn: (_t: string, _c: string) => {},
+    updateFilter: (_id: string, _updates: Partial<VisualFilterCondition>) => {},
+    removeFilter: (_id: string) => {},
+  });
+
+  const tableHandlerCache = useRef(
+    new Map<
+      string,
+      Pick<
+        TableNodeData,
+        "onToggleColumn" | "onSelectAllColumns" | "onClearColumns" | "onRemoveTable" | "onAddFilterFromColumn"
+      >
+    >()
+  );
+
+  const getTableHandlers = useCallback((tableName: string) => {
+    let cached = tableHandlerCache.current.get(tableName);
+    if (!cached) {
+      cached = {
+        onToggleColumn: (col: string) => handlersRef.current.toggleColumnSelection(tableName, col),
+        onSelectAllColumns: () => handlersRef.current.selectAllColumns(tableName),
+        onClearColumns: () => handlersRef.current.clearColumns(tableName),
+        onRemoveTable: () => handlersRef.current.removeTable(tableName),
+        onAddFilterFromColumn: (col: string) => handlersRef.current.addFilterFromColumn(tableName, col),
+      };
+      tableHandlerCache.current.set(tableName, cached);
+    }
+    return cached;
+  }, []);
+
+  const filterHandlers = useMemo(
+    () => ({
+      onUpdateFilter: (id: string, updates: Partial<VisualFilterCondition>) =>
+        handlersRef.current.updateFilter(id, updates),
+      onRemoveFilter: (id: string) => handlersRef.current.removeFilter(id),
+    }),
+    []
+  );
 
   // Handle column selection toggle
   const toggleColumnSelection = useCallback(
@@ -1058,22 +1167,26 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
       }
     });
 
-    setNodes((nds) =>
-      nds.map((n) => {
-        if (n.type === "visualTable") {
-          const tName = (n.data as any).tableName;
-          const currentFiltered = filterMap[tName] || new Set();
-          return {
-            ...n,
-            data: {
-              ...n.data,
-              filteredColumns: currentFiltered,
-            },
-          };
+    setNodes((nds) => {
+      let changed = false;
+      const next = nds.map((n) => {
+        if (n.type !== "visualTable") return n;
+        const tName = (n.data as any).tableName;
+        const nextFiltered = filterMap[tName] || new Set<string>();
+        const prevFiltered: Set<string> = (n.data as any).filteredColumns || new Set<string>();
+        // Skip the allocation entirely when this table's filtered columns are unchanged,
+        // otherwise every keystroke in a filter value rebuilds every table node.
+        if (
+          prevFiltered.size === nextFiltered.size &&
+          Array.from(nextFiltered).every((c) => prevFiltered.has(c))
+        ) {
+          return n;
         }
-        return n;
-      })
-    );
+        changed = true;
+        return { ...n, data: { ...n.data, filteredColumns: nextFiltered } };
+      });
+      return changed ? next : nds;
+    });
   }, [filters, setNodes]);
 
   // Filter conditions handlers
@@ -1139,9 +1252,12 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
   // Add Visual Filter Block to Canvas
   const addFilterBlockToCanvas = useCallback(
     (targetTable?: string, targetColumn?: string, pos?: { x: number; y: number }) => {
-      const defaultTable = targetTable || canvasTableNames[0] || tables[0] || "";
+      const currentTableNames = nodesRef.current
+        .filter((n) => n.type === "visualTable")
+        .map((n) => (n.data as any).tableName as string);
+      const defaultTable = targetTable || currentTableNames[0] || tablesRef.current[0] || "";
       const defaultCol =
-        targetColumn || tableSchemas[defaultTable]?.[0]?.name || "id";
+        targetColumn || tableSchemasRef.current[defaultTable]?.[0]?.name || "id";
       const filterId = `filter-${Date.now()}`;
 
       const newFilter: VisualFilterCondition = {
@@ -1158,13 +1274,15 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
       // Calculate position neatly aligned next to the parent table node
       setNodes((nds) => {
         const parentNode = nds.find((n) => n.id === `table-${defaultTable}`);
-        const sameTableFilters = filters.filter((f) => f.table === defaultTable);
+        const sameTableFilters = nds.filter(
+          (n) => n.type === "visualFilter" && (n.data as any).table === defaultTable
+        );
         const position = pos || (parentNode ? {
           x: parentNode.position.x + 320,
           y: parentNode.position.y + 30 + sameTableFilters.length * 135,
         } : {
           x: 420 + Math.random() * 40,
-          y: 100 + filters.length * 135,
+          y: 100 + nds.filter((n) => n.type === "visualFilter").length * 135,
         });
 
         const filterNode: Node = {
@@ -1178,10 +1296,9 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
             operator: "=",
             value: "",
             logic: "AND",
-            tablesList: canvasTableNames.length > 0 ? canvasTableNames : tables,
-            tableSchemas,
-            onUpdateFilter: updateFilter,
-            onRemoveFilter: removeFilter,
+            tablesList: currentTableNames.length > 0 ? currentTableNames : tablesRef.current,
+            tableSchemas: tableSchemasRef.current,
+            ...filterHandlers,
           },
         };
 
@@ -1207,34 +1324,36 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
         setEdges((eds) => [...eds, newEdge]);
       }
     },
-    [
-      canvasTableNames,
-      tables,
-      tableSchemas,
-      filters,
-      updateFilter,
-      removeFilter,
-      setNodes,
-      setEdges,
-    ]
+    [filterHandlers, setNodes, setEdges]
   );
 
   // Remove table from canvas
   const removeTable = useCallback(
     (tableName: string) => {
+      const nodeId = `table-${tableName}`;
       setNodes((nds) => nds.filter((n) => (n.data as any).tableName !== tableName));
-      setEdges((eds) =>
-        eds.filter((e) => {
-          const join = joins.find((j) => j.id === e.id);
-          return join?.fromTable !== tableName && join?.toTable !== tableName;
-        })
-      );
+      // Match on node ids, not on the joins list: filter edges (`edge-filter-...`) have
+      // no matching join and used to survive as edges pointing at a deleted node.
+      setEdges((eds) => eds.filter((e) => e.source !== nodeId && e.target !== nodeId));
       setJoins((prev) => prev.filter((j) => j.fromTable !== tableName && j.toTable !== tableName));
       setFilters((prev) => prev.filter((f) => f.table !== tableName));
       setSorts((prev) => prev.filter((s) => s.table !== tableName));
     },
-    [setNodes, setEdges, joins]
+    [setNodes, setEdges]
   );
+
+  // Keep the stable wrappers pointing at the current callbacks.
+  useEffect(() => {
+    handlersRef.current = {
+      toggleColumnSelection,
+      selectAllColumns,
+      clearColumns,
+      removeTable,
+      addFilterFromColumn: (t: string, c: string) => addFilterBlockToCanvas(t, c),
+      updateFilter,
+      removeFilter,
+    };
+  });
 
   // Add table to canvas
   const addTableToCanvas = useCallback(
@@ -1257,15 +1376,7 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
           tableName,
           columns: cols,
           selectedColumns: new Set(colNames), // default select all columns
-          onToggleColumn: (col: string) => toggleColumnSelection(tableName, col),
-          onSelectAllColumns: () => selectAllColumns(tableName),
-          onClearColumns: () => clearColumns(tableName),
-          onRemoveTable: () => removeTable(tableName),
-          onAddFilterFromColumn: (col: string) =>
-            addFilterBlockToCanvas(tableName, col, {
-              x: defaultPos.x + 320,
-              y: defaultPos.y + 20,
-            }),
+          ...getTableHandlers(tableName),
         },
       };
 
@@ -1308,17 +1419,7 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
         }
       }
     },
-    [
-      canvasTableNames,
-      tableSchemas,
-      setNodes,
-      setEdges,
-      toggleColumnSelection,
-      selectAllColumns,
-      clearColumns,
-      removeTable,
-      addFilterBlockToCanvas,
-    ]
+    [canvasTableNames, tableSchemas, setNodes, setEdges, getTableHandlers]
   );
 
   // Auto-Connect All Tables on Canvas
@@ -1501,21 +1602,28 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
     [setEdges]
   );
 
-  // Generate current SQL query from Canvas State
-  const generatedSql = useMemo(() => {
-    const tableNodes = nodes.filter((n) => n.type === "visualTable");
-    const tableSelections: VisualTableSelection[] = tableNodes.map((n) => {
-      const d = n.data as any;
-      return {
-        tableName: d.tableName,
-        selectedColumns: Array.from(d.selectedColumns || []),
-      };
-    });
+  // Generate current SQL query from Canvas State.
+  // xyflow replaces the whole `nodes` array on every pointer move during a drag, so the
+  // SQL is memoized on a cheap value-signature of the selections instead — dragging a
+  // node no longer re-runs buildVisualSql (and its O(n^2) join ordering) per mousemove.
+  const selectionKey = useMemo(() => {
+    const tableSelections: VisualTableSelection[] = nodes
+      .filter((n) => n.type === "visualTable")
+      .map((n) => {
+        const d = n.data as any;
+        return {
+          tableName: d.tableName,
+          selectedColumns: Array.from(d.selectedColumns || []) as string[],
+        };
+      });
+    return JSON.stringify(tableSelections);
+  }, [nodes]);
 
+  const generatedSql = useMemo(() => {
     const dialect: DBType = activeProfile?.type || "mariadb";
 
     return buildVisualSql({
-      tables: tableSelections,
+      tables: JSON.parse(selectionKey) as VisualTableSelection[],
       joins,
       filters,
       sorts,
@@ -1523,30 +1631,45 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
       offset: page > 0 ? page * limit : undefined,
       dbType: dialect,
     });
-  }, [nodes, joins, filters, sorts, limit, page, activeProfile?.type]);
+  }, [selectionKey, joins, filters, sorts, limit, page, activeProfile?.type]);
 
-  // Bidirectional SQL State
-  const [sqlText, setSqlText] = useState<string>(initialSql || "");
+  // SQL text is shared with the SQL console tab (module-level store, survives unmount).
+  const sqlText = useSharedSql();
   const [sqlParseError, setSqlParseError] = useState<string | null>(null);
-  const isSyncingFromSqlRef = useRef(false);
-  const initialAppliedRef = useRef(false);
-
-  // 1. Sync Canvas -> SQL Text Editor locally whenever Canvas elements change
+  const lastPushedSqlRef = useRef<string | null>(null);
+  // Bumped by an explicit "Sync to Canvas" so the canvas re-asserts its canonical SQL
+  // even when the rebuild happened to produce an identical query.
+  const [canvasRevision, setCanvasRevision] = useState(0);
+  const sqlTextRef = useRef(sqlText);
   useEffect(() => {
-    if (isSyncingFromSqlRef.current) {
-      isSyncingFromSqlRef.current = false;
+    sqlTextRef.current = sqlText;
+  });
+
+  // Canvas -> SQL, automatic. Guarded by value (not by a one-shot flag): a flag that is
+  // only cleared when `generatedSql` happens to change would silently swallow the next
+  // genuine canvas edit whenever a sync produced an identical string.
+  useEffect(() => {
+    // An empty canvas emits a "-- Drag or add tables..." comment; never let that
+    // clobber SQL the user typed in the SQL console tab.
+    if (!generatedSql || generatedSql.trim().startsWith("--")) {
+      // Canvas emptied: forget what we last published so the next real query always
+      // gets pushed, even if it happens to match the one before the canvas was cleared.
+      lastPushedSqlRef.current = null;
       return;
     }
-    setSqlText(generatedSql);
+    if (generatedSql === lastPushedSqlRef.current) return;
+    lastPushedSqlRef.current = generatedSql;
+    setSharedSql(generatedSql);
     setSqlParseError(null);
-  }, [generatedSql]);
+  }, [generatedSql, canvasRevision]);
 
   // Apply SQL Text -> Canvas State
   const handleSyncSqlToCanvas = useCallback(
     (customSql?: string) => {
-      const targetSql = customSql !== undefined ? customSql : sqlText;
+      const targetSql = customSql !== undefined ? customSql : sqlTextRef.current;
       if (!targetSql || targetSql.trim().startsWith("--")) return;
 
+      const tableSchemas = tableSchemasRef.current;
       const parsed = parseSqlToVisual(targetSql, tableSchemas);
       if (!parsed || parsed.tables.length === 0) {
         setSqlParseError("Unable to parse SQL query. Please check SELECT and FROM clauses.");
@@ -1554,7 +1677,6 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
       }
 
       setSqlParseError(null);
-      isSyncingFromSqlRef.current = true;
 
       // Asynchronously fetch schema for any table not yet in tableSchemas
       if (activeProfile && activeDatabase) {
@@ -1572,7 +1694,10 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
         });
       }
 
-      // 1. Rebuild Table Nodes
+      // 1. Rebuild Table Nodes, keeping wherever the user already dragged them
+      const prevNodes = nodesRef.current;
+      const prevPositions = new Map(prevNodes.map((n) => [n.id, n.position]));
+      const prevNodeIds = new Set(prevNodes.map((n) => n.id));
       const newNodes: Node[] = [];
       const newEdges: Edge[] = [];
 
@@ -1582,28 +1707,21 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
           tbl.selectedColumns.length > 0 ? tbl.selectedColumns : cols.map((c) => c.name)
         );
 
-        const defaultPos = {
+        const nodeId = `table-${tbl.tableName}`;
+        const defaultPos = prevPositions.get(nodeId) || {
           x: 60 + idx * 300,
           y: 60 + (idx % 2) * 40,
         };
 
         newNodes.push({
-          id: `table-${tbl.tableName}`,
+          id: nodeId,
           type: "visualTable",
           position: defaultPos,
           data: {
             tableName: tbl.tableName,
             columns: cols,
             selectedColumns: selectedColsSet,
-            onToggleColumn: (col: string) => toggleColumnSelection(tbl.tableName, col),
-            onSelectAllColumns: () => selectAllColumns(tbl.tableName),
-            onClearColumns: () => clearColumns(tbl.tableName),
-            onRemoveTable: () => removeTable(tbl.tableName),
-            onAddFilterFromColumn: (col: string) =>
-              addFilterBlockToCanvas(tbl.tableName, col, {
-                x: defaultPos.x + 320,
-                y: defaultPos.y + 20,
-              }),
+            ...getTableHandlers(tbl.tableName),
           },
         });
       });
@@ -1632,15 +1750,17 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
         const count = sameTableCount[f.table] || 0;
         sameTableCount[f.table] = count + 1;
 
-        const filterPos = parentTableNode
-          ? {
-              x: parentTableNode.position.x + 320,
-              y: parentTableNode.position.y + 30 + count * 135,
-            }
-          : {
-              x: 420 + (idx % 3) * 280,
-              y: 340 + Math.floor(idx / 3) * 160,
-            };
+        const filterPos =
+          prevPositions.get(f.id) ||
+          (parentTableNode
+            ? {
+                x: parentTableNode.position.x + 320,
+                y: parentTableNode.position.y + 30 + count * 135,
+              }
+            : {
+                x: 420 + (idx % 3) * 280,
+                y: 340 + Math.floor(idx / 3) * 160,
+              });
 
         const filterNode: Node = {
           id: f.id,
@@ -1655,8 +1775,7 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
             logic: f.logic,
             tablesList: parsed.tables.map((t) => t.tableName),
             tableSchemas,
-            onUpdateFilter: updateFilter,
-            onRemoveFilter: removeFilter,
+            ...filterHandlers,
           },
         };
         newNodes.push(filterNode);
@@ -1684,70 +1803,46 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
       setFilters(parsed.filters);
       setSorts(parsed.sorts);
       setLimit(parsed.limit);
+      // The canvas we just built is now authoritative: re-publish its canonical SQL.
+      lastPushedSqlRef.current = null;
+      setCanvasRevision((r) => r + 1);
 
-      setTimeout(() => fitView({ padding: 0.25, duration: 300 }), 60);
+      // Only re-frame when the set of nodes actually changed; refitting on every sync
+      // yanks the viewport out from under the user.
+      const addedNode = newNodes.some((n) => !prevNodeIds.has(n.id));
+      const removedNode = newNodes.length !== prevNodes.length;
+      if (addedNode || removedNode) {
+        setTimeout(() => fitView({ padding: 0.25, duration: 300 }), 60);
+      }
     },
     [
-      sqlText,
-      tableSchemas,
       activeProfile,
       activeDatabase,
       setNodes,
       setEdges,
-      toggleColumnSelection,
-      selectAllColumns,
-      clearColumns,
-      removeTable,
-      addFilterBlockToCanvas,
-      updateFilter,
-      removeFilter,
+      getTableHandlers,
+      filterHandlers,
       fitView,
     ]
   );
 
-  // 2. Initial SQL sync on mount
-  useEffect(() => {
-    if (
-      initialSql &&
-      initialSql.trim() &&
-      !initialSql.startsWith("--") &&
-      !initialAppliedRef.current
-    ) {
-      initialAppliedRef.current = true;
-      setSqlText(initialSql);
-      handleSyncSqlToCanvas(initialSql);
-    }
-  }, [initialSql, handleSyncSqlToCanvas]);
+  const miniMapNodeColor = useCallback(
+    () => (theme === "dark" ? "#3b82f6" : "#2563eb"),
+    [theme]
+  );
 
-  // 3. Debounce Auto-Sync SQL Text Editor -> Canvas (350ms)
-  useEffect(() => {
-    if (!sqlText || sqlText.trim().startsWith("--")) return;
-    if (sqlText.trim() === generatedSql.trim()) return;
-
-    const timer = setTimeout(() => {
-      const parsed = parseSqlToVisual(sqlText, tableSchemas);
-      if (parsed && parsed.tables.length > 0) {
-        handleSyncSqlToCanvas(sqlText);
-      }
-    }, 350);
-
-    return () => clearTimeout(timer);
-  }, [sqlText, tableSchemas, generatedSql, handleSyncSqlToCanvas]);
+  // True when the SQL text has drifted away from what the canvas describes.
+  const sqlDivergedFromCanvas = useMemo(() => {
+    if (!sqlText.trim() || sqlText.trim().startsWith("--")) return false;
+    return sqlText.trim() !== generatedSql.trim();
+  }, [sqlText, generatedSql]);
 
   // Execute Query
   const handleRunQuery = async (customPage?: number) => {
     const activePg = customPage !== undefined ? customPage : page;
-    const tableNodes = nodes.filter((n) => n.type === "visualTable");
-    const tableSelections: VisualTableSelection[] = tableNodes.map((n) => {
-      const d = n.data as any;
-      return {
-        tableName: d.tableName,
-        selectedColumns: Array.from(d.selectedColumns || []),
-      };
-    });
     const dialect: DBType = activeProfile?.type || "mariadb";
     const queryToRun = buildVisualSql({
-      tables: tableSelections,
+      tables: JSON.parse(selectionKey) as VisualTableSelection[],
       joins,
       filters,
       sorts,
@@ -2469,10 +2564,7 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
             fitView
             minZoom={0.2}
             maxZoom={2.0}
-            defaultEdgeOptions={{
-              animated: true,
-              style: { stroke: "var(--accent-blue)", strokeWidth: 2 },
-            }}
+            defaultEdgeOptions={DEFAULT_EDGE_OPTIONS}
           >
             <Background
               variant={BackgroundVariant.Dots}
@@ -2482,7 +2574,7 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
             />
             <Controls className="custom-flow-controls" showInteractive={false} />
             <MiniMap
-              nodeColor={() => (theme === "dark" ? "#3b82f6" : "#2563eb")}
+              nodeColor={miniMapNodeColor}
               maskColor={theme === "dark" ? "rgba(0, 0, 0, 0.65)" : "rgba(240, 240, 243, 0.75)"}
               style={{
                 background: "var(--bg-card)",
@@ -2915,16 +3007,23 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
                     </span>
                   </div>
                   <div className="sql-toolbar-right">
-                    {sqlParseError && (
+                    {sqlParseError ? (
                       <span className="sync-badge is-error font-mono" title={sqlParseError}>
                         {sqlParseError}
                       </span>
-                    )}
+                    ) : sqlDivergedFromCanvas ? (
+                      <span
+                        className="sync-badge font-mono"
+                        title="This SQL no longer matches the canvas — click Sync to Canvas to apply it"
+                      >
+                        SQL differs from canvas
+                      </span>
+                    ) : null}
                     <button
                       type="button"
                       className="btn btn-secondary btn-xs"
                       onClick={() => {
-                        setSqlText(generatedSql);
+                        setSharedSql(generatedSql);
                         setSqlParseError(null);
                         handleSyncSqlToCanvas(generatedSql);
                       }}
@@ -2958,7 +3057,7 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
                   <textarea
                     className="sql-code-editor-textarea font-mono"
                     value={sqlText}
-                    onChange={(e) => setSqlText(e.target.value)}
+                    onChange={(e) => setSharedSql(e.target.value)}
                     placeholder="Write or paste SQL query here..."
                     spellCheck={false}
                   />

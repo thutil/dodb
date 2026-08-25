@@ -841,7 +841,7 @@ export function parseSqlToVisual(
         }
 
         filters.push({
-          id: `filter-${Date.now()}-${filters.length}`,
+          id: `filter-${targetTable}-${targetCol}-${filters.length}`,
           table: targetTable,
           column: targetCol,
           operator: op,
@@ -877,7 +877,7 @@ export function parseSqlToVisual(
       }
 
       sorts.push({
-        id: `sort-${Date.now()}-${sorts.length}`,
+        id: `sort-${targetTable}-${targetCol}-${sorts.length}`,
         table: targetTable,
         column: targetCol,
         direction: dir,

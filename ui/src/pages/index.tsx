@@ -10,6 +10,7 @@ import { EditTableModal } from "../components/EditTableModal";
 import { ConfirmDdlModal, ConfirmDdlRequest } from "../components/ConfirmDdlModal";
 import { DataGrid, PendingChanges, CommitResult } from "../components/DataGrid";
 import { SqlConsole } from "../components/SqlConsole";
+import { setSharedSql } from "../utils/queryWorkspaceStore";
 import { AdminPanel } from "../components/AdminPanel";
 import { SchemaDiagram } from "../components/SchemaDiagram";
 import { VisualQueryBuilder } from "../components/VisualQueryBuilder";
@@ -79,7 +80,20 @@ export default function Home() {
   const [appVersion, setAppVersion] = useState<string>(DEFAULT_APP_VERSION);
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [activeView, setActiveView] = useState<"explorer" | "sql" | "admin" | "diagram" | "visual-query">("explorer");
-  const [sqlConsoleInitialQuery, setSqlConsoleInitialQuery] = useState<string>("");
+  // Views that have been opened at least once stay mounted (see the view container
+  // below) so the SQL editor and the query canvas keep their state across tab switches.
+  const [visitedViews, setVisitedViews] = useState<Set<string>>(() => new Set(["explorer"]));
+
+  // Mount a keep-alive view the first time it becomes active — React Flow's fitView and
+  // Monaco's initial layout both need the container to have real dimensions at mount.
+  useEffect(() => {
+    setVisitedViews((prev) => {
+      if (prev.has(activeView)) return prev;
+      const next = new Set(prev);
+      next.add(activeView);
+      return next;
+    });
+  }, [activeView]);
 
   const [profiles, setProfiles] = useState<ConnectionProfile[]>([]);
   const [activeProfile, setActiveProfile] = useState<ConnectionProfile | null>(null);
@@ -1173,8 +1187,8 @@ export default function Home() {
           onOpenSettings={() => setIsSettingsOpen(true)}
           onViewStructure={(tbl) => setStructureModalTable(tbl)}
           onOpenInSql={(sql) => {
+            setSharedSql(sql);
             setActiveView("sql");
-            handleExecuteSql(sql);
           }}
           onRefreshDatabases={fetchDatabases}
           latencyMs={latencyMs}
@@ -1226,8 +1240,8 @@ export default function Home() {
               onImportIntoDatabase={() => setImportTarget({ table: null })}
               onImportIntoTable={(tbl) => setImportTarget({ table: tbl })}
               onOpenInSql={(sql) => {
+                setSharedSql(sql);
                 setActiveView("sql");
-                handleExecuteSql(sql);
               }}
               onRefresh={() => {
                 fetchDatabases();
@@ -1253,6 +1267,60 @@ export default function Home() {
                 >
                   <X size={13} />
                 </button>
+              </div>
+            )}
+            {/* Keep-alive views: mounted on first visit, then hidden rather than
+                unmounted, so canvas layout, editor text and results survive tab
+                switches. Explorer/diagram/admin stay conditional so they do not keep
+                fetching in the background. */}
+            {visitedViews.has("sql") && (
+              <div
+                className="view-keepalive"
+                style={{
+                  display: activeView === "sql" ? "flex" : "none",
+                  flexDirection: "column",
+                  flex: 1,
+                  minHeight: 0,
+                }}
+              >
+                <ViewErrorBoundary key="sql">
+                  <SqlConsole
+                    activeProfile={activeProfile}
+                    activeDatabase={activeDatabase}
+                    activeTable={activeTable}
+                    tables={tables}
+                    columns={columns}
+                    theme={theme}
+                    onExecuteSql={handleExecuteSql}
+                    onCommitChanges={handleCommitChanges}
+                  />
+                </ViewErrorBoundary>
+              </div>
+            )}
+            {visitedViews.has("visual-query") && (
+              <div
+                className="view-keepalive"
+                style={{
+                  display: activeView === "visual-query" ? "flex" : "none",
+                  flexDirection: "column",
+                  flex: 1,
+                  minHeight: 0,
+                }}
+              >
+                <ViewErrorBoundary key="visual-query">
+                  <VisualQueryBuilder
+                    activeProfile={activeProfile}
+                    activeDatabase={activeDatabase}
+                    tables={tables}
+                    theme={theme}
+                    onExecuteSql={handleExecuteSql}
+                    onCommitChanges={handleCommitChanges}
+                    onOpenInSqlConsole={(sql) => {
+                      setSharedSql(sql);
+                      setActiveView("sql");
+                    }}
+                  />
+                </ViewErrorBoundary>
               </div>
             )}
             <ViewErrorBoundary key={activeView}>
@@ -1285,33 +1353,7 @@ export default function Home() {
                   onCreateTable={() => setIsCreateTableOpen(true)}
                   language={language}
                 />
-              ) : activeView === "sql" ? (
-                <SqlConsole
-                  activeProfile={activeProfile}
-                  activeDatabase={activeDatabase}
-                  activeTable={activeTable}
-                  tables={tables}
-                  columns={columns}
-                  theme={theme}
-                  initialSql={sqlConsoleInitialQuery}
-                  onExecuteSql={handleExecuteSql}
-                  onCommitChanges={handleCommitChanges}
-                />
-              ) : activeView === "visual-query" ? (
-                <VisualQueryBuilder
-                  activeProfile={activeProfile}
-                  activeDatabase={activeDatabase}
-                  tables={tables}
-                  theme={theme}
-                  initialSql={sqlConsoleInitialQuery}
-                  onExecuteSql={handleExecuteSql}
-                  onCommitChanges={handleCommitChanges}
-                  onOpenInSqlConsole={(sql) => {
-                    setSqlConsoleInitialQuery(sql);
-                    setActiveView("sql");
-                  }}
-                />
-              ) : activeView === "diagram" ? (
+              ) : activeView === "sql" || activeView === "visual-query" ? null : activeView === "diagram" ? (
                 <SchemaDiagram
                   activeProfile={activeProfile}
                   activeDatabase={activeDatabase}
@@ -1366,8 +1408,8 @@ export default function Home() {
           activeProfile={activeProfile}
           activeDatabase={activeDatabase}
           onOpenInSql={(sql) => {
+            setSharedSql(sql);
             setActiveView("sql");
-            handleExecuteSql(sql);
           }}
           onOpenInExplorer={(tbl) => {
             setActiveTable(tbl);

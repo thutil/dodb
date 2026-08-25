@@ -13,6 +13,7 @@ import { isGeometryColumn, isGisData, formatGisSummary, parseGisToGeoJson } from
 import { GisMapViewer, GisFeatureRecord } from "./GisMapViewer";
 import { splitSqlStatements, getStatementAtLine, stripCommentsAndTrim, extractTableFromSql, extractColumnMappingsFromSql } from "../utils/sqlUtils";
 import { apiClient } from "../utils/apiClient";
+import { getSharedSql, setSharedSql, useSharedSql } from "../utils/queryWorkspaceStore";
 import {
   DatabaseSchemaInfo,
   SchemaRelation,
@@ -28,7 +29,6 @@ interface SqlConsoleProps {
   tables?: string[];
   columns?: ColumnInfo[];
   theme?: "dark" | "light";
-  initialSql?: string;
   onExecuteSql: (sql: string) => Promise<QueryExecutionResult>;
   onCommitChanges?: (changes: PendingChanges) => Promise<CommitResult>;
 }
@@ -80,19 +80,45 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
   tables = [],
   columns = [],
   theme = "dark",
-  initialSql,
   onExecuteSql,
   onCommitChanges,
 }) => {
-  const [sql, setSql] = useState<string>(
-    initialSql || (activeTable ? `SELECT * FROM ${activeTable} LIMIT 50;` : "SELECT 1;")
-  );
+  const sqlPushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // SQL text is shared with the visual Query tab. Monaco stays bound to fast local
+  // state; the store is written back debounced so a keystroke never notifies subscribers.
+  const sharedSql = useSharedSql();
+  const [sql, setSql] = useState<string>(
+    () => getSharedSql() || (activeTable ? `SELECT * FROM ${activeTable} LIMIT 50;` : "SELECT 1;")
+  );
+  const sqlRef = useRef(sql);
   useEffect(() => {
-    if (initialSql && initialSql !== sql) {
-      setSql(initialSql);
+    sqlRef.current = sql;
+  });
+
+  // Seed the store from the local default so the Query tab starts from the same text.
+  useEffect(() => {
+    if (!getSharedSql().trim()) setSharedSql(sqlRef.current);
+  }, []);
+
+  // Adopt changes that came from the other tab (e.g. a JOIN drawn on the canvas).
+  useEffect(() => {
+    if (sharedSql && sharedSql !== sqlRef.current) {
+      // Drop any pending push, or it would immediately overwrite what we just adopted.
+      if (sqlPushTimerRef.current) {
+        clearTimeout(sqlPushTimerRef.current);
+        sqlPushTimerRef.current = null;
+      }
+      setSql(sharedSql);
     }
-  }, [initialSql]);
+  }, [sharedSql]);
+
+  // Push local edits back to the store, debounced.
+  const handleSqlChange = useCallback((val: string) => {
+    setSql(val);
+    if (sqlPushTimerRef.current) clearTimeout(sqlPushTimerRef.current);
+    sqlPushTimerRef.current = setTimeout(() => setSharedSql(val), 400);
+  }, []);
 
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<QueryExecutionResult | null>(null);
@@ -259,6 +285,10 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
   // Clean up Monaco completion providers on unmount
   useEffect(() => {
     return () => {
+      if (sqlPushTimerRef.current) {
+        clearTimeout(sqlPushTimerRef.current);
+        setSharedSql(sqlRef.current);
+      }
       if (completionProviderRef.current) {
         completionProviderRef.current.dispose();
         completionProviderRef.current = null;
@@ -1292,7 +1322,7 @@ const quoteTableIdentifier = (tbl: string): string => {
             {activeTable && (
               <button
                 className="btn btn-secondary btn-sm chip-btn"
-                onClick={() => setSql(`SELECT * FROM ${activeTable} LIMIT 50;`)}
+                onClick={() => handleSqlChange(`SELECT * FROM ${activeTable} LIMIT 50;`)}
                 title="Select 50 rows from active table"
               >
                 SELECT *
@@ -1301,7 +1331,7 @@ const quoteTableIdentifier = (tbl: string): string => {
             <button
               className="btn btn-secondary btn-sm chip-btn"
               onClick={() =>
-                setSql(
+                handleSqlChange(
                   activeTable
                     ? `SELECT COUNT(*) AS total_count FROM ${activeTable};`
                     : "SELECT COUNT(*) FROM information_schema.tables;"
@@ -1315,7 +1345,7 @@ const quoteTableIdentifier = (tbl: string): string => {
               <button
                 className="btn btn-secondary btn-sm chip-btn"
                 onClick={() =>
-                  setSql(
+                  handleSqlChange(
                     activeTable
                       ? `SELECT * FROM ${activeTable} ORDER BY 1 DESC LIMIT 10;`
                       : `SELECT * FROM ${tables[0]} LIMIT 10;`
@@ -1414,7 +1444,7 @@ const quoteTableIdentifier = (tbl: string): string => {
           language="sql"
           theme={theme === "dark" ? "dodb-dark" : "light"}
           value={sql}
-          onChange={(val) => setSql(val || "")}
+          onChange={(val) => handleSqlChange(val || "")}
           onMount={handleEditorDidMount}
           options={{
             fontSize: 12.5,
