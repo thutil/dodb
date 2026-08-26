@@ -275,7 +275,7 @@ export default function Home() {
     const nextTheme = theme === "dark" ? "light" : "dark";
     setTheme(nextTheme);
     document.documentElement.setAttribute("data-theme", nextTheme);
-  });
+  }, [theme]);
 
   // Comprehensive Global Keyboard Shortcuts Listener
   useEffect(() => {
