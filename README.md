@@ -135,32 +135,6 @@ Explore and edit database records with safety and speed.
 - Save and organize database connections with color tags and environment groups.
 - Direct socket connections. Passwords you choose to save are encrypted with AES-256-GCM.
 
-#### Where your passwords live
-
-- Connection details live in `~/.dodb/profiles.json`. Passwords are encrypted with AES-256-GCM
-  (`enc:v2:` entries); host, port, user and database names are stored in the clear.
-- The master key is kept in the **macOS Keychain** / **Windows Credential Manager** under the
-  service `com.thutil.dodb`. On the first launch after upgrading, an existing
-  `~/.dodb/.master_key` file is written into the keychain, read back to verify, and only then
-  deleted. On Linux and other platforms the key is still a `0600` file at `~/.dodb/.master_key`.
-- **What this protects:** a copy of your home directory. Backups, Time Machine, dotfile or
-  cloud sync, and a stolen `~/.dodb` tarball no longer carry the key needed to decrypt your
-  passwords.
-- **What this does not protect:** code running as *you* on an unlocked session. Windows
-  Credential Manager returns the key to any process of the same user without prompting. On
-  macOS the only barrier is the consent prompt raised because the keychain item is bound to
-  the app's code signature.
-- Release builds are not signed with a Developer ID yet, so macOS will ask for keychain access
-  again after every update. [`docs/SIGNING.md`](docs/SIGNING.md) covers what changes once they
-  are, and how to build dodb locally without touching your login keychain.
-- Untick **Save password** to keep a password out of both files entirely — it then lives in
-  memory for that session only. Or set `DODB_ENCRYPTION_KEY` to supply your own key.
-- If the keychain is locked or unavailable, or you deny the prompt, dodb reports the error and
-  leaves your saved passwords untouched instead of quietly generating a new key. Unlock and
-  reopen, or start dodb with `DODB_KEY_BACKEND=file`.
-- `brew uninstall --zap dodb` cannot remove keychain items — delete `com.thutil.dodb` in
-  Keychain Access if you want it gone.
-
 <p align="center">
   <img src="docs/screenshot/connection_group.png" alt="Connection Management" width="100%" />
 </p>
@@ -231,14 +205,17 @@ brew upgrade --cask dodb
 2. Open the `.dmg` and drag **dodb** to your `/Applications` folder.
 
 #### 🛡️ macOS Gatekeeper Notice
+
 If macOS displays a warning that the app cannot be opened because it is from an unidentified developer:
 
 **Method 1: Terminal (Fastest)**
+
 ```bash
 xattr -dr com.apple.quarantine /Applications/dodb.app
 ```
 
 **Method 2: Right-Click Open**
+
 1. Open **Finder** → `/Applications`.
 2. **Right-click** (or `Control + Click`) on **dodb.app** and select **Open**.
 3. Click **Open** in the confirmation dialog.
