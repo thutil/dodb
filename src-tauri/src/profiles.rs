@@ -26,10 +26,16 @@ pub fn load_profiles() -> Result<Vec<ConnectionProfile>, String> {
     let mut profiles: Vec<ConnectionProfile> = serde_json::from_str(&raw)
         .map_err(|e| format!("Failed to parse profiles: {}", e))?;
 
-    // Decrypt passwords
     for p in profiles.iter_mut() {
-        if !p.password.is_empty() {
-            p.password = decrypt_password(&p.password);
+        if p.password.is_empty() {
+            continue;
+        }
+        match decrypt_password(&p.password)? {
+            Some(plain) => p.password = plain,
+            None => {
+                log::warn!("stored password for profile '{}' could not be decrypted", p.id);
+                p.password.clear();
+            }
         }
     }
 
@@ -42,7 +48,7 @@ pub fn save_profiles(profiles: &mut Vec<ConnectionProfile>) -> Result<(), String
         fs::create_dir_all(&dir).map_err(|e| format!("Failed to create data dir: {}", e))?;
     }
 
-    let encrypted_profiles = prepare_for_disk(profiles);
+    let encrypted_profiles = prepare_for_disk(profiles)?;
 
     let raw = serde_json::to_string_pretty(&encrypted_profiles)
         .map_err(|e| format!("Failed to serialize profiles: {}", e))?;
@@ -54,16 +60,16 @@ pub fn save_profiles(profiles: &mut Vec<ConnectionProfile>) -> Result<(), String
 }
 
 
-fn prepare_for_disk(profiles: &[ConnectionProfile]) -> Vec<ConnectionProfile> {
+fn prepare_for_disk(profiles: &[ConnectionProfile]) -> Result<Vec<ConnectionProfile>, String> {
     let mut out = profiles.to_vec();
     for p in out.iter_mut() {
         if !p.save_password {
             p.password.clear();
         } else if !p.password.is_empty() {
-            p.password = encrypt_password(&p.password);
+            p.password = encrypt_password(&p.password)?;
         }
     }
-    out
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -88,7 +94,8 @@ mod tests {
 
     #[test]
     fn opting_out_keeps_the_password_off_disk() {
-        let on_disk = prepare_for_disk(&[profile(false)]);
+        crate::crypto::seed_test_secret();
+        let on_disk = prepare_for_disk(&[profile(false)]).unwrap();
         assert_eq!(on_disk[0].password, "");
         let raw = serde_json::to_string(&on_disk).unwrap();
         assert!(!raw.contains("s3cret"), "{raw}");
@@ -96,9 +103,10 @@ mod tests {
 
     #[test]
     fn opting_in_stores_the_password_encrypted() {
-        let on_disk = prepare_for_disk(&[profile(true)]);
-        assert!(on_disk[0].password.starts_with("enc:"), "{}", on_disk[0].password);
-        assert_eq!(decrypt_password(&on_disk[0].password), "s3cret");
+        crate::crypto::seed_test_secret();
+        let on_disk = prepare_for_disk(&[profile(true)]).unwrap();
+        assert!(on_disk[0].password.starts_with("enc:v2:"), "{}", on_disk[0].password);
+        assert_eq!(decrypt_password(&on_disk[0].password).unwrap().as_deref(), Some("s3cret"));
     }
 
     #[test]
@@ -107,6 +115,7 @@ mod tests {
         let parsed: Vec<ConnectionProfile> = serde_json::from_str(raw).unwrap();
         assert!(parsed[0].save_password);
         assert!(!parsed[0].keep_alive);
-        assert!(prepare_for_disk(&parsed)[0].password.starts_with("enc:"));
+        crate::crypto::seed_test_secret();
+        assert!(prepare_for_disk(&parsed).unwrap()[0].password.starts_with("enc:v2:"));
     }
 }

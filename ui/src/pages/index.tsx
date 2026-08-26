@@ -203,14 +203,14 @@ export default function Home() {
       const root = document.documentElement;
       (root.style as any).zoom = `${uiScale}%`;
       localStorage.setItem("dodb_ui_scale", String(uiScale));
-    } catch (e) {}
+    } catch (e) { }
   }, [uiScale]);
 
   const handleLanguageChange = (newLang: Language) => {
     setLanguage(newLang);
     try {
       localStorage.setItem("dodb_language", newLang);
-    } catch (e) {}
+    } catch (e) { }
   };
 
   // Dynamically load Tauri version at runtime if running in desktop app
@@ -271,11 +271,11 @@ export default function Home() {
     };
   }, []);
 
-  const toggleTheme = () => {
+  const toggleTheme = useCallback(() => {
     const nextTheme = theme === "dark" ? "light" : "dark";
     setTheme(nextTheme);
     document.documentElement.setAttribute("data-theme", nextTheme);
-  };
+  });
 
   // Comprehensive Global Keyboard Shortcuts Listener
   useEffect(() => {
@@ -361,16 +361,24 @@ export default function Home() {
 
     window.addEventListener("keydown", handleGlobalShortcuts);
     return () => window.removeEventListener("keydown", handleGlobalShortcuts);
-  }, [activeTable, theme]);
+  }, [activeTable, theme, toggleTheme]);
 
   const fetchProfiles = useCallback(async () => {
     try {
       const data: any = await apiClient.getProfiles();
       setProfiles(data);
-    } catch {
-      // Backend service offline or initial launch
+    } catch (err) {
+      const message = String((err as any)?.message ?? err ?? "");
+      if (message.includes("KEY_UNAVAILABLE")) {
+        showToast({
+          type: "error",
+          title: "Saved passwords could not be unlocked",
+          sub: "dodb cannot read its master key from the keychain. Unlock the keychain and reopen dodb, or start it with DODB_KEY_BACKEND=file.",
+          duration: 0,
+        });
+      }
     }
-  }, []);
+  }, [showToast]);
 
   const handleDisconnect = async () => {
     try {

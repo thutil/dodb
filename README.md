@@ -37,7 +37,7 @@ No bloated Java runtimes, no slow Electron shells, and no hidden cloud proxies. 
 - 🕸️ **Visual ER Diagrams** — Auto-generated entity relationship diagrams with foreign key topology and relationship highlighting.
 - ⚡ **Monaco SQL Console** — Full-featured code editor with smart autocomplete, highlight-to-run (`Cmd + Enter`), and multi-tab results.
 - 📝 **Virtual DataGrid & Inline Editing** — Instant double-click edits, staged transactional mutation bar, multi-select rows (`Cmd + Click`), and batch actions.
-- 🔒 **Local & Direct Connection** — Direct socket connection with local AES-256-GCM encryption for stored credentials. Zero telemetry.
+- 🔒 **Local & Direct Connection** — Direct socket connections. Saved passwords are encrypted with AES-256-GCM and the master key lives in the macOS Keychain or Windows Credential Manager, not in a file. Zero telemetry.
 
 ---
 
@@ -133,7 +133,33 @@ Explore and edit database records with safety and speed.
 ### 7. Profile & Connection Management
 
 - Save and organize database connections with color tags and environment groups.
-- Direct socket connections with local AES-256-GCM encryption for stored credentials.
+- Direct socket connections. Passwords you choose to save are encrypted with AES-256-GCM.
+
+#### Where your passwords live
+
+- Connection details live in `~/.dodb/profiles.json`. Passwords are encrypted with AES-256-GCM
+  (`enc:v2:` entries); host, port, user and database names are stored in the clear.
+- The master key is kept in the **macOS Keychain** / **Windows Credential Manager** under the
+  service `com.thutil.dodb`. On the first launch after upgrading, an existing
+  `~/.dodb/.master_key` file is written into the keychain, read back to verify, and only then
+  deleted. On Linux and other platforms the key is still a `0600` file at `~/.dodb/.master_key`.
+- **What this protects:** a copy of your home directory. Backups, Time Machine, dotfile or
+  cloud sync, and a stolen `~/.dodb` tarball no longer carry the key needed to decrypt your
+  passwords.
+- **What this does not protect:** code running as *you* on an unlocked session. Windows
+  Credential Manager returns the key to any process of the same user without prompting. On
+  macOS the only barrier is the consent prompt raised because the keychain item is bound to
+  the app's code signature.
+- Release builds are not signed with a Developer ID yet, so macOS will ask for keychain access
+  again after every update. [`docs/SIGNING.md`](docs/SIGNING.md) covers what changes once they
+  are, and how to build dodb locally without touching your login keychain.
+- Untick **Save password** to keep a password out of both files entirely — it then lives in
+  memory for that session only. Or set `DODB_ENCRYPTION_KEY` to supply your own key.
+- If the keychain is locked or unavailable, or you deny the prompt, dodb reports the error and
+  leaves your saved passwords untouched instead of quietly generating a new key. Unlock and
+  reopen, or start dodb with `DODB_KEY_BACKEND=file`.
+- `brew uninstall --zap dodb` cannot remove keychain items — delete `com.thutil.dodb` in
+  Keychain Access if you want it gone.
 
 <p align="center">
   <img src="docs/screenshot/connection_group.png" alt="Connection Management" width="100%" />

@@ -2,251 +2,441 @@ use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
 };
+use dirs::home_dir;
 use hex;
+use hkdf::Hkdf;
 use pbkdf2::pbkdf2_hmac;
 use rand::Rng;
 use sha2::Sha256;
 use std::env;
+use std::fmt;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::OnceLock;
-use dirs::home_dir;
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
 const SALT: &[u8] = b"dodb-per-device-salt-v2";
 const LEGACY_SALT: &[u8] = b"dodb-salt-salt-v1";
-const ITERATIONS: u32 = 100000;
+const HKDF_SALT: &[u8] = b"dodb-hkdf-salt-v3";
+const HKDF_INFO: &[u8] = b"dodb-profile-password-v2";
+const ITERATIONS: u32 = 100_000;
 const KEY_LENGTH: usize = 32;
+const TAG_LENGTH: usize = 16;
+const IV_LENGTH: usize = 12;
 
-static CACHED_SECRET: OnceLock<String> = OnceLock::new();
-static CACHED_CURRENT_KEY: OnceLock<[u8; KEY_LENGTH]> = OnceLock::new();
-static CACHED_LEGACY_KEY: OnceLock<[u8; KEY_LENGTH]> = OnceLock::new();
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+const KEYCHAIN_SERVICE: &str = "com.thutil.dodb";
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+const KEYCHAIN_ACCOUNT: &str = "master-key";
 
-/// Resolves the storage path for the per-device master key
-fn get_master_key_path() -> PathBuf {
-    if let Ok(dir) = env::var("DODB_DATA_DIR") {
-        PathBuf::from(dir).join(".master_key")
-    } else {
-        home_dir().unwrap_or_else(|| PathBuf::from(".")).join(".dodb").join(".master_key")
+pub const KEY_UNAVAILABLE_MARKER: &str = "KEY_UNAVAILABLE";
+
+#[derive(Debug)]
+pub enum CryptoError {
+    KeyUnavailable(String),
+    Cipher(String),
+}
+
+impl fmt::Display for CryptoError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CryptoError::KeyUnavailable(m) => write!(f, "{KEY_UNAVAILABLE_MARKER}: {m}"),
+            CryptoError::Cipher(m) => write!(f, "CIPHER_FAILED: {m}"),
+        }
     }
 }
 
-/// Retrieves or securely generates a unique per-device 256-bit master secret key.
-/// Cached in memory via OnceLock for thread-safety, speed, and consistency.
-fn get_secret() -> String {
-    CACHED_SECRET
-        .get_or_init(|| {
-            // 1. Check if an environment variable override is set (useful for CI / tests / custom deployments)
-            if let Ok(env_key) = env::var("DODB_ENCRYPTION_KEY") {
-                if !env_key.trim().is_empty() {
-                    return env_key.trim().to_string();
-                }
-            }
-            if let Ok(env_key) = env::var("ENCRYPTION_KEY") {
-                if !env_key.trim().is_empty() {
-                    return env_key.trim().to_string();
-                }
-            }
+impl std::error::Error for CryptoError {}
 
-            // 2. Read existing per-device master key file
-            let key_path = get_master_key_path();
-            if key_path.exists() {
-                if let Ok(content) = fs::read_to_string(&key_path) {
-                    let trimmed = content.trim();
-                    if !trimmed.is_empty() {
-                        return trimmed.to_string();
-                    }
-                }
-            }
-
-            // 3. Generate a new high-entropy 256-bit cryptographically secure random key
-            let mut raw_bytes = [0u8; 32];
-            rand::rng().fill(&mut raw_bytes);
-            let new_key_hex = hex::encode(raw_bytes);
-
-            // Ensure parent directory exists (~/.dodb)
-            if let Some(parent) = key_path.parent() {
-                let _ = fs::create_dir_all(parent);
-            }
-
-            // Write key file
-            if let Ok(()) = fs::write(&key_path, &new_key_hex) {
-                // Set strict file permissions (chmod 600 - Owner Read/Write only) on macOS/Linux
-                #[cfg(unix)]
-                {
-                    if let Ok(metadata) = fs::metadata(&key_path) {
-                        let mut perms = metadata.permissions();
-                        perms.set_mode(0o600);
-                        let _ = fs::set_permissions(&key_path, perms);
-                    }
-                }
-            }
-
-            new_key_hex
-        })
-        .clone()
+impl From<CryptoError> for String {
+    fn from(err: CryptoError) -> Self {
+        err.to_string()
+    }
 }
 
-/// Derives a 32-byte AES-256 key from a secret string and salt using PBKDF2-HMAC-SHA256
-fn derive_key(secret: &str, salt: &[u8]) -> [u8; KEY_LENGTH] {
+fn unavailable(message: impl fmt::Display) -> CryptoError {
+    CryptoError::KeyUnavailable(message.to_string())
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Backend {
+    Keychain,
+    File,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum SecretSource {
+    Env,
+    Store,
+}
+
+struct MasterSecret {
+    value: String,
+    source: SecretSource,
+}
+
+static SECRET: OnceLock<MasterSecret> = OnceLock::new();
+static V2_KEY: OnceLock<[u8; KEY_LENGTH]> = OnceLock::new();
+static V1_KEY: OnceLock<[u8; KEY_LENGTH]> = OnceLock::new();
+static LEGACY_KEY: OnceLock<[u8; KEY_LENGTH]> = OnceLock::new();
+
+fn master_key_path() -> PathBuf {
+    if let Ok(dir) = env::var("DODB_DATA_DIR") {
+        PathBuf::from(dir).join(".master_key")
+    } else {
+        home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".dodb")
+            .join(".master_key")
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn default_backend() -> Backend {
+    Backend::Keychain
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn default_backend() -> Backend {
+    Backend::File
+}
+
+fn resolve_backend() -> Backend {
+    match env::var("DODB_KEY_BACKEND") {
+        Ok(raw) => match raw.trim().to_ascii_lowercase().as_str() {
+            "file" => Backend::File,
+            "keychain" => Backend::Keychain,
+            "" => default_backend(),
+            other => {
+                log::warn!("unknown DODB_KEY_BACKEND '{other}', using the default backend");
+                default_backend()
+            }
+        },
+        Err(_) => default_backend(),
+    }
+}
+
+fn env_secret() -> Option<String> {
+    for name in ["DODB_ENCRYPTION_KEY", "ENCRYPTION_KEY"] {
+        if let Ok(value) = env::var(name) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn new_secret() -> String {
+    let mut raw = [0u8; KEY_LENGTH];
+    rand::rng().fill(&mut raw);
+    hex::encode(raw)
+}
+
+fn read_key_file() -> Option<String> {
+    let content = fs::read_to_string(master_key_path()).ok()?;
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn file_secret() -> Result<String, CryptoError> {
+    if let Some(existing) = read_key_file() {
+        return Ok(existing);
+    }
+
+    let path = master_key_path();
+    let secret = new_secret();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| unavailable(format!("could not create {}: {e}", parent.display())))?;
+    }
+    fs::write(&path, &secret)
+        .map_err(|e| unavailable(format!("could not write {}: {e}", path.display())))?;
+
+    #[cfg(unix)]
+    if let Ok(metadata) = fs::metadata(&path) {
+        let mut perms = metadata.permissions();
+        perms.set_mode(0o600);
+        let _ = fs::set_permissions(&path, perms);
+    }
+
+    Ok(secret)
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn keychain_secret() -> Result<String, CryptoError> {
+    use keyring::{Entry, Error as KeyringError};
+
+    let entry = Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT).map_err(unavailable)?;
+    match entry.get_password() {
+        Ok(stored) if !stored.trim().is_empty() => Ok(stored.trim().to_string()),
+        Ok(_) | Err(KeyringError::NoEntry) => adopt_or_generate(&entry),
+        Err(e) => Err(unavailable(e)),
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn adopt_or_generate(entry: &keyring::Entry) -> Result<String, CryptoError> {
+    let path = master_key_path();
+    let from_file = read_key_file();
+    let secret = from_file.clone().unwrap_or_else(new_secret);
+
+    entry.set_password(&secret).map_err(unavailable)?;
+
+    let verified = match entry.get_password() {
+        Ok(read_back) => read_back.trim() == secret,
+        Err(e) => {
+            return match from_file {
+                Some(existing) => {
+                    log::warn!("keychain write could not be read back ({e}); keeping {}", path.display());
+                    Ok(existing)
+                }
+                None => Err(unavailable(e)),
+            }
+        }
+    };
+
+    match (verified, from_file) {
+        (true, Some(_)) => {
+            match fs::remove_file(&path) {
+                Ok(()) => log::info!("master key moved into the OS keychain, removed {}", path.display()),
+                Err(e) => log::warn!("master key is in the keychain but {} remains: {e}", path.display()),
+            }
+            Ok(secret)
+        }
+        (true, None) => Ok(secret),
+        (false, Some(existing)) => {
+            log::warn!("keychain returned a different master key; keeping {}", path.display());
+            Ok(existing)
+        }
+        (false, None) => Err(unavailable("the keychain returned a different master key than the one just written")),
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn keychain_secret() -> Result<String, CryptoError> {
+    Err(unavailable(
+        "this build has no OS keychain support; unset DODB_KEY_BACKEND to use the key file",
+    ))
+}
+
+fn load_secret() -> Result<MasterSecret, CryptoError> {
+    if let Some(value) = env_secret() {
+        return Ok(MasterSecret { value, source: SecretSource::Env });
+    }
+    let value = match resolve_backend() {
+        Backend::Keychain => keychain_secret()?,
+        Backend::File => file_secret()?,
+    };
+    Ok(MasterSecret { value, source: SecretSource::Store })
+}
+
+fn secret() -> Result<&'static MasterSecret, CryptoError> {
+    if let Some(cached) = SECRET.get() {
+        return Ok(cached);
+    }
+    let loaded = load_secret()?;
+    Ok(SECRET.get_or_init(|| loaded))
+}
+
+fn pbkdf2_key(secret: &str, salt: &[u8]) -> [u8; KEY_LENGTH] {
     let mut key = [0u8; KEY_LENGTH];
     pbkdf2_hmac::<Sha256>(secret.as_bytes(), salt, ITERATIONS, &mut key);
     key
 }
 
-/// Derives the current device's active encryption key (cached in memory)
-fn get_current_key() -> [u8; KEY_LENGTH] {
-    *CACHED_CURRENT_KEY.get_or_init(|| {
-        let secret = get_secret();
-        derive_key(&secret, SALT)
-    })
-}
-
-/// Derives the legacy static key for backward-compatibility auto-migration (cached in memory)
-fn get_legacy_key() -> [u8; KEY_LENGTH] {
-    *CACHED_LEGACY_KEY.get_or_init(|| {
-        derive_key("dodb-mac-secure-master-key-v1", LEGACY_SALT)
-    })
-}
-
-/// Encrypts plain text password using AES-256-GCM with a unique 12-byte CSPRNG IV
-pub fn encrypt_password(plain_text: &str) -> String {
-    if plain_text.is_empty() {
-        return "".to_string();
+fn v2_key() -> Result<[u8; KEY_LENGTH], CryptoError> {
+    if let Some(cached) = V2_KEY.get() {
+        return Ok(*cached);
     }
-    if plain_text.starts_with("enc:") {
-        return plain_text.to_string();
-    }
+    let secret = secret()?;
 
-    let key = get_current_key();
-    let cipher = match Aes256Gcm::new_from_slice(&key) {
-        Ok(c) => c,
-        Err(_) => return plain_text.to_string(),
+    let ikm = match secret.source {
+        SecretSource::Env => pbkdf2_key(&secret.value, SALT).to_vec(),
+        SecretSource::Store => secret.value.as_bytes().to_vec(),
     };
 
-    let mut iv = [0u8; 12];
+    let mut key = [0u8; KEY_LENGTH];
+    Hkdf::<Sha256>::new(Some(HKDF_SALT), &ikm)
+        .expand(HKDF_INFO, &mut key)
+        .map_err(|e| CryptoError::Cipher(format!("HKDF expand failed: {e}")))?;
+    Ok(*V2_KEY.get_or_init(|| key))
+}
+
+fn v1_key() -> Result<[u8; KEY_LENGTH], CryptoError> {
+    if let Some(cached) = V1_KEY.get() {
+        return Ok(*cached);
+    }
+    let key = pbkdf2_key(&secret()?.value, SALT);
+    Ok(*V1_KEY.get_or_init(|| key))
+}
+
+fn legacy_key() -> [u8; KEY_LENGTH] {
+    *LEGACY_KEY.get_or_init(|| pbkdf2_key("dodb-mac-secure-master-key-v1", LEGACY_SALT))
+}
+
+pub fn init() -> Result<(), CryptoError> {
+    v2_key().map(|_| ())
+}
+
+pub fn encrypt_password(plain_text: &str) -> Result<String, CryptoError> {
+    if plain_text.is_empty() || plain_text.starts_with("enc:") {
+        return Ok(plain_text.to_string());
+    }
+
+    let key = v2_key()?;
+    let cipher = Aes256Gcm::new_from_slice(&key)
+        .map_err(|e| CryptoError::Cipher(format!("invalid AES key: {e}")))?;
+
+    let mut iv = [0u8; IV_LENGTH];
     rand::rng().fill(&mut iv);
-    let nonce = Nonce::from_slice(&iv);
 
-    match cipher.encrypt(nonce, plain_text.as_bytes()) {
-        Ok(encrypted) => {
-            // aes-gcm appends the 16-byte auth tag to the end of the ciphertext.
-            let auth_tag_len = 16;
-            if encrypted.len() < auth_tag_len {
-                return plain_text.to_string();
+    let sealed = cipher
+        .encrypt(Nonce::from_slice(&iv), plain_text.as_bytes())
+        .map_err(|e| CryptoError::Cipher(format!("AES-GCM encryption failed: {e}")))?;
+    if sealed.len() < TAG_LENGTH {
+        return Err(CryptoError::Cipher("AES-GCM output is missing its auth tag".into()));
+    }
+
+    let (cipher_text, auth_tag) = sealed.split_at(sealed.len() - TAG_LENGTH);
+    Ok(format!(
+        "enc:v2:{}:{}:{}",
+        hex::encode(iv),
+        hex::encode(auth_tag),
+        hex::encode(cipher_text)
+    ))
+}
+
+pub fn decrypt_password(cipher_text: &str) -> Result<Option<String>, CryptoError> {
+    if cipher_text.is_empty() || !cipher_text.starts_with("enc:") {
+        return Ok(Some(cipher_text.to_string()));
+    }
+
+    let parts: Vec<&str> = cipher_text.split(':').collect();
+    match parts.as_slice() {
+        ["enc", "v2", iv, tag, body] => Ok(open(iv, tag, body, &v2_key()?)),
+        ["enc", iv, tag, body] => {
+            if let Some(plain) = open(iv, tag, body, &v1_key()?) {
+                return Ok(Some(plain));
             }
-            let ct_len = encrypted.len() - auth_tag_len;
-            let cipher_text = &encrypted[..ct_len];
-            let auth_tag = &encrypted[ct_len..];
-
-            let iv_hex = hex::encode(iv);
-            let auth_tag_hex = hex::encode(auth_tag);
-            let cipher_text_hex = hex::encode(cipher_text);
-
-            format!("enc:{}:{}:{}", iv_hex, auth_tag_hex, cipher_text_hex)
+            Ok(open(iv, tag, body, &legacy_key()))
         }
-        Err(_) => plain_text.to_string(),
+        _ => Ok(None),
     }
 }
 
-/// Internal decryption helper with a specific derived AES-256 key
-fn try_decrypt_with_key(cipher_text: &str, key: &[u8; KEY_LENGTH]) -> Option<String> {
-    let parts: Vec<&str> = cipher_text.split(':').collect();
-    if parts.len() != 4 || parts[0] != "enc" {
+fn open(iv_hex: &str, tag_hex: &str, body_hex: &str, key: &[u8; KEY_LENGTH]) -> Option<String> {
+    let iv = hex::decode(iv_hex).ok()?;
+    let tag = hex::decode(tag_hex).ok()?;
+    let mut blob = hex::decode(body_hex).ok()?;
+    if iv.len() != IV_LENGTH || tag.len() != TAG_LENGTH {
         return None;
     }
-
-    let iv = hex::decode(parts[1]).ok()?;
-    let mut auth_tag = hex::decode(parts[2]).ok()?;
-    let mut encrypted_data = hex::decode(parts[3]).ok()?;
-
-    if iv.len() != 12 || auth_tag.len() != 16 {
-        return None;
-    }
+    blob.extend_from_slice(&tag);
 
     let cipher = Aes256Gcm::new_from_slice(key).ok()?;
-    let nonce = Nonce::from_slice(&iv);
-
-    // Recombine ciphertext and auth tag for AES-GCM decryption
-    encrypted_data.append(&mut auth_tag);
-
-    match cipher.decrypt(nonce, encrypted_data.as_ref()) {
-        Ok(decrypted) => String::from_utf8(decrypted).ok(),
-        Err(_) => None,
-    }
+    let plain = cipher.decrypt(Nonce::from_slice(&iv), blob.as_ref()).ok()?;
+    String::from_utf8(plain).ok()
 }
 
-/// Decrypts a password string.
-/// Tries the per-device unique key first; if that fails, transparently falls back to
-/// legacy static key to allow seamless auto-migration for existing saved connections.
-pub fn decrypt_password(cipher_text: &str) -> String {
-    if cipher_text.is_empty() {
-        return "".to_string();
-    }
-    if !cipher_text.starts_with("enc:") {
-        return cipher_text.to_string();
-    }
+#[cfg(test)]
+const TEST_SECRET: &str = "9f8e7d6c5b4a39281706f5e4d3c2b1a09f8e7d6c5b4a39281706f5e4d3c2b1a0";
 
-    // 1. Try decrypting with the secure per-device unique key
-    let current_key = get_current_key();
-    if let Some(decrypted) = try_decrypt_with_key(cipher_text, &current_key) {
-        return decrypted;
-    }
-
-    // 2. Fallback: Try decrypting with the legacy static key for backward compatibility
-    let legacy_key = get_legacy_key();
-    if let Some(decrypted) = try_decrypt_with_key(cipher_text, &legacy_key) {
-        return decrypted;
-    }
-
-    // If both fail (tampered or invalid), return original string safely
-    cipher_text.to_string()
+/// keychain (CI runs `cargo test` on a macOS runner).
+#[cfg(test)]
+pub(crate) fn seed_test_secret() {
+    let _ = SECRET.set(MasterSecret {
+        value: TEST_SECRET.to_string(),
+        source: SecretSource::Store,
+    });
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_encrypt_decrypt_roundtrip() {
-        let password = "MySuperSecretPassword#2026";
-        let encrypted = encrypt_password(password);
-        assert!(encrypted.starts_with("enc:"));
-        assert_ne!(encrypted, password);
-
-        let decrypted = decrypt_password(&encrypted);
-        assert_eq!(decrypted, password);
-    }
-
-    #[test]
-    fn test_empty_and_passthrough() {
-        assert_eq!(encrypt_password(""), "");
-        assert_eq!(decrypt_password(""), "");
-        assert_eq!(decrypt_password("plain_password_not_enc"), "plain_password_not_enc");
-    }
-
-    #[test]
-    fn test_legacy_key_backward_compatibility() {
-        // Encrypt with legacy key manually
-        let legacy_key = get_legacy_key();
-        let cipher = Aes256Gcm::new_from_slice(&legacy_key).unwrap();
-        let mut iv = [0u8; 12];
+    fn seal_with(key: &[u8; KEY_LENGTH], plain: &str, versioned: bool) -> String {
+        let cipher = Aes256Gcm::new_from_slice(key).unwrap();
+        let mut iv = [0u8; IV_LENGTH];
         rand::rng().fill(&mut iv);
-        let nonce = Nonce::from_slice(&iv);
-        let plain = "OldLegacyPassword123";
-        let encrypted = cipher.encrypt(nonce, plain.as_bytes()).unwrap();
+        let sealed = cipher.encrypt(Nonce::from_slice(&iv), plain.as_bytes()).unwrap();
+        let (body, tag) = sealed.split_at(sealed.len() - TAG_LENGTH);
+        let tail = format!("{}:{}:{}", hex::encode(iv), hex::encode(tag), hex::encode(body));
+        if versioned {
+            format!("enc:v2:{tail}")
+        } else {
+            format!("enc:{tail}")
+        }
+    }
 
-        let auth_tag_len = 16;
-        let ct_len = encrypted.len() - auth_tag_len;
-        let cipher_text = &encrypted[..ct_len];
-        let auth_tag = &encrypted[ct_len..];
+    #[test]
+    fn roundtrip_writes_the_versioned_format() {
+        seed_test_secret();
+        let encrypted = encrypt_password("MySuperSecretPassword#2026").unwrap();
+        assert!(encrypted.starts_with("enc:v2:"), "{encrypted}");
+        assert_eq!(encrypted.split(':').count(), 5, "{encrypted}");
+        assert_eq!(
+            decrypt_password(&encrypted).unwrap().as_deref(),
+            Some("MySuperSecretPassword#2026")
+        );
+    }
 
-        let legacy_enc_str = format!("enc:{}:{}:{}", hex::encode(iv), hex::encode(auth_tag), hex::encode(cipher_text));
+    #[test]
+    fn empty_and_plaintext_pass_through() {
+        seed_test_secret();
+        assert_eq!(encrypt_password("").unwrap(), "");
+        assert_eq!(decrypt_password("").unwrap().as_deref(), Some(""));
+        assert_eq!(
+            decrypt_password("plain_password_not_enc").unwrap().as_deref(),
+            Some("plain_password_not_enc")
+        );
+    }
 
-        // Decrypt using the new system - should fall back and succeed seamlessly!
-        let decrypted = decrypt_password(&legacy_enc_str);
-        assert_eq!(decrypted, plain);
+    #[test]
+    fn pre_v2_blobs_still_decrypt() {
+        seed_test_secret();
+        let blob = seal_with(&v1_key().unwrap(), "OldDevicePassword123", false);
+        assert_eq!(decrypt_password(&blob).unwrap().as_deref(), Some("OldDevicePassword123"));
+    }
+
+    #[test]
+    fn legacy_static_key_blobs_still_decrypt() {
+        seed_test_secret();
+        let blob = seal_with(&legacy_key(), "OldLegacyPassword123", false);
+        assert_eq!(decrypt_password(&blob).unwrap().as_deref(), Some("OldLegacyPassword123"));
+    }
+
+    #[test]
+    fn a_tampered_blob_reports_failure_instead_of_echoing_itself() {
+        seed_test_secret();
+        let mut blob = encrypt_password("secret").unwrap();
+        blob.pop();
+        blob.push(if blob.ends_with('a') { 'b' } else { 'a' });
+        assert_eq!(decrypt_password(&blob).unwrap(), None);
+        assert_eq!(decrypt_password("enc:v2:zz:zz:zz").unwrap(), None);
+        assert_eq!(decrypt_password("enc:only:three").unwrap(), None);
+    }
+
+    #[test]
+    fn backend_override_is_honoured() {
+        // Env vars are process-wide; this test owns DODB_KEY_BACKEND and restores it.
+        let previous = env::var("DODB_KEY_BACKEND").ok();
+        env::set_var("DODB_KEY_BACKEND", "file");
+        assert_eq!(resolve_backend(), Backend::File);
+        env::set_var("DODB_KEY_BACKEND", "KeyChain");
+        assert_eq!(resolve_backend(), Backend::Keychain);
+        env::set_var("DODB_KEY_BACKEND", "nonsense");
+        assert_eq!(resolve_backend(), default_backend());
+        match previous {
+            Some(value) => env::set_var("DODB_KEY_BACKEND", value),
+            None => env::remove_var("DODB_KEY_BACKEND"),
+        }
     }
 }

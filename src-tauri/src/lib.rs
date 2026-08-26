@@ -71,6 +71,9 @@ pub fn run() {
             .build(),
         )?;
       }
+      if let Err(e) = crypto::init() {
+        log::error!("master key is unavailable: {e}");
+      }
       Ok(())
     })
     .build(tauri::generate_context!())

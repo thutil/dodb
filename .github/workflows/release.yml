@@ -47,6 +47,74 @@ jobs:
       - name: Sync Version from Git Tag
         run: node scripts/sync-version.js "${{ github.ref_name }}"
 
+      # Signing stays off until APPLE_CERTIFICATE exists, and the Apple variables are
+      # only exported when they do - an empty APPLE_SIGNING_IDENTITY would make the
+      # bundler try to sign with no identity. See docs/SIGNING.md.
+      - name: Set up macOS code signing
+        if: matrix.platform == 'macos-latest'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          IDENTITY_OVERRIDE: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${APPLE_CERTIFICATE:-}" ]; then
+            echo "::warning::APPLE_CERTIFICATE is not set - releasing an ad-hoc signed build. macOS will ask for keychain access again after every update, and Gatekeeper will warn on first launch. See docs/SIGNING.md."
+            exit 0
+          fi
+
+          KEYCHAIN_PASSWORD="${KEYCHAIN_PASSWORD:-$(uuidgen)}"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security set-keychain-settings -t 3600 -u build.keychain
+          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+          rm -f certificate.p12
+
+          if [ -n "${IDENTITY_OVERRIDE:-}" ]; then
+            IDENTITY="$IDENTITY_OVERRIDE"
+          else
+            IDENTITIES=$(security find-identity -v -p codesigning build.keychain || true)
+            # Prefer a Developer ID; fall back to whatever code signing identity the
+            # certificate carries, so a self-signed one works too.
+            IDENTITY=$(printf '%s' "$IDENTITIES" | awk -F'"' '/Developer ID Application/ {print $2; exit}')
+            if [ -z "$IDENTITY" ]; then
+              IDENTITY=$(printf '%s' "$IDENTITIES" | awk -F'"' 'NF > 1 {print $2; exit}')
+            fi
+          fi
+
+          if [ -z "$IDENTITY" ]; then
+            echo "::error::certificate imported but no code signing identity was found in it"
+            exit 1
+          fi
+          echo "Signing as: $IDENTITY"
+
+          {
+            echo "APPLE_CERTIFICATE<<__DODB_EOF__"
+            echo "$APPLE_CERTIFICATE"
+            echo "__DODB_EOF__"
+            echo "APPLE_CERTIFICATE_PASSWORD=$APPLE_CERTIFICATE_PASSWORD"
+            echo "APPLE_SIGNING_IDENTITY=$IDENTITY"
+          } >> "$GITHUB_ENV"
+
+          if [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_PASSWORD:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ]; then
+            {
+              echo "APPLE_ID=$APPLE_ID"
+              echo "APPLE_PASSWORD=$APPLE_PASSWORD"
+              echo "APPLE_TEAM_ID=$APPLE_TEAM_ID"
+            } >> "$GITHUB_ENV"
+            echo "Notarization credentials found - the bundle will be notarized and stapled."
+          else
+            echo "::warning::Signing without notarization (APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID incomplete). Keychain prompts stop recurring, but Gatekeeper still warns on first launch."
+          fi
+
       - name: Build Tauri App & Create Release
         uses: tauri-apps/tauri-action@v0
         env:
