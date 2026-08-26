@@ -26,8 +26,9 @@ const KEY_LENGTH: usize = 32;
 const TAG_LENGTH: usize = 16;
 const IV_LENGTH: usize = 12;
 
+const KEYCHAIN_SERVICE_NAME: &str = "com.thutil.dodb";
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-const KEYCHAIN_SERVICE: &str = "com.thutil.dodb";
+const KEYCHAIN_SERVICE: &str = KEYCHAIN_SERVICE_NAME;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 const KEYCHAIN_ACCOUNT: &str = "master-key";
 
@@ -93,12 +94,15 @@ fn master_key_path() -> PathBuf {
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(target_os = "windows")]
 fn default_backend() -> Backend {
     Backend::Keychain
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+// Not macOS: an app that is not signed with a certificate cannot read the login keychain
+// without a consent prompt on *every* launch - "Always Allow" has no stable code identity
+// to record for an ad-hoc signature. See docs/MASTER_KEY.md.
+#[cfg(not(target_os = "windows"))]
 fn default_backend() -> Backend {
     Backend::File
 }
@@ -146,18 +150,13 @@ fn read_key_file() -> Option<String> {
     }
 }
 
-fn file_secret() -> Result<String, CryptoError> {
-    if let Some(existing) = read_key_file() {
-        return Ok(existing);
-    }
-
+fn write_key_file(secret: &str) -> Result<(), CryptoError> {
     let path = master_key_path();
-    let secret = new_secret();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|e| unavailable(format!("could not create {}: {e}", parent.display())))?;
     }
-    fs::write(&path, &secret)
+    fs::write(&path, secret)
         .map_err(|e| unavailable(format!("could not write {}: {e}", path.display())))?;
 
     #[cfg(unix)]
@@ -167,8 +166,105 @@ fn file_secret() -> Result<String, CryptoError> {
         let _ = fs::set_permissions(&path, perms);
     }
 
-    Ok(secret)
+    if read_key_file().as_deref() != Some(secret) {
+        return Err(unavailable(format!("{} did not read back as written", path.display())));
+    }
+    Ok(())
 }
+
+#[derive(Debug, PartialEq, Eq)]
+enum FileAction {
+    Use(String),
+    Rescue(String),
+    Generate,
+}
+
+fn decide_file_action(
+    file: Option<String>,
+    keychain: Result<Option<String>, String>,
+) -> Result<FileAction, CryptoError> {
+    if let Some(existing) = file {
+        return Ok(FileAction::Use(existing));
+    }
+    match keychain {
+        Ok(Some(stored)) => Ok(FileAction::Rescue(stored)),
+        Ok(None) => Ok(FileAction::Generate),
+        Err(e) => Err(unavailable(format!(
+            "a master key is stored in the keychain but could not be read ({e}); allow access and reopen dodb, or delete the {KEYCHAIN_SERVICE_NAME} item from Keychain Access to start over"
+        ))),
+    }
+}
+
+fn file_secret() -> Result<String, CryptoError> {
+    match decide_file_action(read_key_file(), keychain_lookup())? {
+        FileAction::Use(existing) => Ok(existing),
+        FileAction::Rescue(stored) => {
+            write_key_file(&stored)?;
+            log::info!("master key moved out of the keychain into {}", master_key_path().display());
+            forget_keychain_entry();
+            Ok(stored)
+        }
+        FileAction::Generate => {
+            let secret = new_secret();
+            write_key_file(&secret)?;
+            Ok(secret)
+        }
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn keychain_lookup() -> Result<Option<String>, String> {
+    use keyring::{Entry, Error as KeyringError};
+
+    let entry = match Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT) {
+        Ok(entry) => entry,
+        Err(KeyringError::NoDefaultStore) => return Ok(None),
+        Err(e) => return Err(e.to_string()),
+    };
+    match entry.get_password() {
+        Ok(stored) if !stored.trim().is_empty() => Ok(Some(stored.trim().to_string())),
+        Ok(_) | Err(KeyringError::NoEntry) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn keychain_lookup() -> Result<Option<String>, String> {
+    Ok(None)
+}
+
+#[cfg(target_os = "macos")]
+fn forget_keychain_entry() {
+    let outcome = std::process::Command::new("/usr/bin/security")
+        .args([
+            "delete-generic-password",
+            "-s",
+            KEYCHAIN_SERVICE,
+            "-a",
+            KEYCHAIN_ACCOUNT,
+        ])
+        .output();
+    match outcome {
+        Ok(out) if out.status.success() => {}
+        Ok(out) => log::warn!(
+            "the master key is now in a file but the keychain item remains: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ),
+        Err(e) => log::warn!("could not run security(1) to drop the keychain item: {e}"),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn forget_keychain_entry() {
+    if let Ok(entry) = keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT) {
+        if let Err(e) = entry.delete_credential() {
+            log::warn!("the master key is now in a file but the credential remains: {e}");
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn forget_keychain_entry() {}
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 fn keychain_secret() -> Result<String, CryptoError> {
@@ -417,8 +513,8 @@ mod tests {
     fn a_tampered_blob_reports_failure_instead_of_echoing_itself() {
         seed_test_secret();
         let mut blob = encrypt_password("secret").unwrap();
-        blob.pop();
-        blob.push(if blob.ends_with('a') { 'b' } else { 'a' });
+        let last = blob.pop().unwrap();
+        blob.push(if last == 'a' { 'b' } else { 'a' });
         assert_eq!(decrypt_password(&blob).unwrap(), None);
         assert_eq!(decrypt_password("enc:v2:zz:zz:zz").unwrap(), None);
         assert_eq!(decrypt_password("enc:only:three").unwrap(), None);
@@ -438,5 +534,46 @@ mod tests {
             Some(value) => env::set_var("DODB_KEY_BACKEND", value),
             None => env::remove_var("DODB_KEY_BACKEND"),
         }
+    }
+
+    #[test]
+    fn the_keychain_is_the_default_only_where_apps_can_read_it_without_prompting() {
+        #[cfg(target_os = "windows")]
+        assert_eq!(default_backend(), Backend::Keychain);
+        #[cfg(not(target_os = "windows"))]
+        assert_eq!(default_backend(), Backend::File);
+    }
+
+    #[test]
+    fn an_existing_key_file_wins() {
+        let file = Some("aa".to_string());
+        assert_eq!(
+            decide_file_action(file.clone(), Ok(None)).unwrap(),
+            FileAction::Use("aa".to_string())
+        );
+        assert_eq!(
+            decide_file_action(file, Ok(Some("bb".to_string()))).unwrap(),
+            FileAction::Use("aa".to_string())
+        );
+    }
+
+    #[test]
+    fn a_key_left_in_the_keychain_is_rescued_not_replaced() {
+        assert_eq!(
+            decide_file_action(None, Ok(Some("bb".to_string()))).unwrap(),
+            FileAction::Rescue("bb".to_string())
+        );
+    }
+
+    #[test]
+    fn nothing_stored_anywhere_mints_a_new_key() {
+        assert_eq!(decide_file_action(None, Ok(None)).unwrap(), FileAction::Generate);
+    }
+
+    #[test]
+    fn an_unreadable_keychain_key_is_an_error_not_a_fresh_start() {
+        let err = decide_file_action(None, Err("User denied access".to_string())).unwrap_err();
+        assert!(matches!(err, CryptoError::KeyUnavailable(_)));
+        assert!(err.to_string().contains(KEYCHAIN_SERVICE_NAME), "{err}");
     }
 }
