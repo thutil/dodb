@@ -205,6 +205,8 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
   const columnsRef = useRef(columns);
   const schemaInfoRef = useRef(schemaInfo);
   const activeProfileRef = useRef(activeProfile);
+  const onExecuteSqlRef = useRef(onExecuteSql);
+  const onCommitChangesRef = useRef(onCommitChanges);
 
   activeDatabaseRef.current = activeDatabase;
   activeTableRef.current = activeTable;
@@ -212,6 +214,8 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
   columnsRef.current = columns;
   schemaInfoRef.current = schemaInfo;
   activeProfileRef.current = activeProfile;
+  onExecuteSqlRef.current = onExecuteSql;
+  onCommitChangesRef.current = onCommitChanges;
 
   // Background Schema Indexing for active profile + database
   useEffect(() => {
@@ -629,7 +633,7 @@ const quoteTableIdentifier = (tbl: string): string => {
     setCommitMsg(null);
     try {
       const sqlToRun = stmts.join("\n");
-      const res = await onExecuteSql(sqlToRun);
+      const res = await onExecuteSqlRef.current(sqlToRun);
       if (res.error) {
         setCommitMsg({ success: false, text: res.error });
       } else {
@@ -708,7 +712,7 @@ const quoteTableIdentifier = (tbl: string): string => {
       const start = performance.now();
 
       try {
-        const res = await onExecuteSql(stmtSql);
+        const res = await onExecuteSqlRef.current(stmtSql);
         const duration = Math.round(performance.now() - start);
         resultsList.push({
           id: idx + 1,
@@ -750,7 +754,7 @@ const quoteTableIdentifier = (tbl: string): string => {
       setActiveResultTab(defaultTab);
       setResult(resultsList[defaultTab].result);
     }
-  }, [onExecuteSql]);
+  }, []);
 
   // Primary Execute Handler: Runs highlighted selection if present, else runs statement at cursor (or single query)
   const handleRunSelectionOrCurrent = useCallback(() => {
@@ -801,6 +805,12 @@ const quoteTableIdentifier = (tbl: string): string => {
       executeStatements([currentCode]);
     }
   }, [sql, executeStatements]);
+
+  const handleRunSelectionOrCurrentRef = useRef(handleRunSelectionOrCurrent);
+  handleRunSelectionOrCurrentRef.current = handleRunSelectionOrCurrent;
+
+  const handleRunAllRef = useRef(handleRunAll);
+  handleRunAllRef.current = handleRunAll;
 
   // Switch between result tabs when multiple queries ran
   const switchResultTab = (idx: number) => {
@@ -1261,12 +1271,12 @@ const quoteTableIdentifier = (tbl: string): string => {
     });
 
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
-      handleRunSelectionOrCurrent();
+      handleRunSelectionOrCurrentRef.current();
     });
 
     // Keyboard shortcut: Cmd/Ctrl + Shift + Enter to run ALL statements
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Enter, () => {
-      handleRunAll();
+      handleRunAllRef.current();
     });
 
     // Right-Click Context Menu Actions in Editor
@@ -1277,7 +1287,7 @@ const quoteTableIdentifier = (tbl: string): string => {
       contextMenuGroupId: "navigation",
       contextMenuOrder: 1,
       run: () => {
-        handleRunSelectionOrCurrent();
+        handleRunSelectionOrCurrentRef.current();
       },
     });
 
@@ -1288,7 +1298,7 @@ const quoteTableIdentifier = (tbl: string): string => {
       contextMenuGroupId: "navigation",
       contextMenuOrder: 2,
       run: () => {
-        handleRunAll();
+        handleRunAllRef.current();
       },
     });
   };
