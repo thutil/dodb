@@ -17,6 +17,7 @@ pub struct DbState {
     pub pools: Mutex<HashMap<String, DbPool>>,
     pub session_profiles: Mutex<HashMap<String, ConnectionProfile>>,
     pub runtime_passwords: Mutex<HashMap<String, String>>,
+    pub pg_connect_hints: Mutex<HashMap<String, PgConnectHint>>,
 }
 
 impl Default for DbState {
@@ -25,6 +26,7 @@ impl Default for DbState {
             pools: Mutex::new(HashMap::new()),
             session_profiles: Mutex::new(HashMap::new()),
             runtime_passwords: Mutex::new(HashMap::new()),
+            pg_connect_hints: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -91,6 +93,122 @@ fn tune_pool<DB: sqlx::Database>(
     } else {
         opts
     }
+}
+
+const PG_SSL_MODES: [sqlx::postgres::PgSslMode; 2] = [
+    sqlx::postgres::PgSslMode::Prefer,
+    sqlx::postgres::PgSslMode::Disable,
+];
+const PG_TIMEZONES: [Option<&str>; 4] = [Some("UTC"), Some("UTC0"), Some("Etc/UTC"), None];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct PgConnectHint {
+    ssl: usize,
+    tz: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ConnectRetry {
+    TimeZone,
+    Ssl,
+    Fatal,
+}
+
+fn classify_pg_error(err: &sqlx::Error) -> ConnectRetry {
+    if let sqlx::Error::Database(db) = err {
+        if matches!(
+            db.code().as_deref(),
+            Some("28P01") | Some("28000") | Some("3D000") | Some("42501")
+        ) {
+            return ConnectRetry::Fatal;
+        }
+        if db.message().contains("TimeZone") || db.message().contains("time zone") {
+            return ConnectRetry::TimeZone;
+        }
+        return ConnectRetry::Fatal;
+    }
+
+    let msg = err.to_string().to_ascii_lowercase();
+    if msg.contains("sslrequest") || msg.contains("tls") || msg.contains("ssl") || msg.contains("0x5a") {
+        return ConnectRetry::Ssl;
+    }
+
+    ConnectRetry::Fatal
+}
+
+async fn connect_postgres_with_fallback(
+    pool_options: sqlx::postgres::PgPoolOptions,
+    connect_opts: sqlx::postgres::PgConnectOptions,
+    db_name: &str,
+    hint: Option<PgConnectHint>,
+) -> Result<(sqlx::PgPool, PgConnectHint), String> {
+    let hint = hint.unwrap_or_default();
+    let mut ssl_idx = hint.ssl.min(PG_SSL_MODES.len() - 1);
+    let mut tz_idx = hint.tz.min(PG_TIMEZONES.len() - 1);
+
+    let mut last_err: Option<sqlx::Error> = None;
+    let mut timezone_rejected = false;
+
+    while tz_idx < PG_TIMEZONES.len() {
+        let opts = connect_opts
+            .clone()
+            .ssl_mode(PG_SSL_MODES[ssl_idx])
+            .timezone(PG_TIMEZONES[tz_idx].map(std::borrow::Cow::from));
+
+        match pool_options.clone().connect_with(opts).await {
+            Ok(pool) => {
+                return Ok((pool, PgConnectHint { ssl: ssl_idx, tz: tz_idx }));
+            }
+            Err(err) => {
+                let retry = classify_pg_error(&err);
+                last_err = Some(err);
+                match retry {
+                    ConnectRetry::Fatal => break,
+                    ConnectRetry::Ssl => {
+                        if ssl_idx + 1 >= PG_SSL_MODES.len() {
+                            break;
+                        }
+                        ssl_idx += 1;
+                    }
+                    ConnectRetry::TimeZone => {
+                        timezone_rejected = true;
+                        tz_idx += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    Err(pg_connect_error(db_name, last_err, timezone_rejected))
+}
+
+fn pg_connect_error(db_name: &str, last_err: Option<sqlx::Error>, timezone_rejected: bool) -> String {
+    let detail = last_err
+        .map(|e| e.to_string())
+        .unwrap_or_else(|| "no connection attempt was made".to_string());
+
+    if timezone_rejected {
+        return format!(
+            "Failed to connect to Postgres database '{}': the server rejected every time zone \
+             setting (UTC, UTC0, Etc/UTC, and the server's own default). Its PostgreSQL time zone \
+             data files are most likely missing or corrupt - ask the DBA to reinstall them. \
+             Last error: {}",
+            db_name, detail
+        );
+    }
+
+    format!("Failed to connect to Postgres database '{}': {}", db_name, detail)
+}
+
+
+fn pg_base_options(profile: &ConnectionProfile, db_name: &str) -> sqlx::postgres::PgConnectOptions {
+    sqlx::postgres::PgConnectOptions::new_without_pgpass()
+        .host(profile.host.trim())
+        .port(profile.port)
+        .username(&profile.user)
+        .password(&profile.password)
+        .database(db_name)
+        .application_name("dodb")
 }
 
 impl DbPool {
@@ -186,40 +304,33 @@ pub async fn get_pool_in(
 
     let pool = match profile.r#type {
         SupportedDB::Postgres => {
-            let url = format!(
-                "postgres://{}:{}@{}:{}/{}",
-                profile.user, profile.password, profile.host, profile.port, db_name
-            );
-            
-            let connect_opts = url.parse::<sqlx::postgres::PgConnectOptions>()
-                .unwrap_or_else(|_| {
-                    sqlx::postgres::PgConnectOptions::new()
-                        .host(&profile.host)
-                        .port(profile.port)
-                        .username(&profile.user)
-                        .password(&profile.password)
-                        .database(&db_name)
-                });
-
-            // Try connecting with Prefer first, fallback to Disable if server fails on SSLRequest
-            let connect_res = tune_pool(sqlx::postgres::PgPoolOptions::new(), profile.keep_alive)
-                .connect_with(connect_opts.clone().ssl_mode(sqlx::postgres::PgSslMode::Prefer))
-                .await;
-
-            let p = match connect_res {
-                Ok(pool) => pool,
-                Err(err) => {
-                    let err_msg = err.to_string();
-                    if err_msg.contains("SSLRequest") || err_msg.contains("tls") || err_msg.contains("ssl") || err_msg.contains("0x5a") {
-                        tune_pool(sqlx::postgres::PgPoolOptions::new(), profile.keep_alive)
-                            .connect_with(connect_opts.ssl_mode(sqlx::postgres::PgSslMode::Disable))
-                            .await
-                            .map_err(|e2| format!("Failed to connect to Postgres database '{}': {}", db_name, e2))?
-                    } else {
-                        return Err(format!("Failed to connect to Postgres database '{}': {}", db_name, err));
-                    }
-                }
+            let server_key = format!("{}:{}", profile.host.trim(), profile.port);
+            let hint = {
+                let hints = state.pg_connect_hints.lock().map_err(|e| e.to_string())?;
+                hints.get(&server_key).copied()
             };
+
+            let connect_opts = pg_base_options(profile, &db_name);
+            let pool_opts = tune_pool(sqlx::postgres::PgPoolOptions::new(), profile.keep_alive);
+            let (p, used) =
+                match connect_postgres_with_fallback(pool_opts, connect_opts, &db_name, hint).await {
+                    Ok(ok) => ok,
+                    Err(e) => {
+                        // A cached combination that no longer works must not pin
+                        // the ladder to a bad starting point forever.
+                        if hint.is_some() {
+                            if let Ok(mut hints) = state.pg_connect_hints.lock() {
+                                hints.remove(&server_key);
+                            }
+                        }
+                        return Err(e);
+                    }
+                };
+
+            {
+                let mut hints = state.pg_connect_hints.lock().map_err(|e| e.to_string())?;
+                hints.insert(server_key, used);
+            }
             DbPool::Postgres(p)
         }
         SupportedDB::Mariadb => {
@@ -263,39 +374,12 @@ pub async fn test_connection_standalone(profile: &ConnectionProfile) -> Result<b
             } else {
                 "postgres".to_string()
             };
-            let url = format!(
-                "postgres://{}:{}@{}:{}/{}",
-                profile.user, profile.password, profile.host, profile.port, db_name
-            );
-            let connect_opts = url.parse::<sqlx::postgres::PgConnectOptions>()
-                .unwrap_or_else(|_| {
-                    sqlx::postgres::PgConnectOptions::new()
-                        .host(&profile.host)
-                        .port(profile.port)
-                        .username(&profile.user)
-                        .password(&profile.password)
-                        .database(&db_name)
-                });
-            let pool = match sqlx::postgres::PgPoolOptions::new()
+            let connect_opts = pg_base_options(profile, &db_name);
+            let pool_opts = sqlx::postgres::PgPoolOptions::new()
                 .max_connections(1)
-                .acquire_timeout(timeout)
-                .connect_with(connect_opts.clone().ssl_mode(sqlx::postgres::PgSslMode::Prefer))
-                .await {
-                    Ok(p) => p,
-                    Err(err) => {
-                        let err_msg = err.to_string();
-                        if err_msg.contains("SSLRequest") || err_msg.contains("tls") || err_msg.contains("ssl") || err_msg.contains("0x5a") {
-                            sqlx::postgres::PgPoolOptions::new()
-                                .max_connections(1)
-                                .acquire_timeout(timeout)
-                                .connect_with(connect_opts.ssl_mode(sqlx::postgres::PgSslMode::Disable))
-                                .await
-                                .map_err(|e2| format!("Failed to connect to Postgres database '{}': {}", db_name, e2))?
-                        } else {
-                            return Err(format!("Failed to connect to Postgres database '{}': {}", db_name, err));
-                        }
-                    }
-                };
+                .acquire_timeout(timeout);
+            let (pool, _) =
+                connect_postgres_with_fallback(pool_opts, connect_opts, &db_name, None).await?;
             pool.close().await;
             Ok(true)
         }
@@ -979,6 +1063,112 @@ pub async fn execute_import_stream(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Stands in for `PgDatabaseError`, which cannot be constructed outside sqlx.
+    #[derive(Debug)]
+    struct FakeDbError {
+        code: Option<&'static str>,
+        message: &'static str,
+    }
+
+    impl std::fmt::Display for FakeDbError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(self.message)
+        }
+    }
+
+    impl std::error::Error for FakeDbError {}
+
+    impl sqlx::error::DatabaseError for FakeDbError {
+        fn message(&self) -> &str {
+            self.message
+        }
+
+        fn code(&self) -> Option<std::borrow::Cow<'_, str>> {
+            self.code.map(std::borrow::Cow::from)
+        }
+
+        fn as_error(&self) -> &(dyn std::error::Error + Send + Sync + 'static) {
+            self
+        }
+
+        fn as_error_mut(&mut self) -> &mut (dyn std::error::Error + Send + Sync + 'static) {
+            self
+        }
+
+        fn into_error(self: Box<Self>) -> Box<dyn std::error::Error + Send + Sync + 'static> {
+            self
+        }
+
+        fn kind(&self) -> sqlx::error::ErrorKind {
+            sqlx::error::ErrorKind::Other
+        }
+    }
+
+    fn db_err(code: Option<&'static str>, message: &'static str) -> sqlx::Error {
+        sqlx::Error::Database(Box::new(FakeDbError { code, message }))
+    }
+
+    #[test]
+    fn a_rejected_timezone_advances_to_the_next_candidate() {
+        let err = db_err(Some("22023"), "invalid value for parameter \"TimeZone\": \"UTC\"");
+        assert_eq!(classify_pg_error(&err), ConnectRetry::TimeZone);
+    }
+
+    #[test]
+    fn a_bad_password_is_not_retried() {
+        // Walking the ladder here would be several failed logins in a row,
+        // which is enough to trip a lockout policy on some servers.
+        let err = db_err(Some("28P01"), "password authentication failed for user \"bob\"");
+        assert_eq!(classify_pg_error(&err), ConnectRetry::Fatal);
+    }
+
+    #[test]
+    fn an_unknown_database_is_not_retried() {
+        let err = db_err(Some("3D000"), "database \"nope\" does not exist");
+        assert_eq!(classify_pg_error(&err), ConnectRetry::Fatal);
+    }
+
+    #[test]
+    fn an_unrecognised_database_error_is_not_retried() {
+        let err = db_err(None, "out of memory");
+        assert_eq!(classify_pg_error(&err), ConnectRetry::Fatal);
+    }
+
+    #[test]
+    fn a_refused_tls_handshake_retries_in_plaintext() {
+        let err = sqlx::Error::Protocol("unexpected response from SSLRequest: 0x5a".into());
+        assert_eq!(classify_pg_error(&err), ConnectRetry::Ssl);
+    }
+
+    #[test]
+    fn an_unreachable_host_is_not_retried() {
+        let err = sqlx::Error::Io(std::io::Error::new(
+            std::io::ErrorKind::ConnectionRefused,
+            "connection refused",
+        ));
+        assert_eq!(classify_pg_error(&err), ConnectRetry::Fatal);
+    }
+
+    #[test]
+    fn exhausting_the_timezone_ladder_explains_why() {
+        let err = pg_connect_error(
+            "postgres",
+            Some(db_err(Some("22023"), "invalid value for parameter \"TimeZone\": \"UTC\"")),
+            true,
+        );
+        assert!(err.contains("time zone data files"), "{}", err);
+        assert!(err.contains("UTC0"), "{}", err);
+    }
+
+    #[test]
+    fn an_ordinary_failure_reports_the_driver_message_as_is() {
+        let err = pg_connect_error("shop", Some(db_err(Some("28P01"), "password authentication failed")), false);
+        assert_eq!(
+            err,
+            "Failed to connect to Postgres database 'shop': error returned from database: password authentication failed"
+        );
+    }
     use sqlx::sqlite::SqlitePoolOptions;
 
     async fn sqlite_pool() -> DbPool {

@@ -4215,8 +4215,7 @@ dependencies = [
 [[package]]
 name = "sqlx-core"
 version = "0.8.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee6798b1838b6a0f69c007c133b8df5866302197e404e8b6ee8ed3e3a5e68dc6"
+source = "git+https://github.com/bankjirapan/sqlx?branch=dodb-timezone-0.8.6#1a6b127e46dffcd86c6222c8a26c155f2639b62f"
 dependencies = [
  "base64 0.22.1",
  "bigdecimal",
@@ -4339,8 +4338,7 @@ dependencies = [
 [[package]]
 name = "sqlx-postgres"
 version = "0.8.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db58fcd5a53cf07c184b154801ff91347e4c30d17a3562a635ff028ad5deda46"
+source = "git+https://github.com/bankjirapan/sqlx?branch=dodb-timezone-0.8.6#1a6b127e46dffcd86c6222c8a26c155f2639b62f"
 dependencies = [
  "atoi",
  "base64 0.22.1",

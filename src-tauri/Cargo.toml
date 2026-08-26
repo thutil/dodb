@@ -44,3 +44,13 @@ encoding_rs = "0.8"
 encoding_rs_io = "0.1"
 
 
+
+# sqlx hardcodes `TimeZone=UTC` in the Postgres startup message, and a server whose
+# time zone files cannot resolve that name rejects the connection outright. The fork
+# adds `PgConnectOptions::timezone()` (branch cut from the v0.8.6 tag, one commit on
+# top) so `connect_postgres_with_fallback` can fall back to `UTC0`.
+# `sqlx-core` is patched too: the fork's sqlx-postgres depends on it by path, so
+# without this the build would link two distinct copies of sqlx-core 0.8.6.
+[patch.crates-io]
+sqlx-core = { git = "https://github.com/bankjirapan/sqlx", branch = "dodb-timezone-0.8.6" }
+sqlx-postgres = { git = "https://github.com/bankjirapan/sqlx", branch = "dodb-timezone-0.8.6" }
