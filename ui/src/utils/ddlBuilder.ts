@@ -80,11 +80,11 @@ export function bareTableName(table: string): string {
 }
 
 /**
- * Quote a table reference. Postgres tables may arrive schema-qualified
- * ("reporting.events") from get_tables, and each part must be quoted separately.
+ * Quote a table reference. Tables may arrive schema-qualified
+ * ("reporting.events" or `db`.`events`), and each part must be quoted separately.
  */
 export function quoteTableIdent(table: string, d: DBType): string {
-  const schema = d === "postgres" ? schemaOf(table) : null;
+  const schema = d !== "sqlite" ? schemaOf(table) : null;
   if (schema) {
     return quoteIdent(schema, d) + "." + quoteIdent(bareTableName(table), d);
   }

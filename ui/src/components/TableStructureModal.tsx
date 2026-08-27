@@ -2,8 +2,9 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { X, Table2, Key, Code, Copy, Check, Terminal, Database, RefreshCw, Layers } from "lucide-react";
-import { ColumnInfo, ConnectionProfile } from "../types";
+import { ColumnInfo, ConnectionProfile, DBType } from "../types";
 import { apiClient } from "../utils/apiClient";
+import { quoteIdent, quoteTableIdent } from "../utils/ddlBuilder";
 
 interface TableStructureModalProps {
   isOpen: boolean;
@@ -68,15 +69,19 @@ export const TableStructureModal: React.FC<TableStructureModalProps> = ({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, onClose]);
 
-  const isMySql = activeProfile?.type === "mariadb";
-  const quoteChar = isMySql ? "`" : '"';
+  const dialect: DBType =
+    activeProfile?.type === "mariadb"
+      ? "mariadb"
+      : activeProfile?.type === "sqlite"
+        ? "sqlite"
+        : "postgres";
 
   // Generate DDL based on columns
   const generateDdl = (): string => {
     if (!columns || columns.length === 0) return `-- No columns found for table ${tableName}`;
     
     const lines = columns.map((col) => {
-      let line = `  ${quoteChar}${col.name}${quoteChar} ${col.type.toUpperCase()}`;
+      let line = `  ${quoteIdent(col.name, dialect)} ${col.type.toUpperCase()}`;
       if (!col.nullable) {
         line += " NOT NULL";
       }
@@ -89,7 +94,7 @@ export const TableStructureModal: React.FC<TableStructureModalProps> = ({
       return line;
     });
 
-    return `CREATE TABLE ${quoteChar}${tableName}${quoteChar} (\n${lines.join(",\n")}\n);`;
+    return `CREATE TABLE ${quoteTableIdent(tableName, dialect)} (\n${lines.join(",\n")}\n);`;
   };
 
   const handleCopyDdl = () => {
@@ -99,7 +104,7 @@ export const TableStructureModal: React.FC<TableStructureModalProps> = ({
   };
 
   const handleCopyColumnsList = () => {
-    const colList = columns.map((c) => `${quoteChar}${c.name}${quoteChar}`).join(", ");
+    const colList = columns.map((c) => quoteIdent(c.name, dialect)).join(", ");
     navigator.clipboard.writeText(colList);
     setCopiedCols(true);
     setTimeout(() => setCopiedCols(false), 2000);
@@ -267,7 +272,7 @@ export const TableStructureModal: React.FC<TableStructureModalProps> = ({
                 <button
                   className="btn btn-secondary"
                   onClick={() => {
-                    onOpenInSql(`SELECT * FROM ${quoteChar}${tableName}${quoteChar} LIMIT 100;`);
+                    onOpenInSql(`SELECT * FROM ${quoteTableIdent(tableName, dialect)} LIMIT 100;`);
                     onClose();
                   }}
                 >
