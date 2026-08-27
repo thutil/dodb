@@ -2430,6 +2430,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
           flex-direction: column;
           background: var(--bg-content);
           overflow: hidden;
+          position: relative;
         }
 
         .grid-bar {
@@ -2607,33 +2608,96 @@ export const DataGrid: React.FC<DataGridProps> = ({
           box-sizing: border-box;
         }
 
+        /* Transaction Commit / Rollback Floating Dock */
         .transaction-bar {
-          padding: 6px 14px;
-          background: var(--bg-card);
-          border-bottom: 1px solid var(--border-light);
+          position: absolute;
+          bottom: 50px;
+          left: 50%;
+          transform: translateX(-50%);
+          z-index: 50;
           display: flex;
           justify-content: space-between;
           align-items: center;
+          padding: 8px 16px;
+          background: var(--bg-card);
+          backdrop-filter: blur(16px);
+          -webkit-backdrop-filter: blur(16px);
+          border: 1px solid rgba(245, 158, 11, 0.45);
+          border-radius: 9999px;
+          box-shadow: 0 12px 32px -4px rgba(0, 0, 0, 0.5), 0 4px 12px -2px rgba(245, 158, 11, 0.15);
           font-size: 11.5px;
+          color: #fbbf24;
+          gap: 16px;
+          animation: floatDockIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+          white-space: nowrap;
+          pointer-events: auto;
         }
         .tx-info {
           display: flex;
           align-items: center;
-          gap: 7px;
-          color: var(--text-main);
+          gap: 8px;
           font-weight: 500;
         }
-        .tx-actions { display: flex; gap: 6px; }
-
-        .status-bar-msg {
-          padding: 6px 14px;
-          font-size: 11.5px;
+        .tx-icon {
+          flex-shrink: 0;
+        }
+        .tx-actions {
           display: flex;
           align-items: center;
-          gap: 6px;
+          gap: 8px;
         }
-        .status-bar-msg.success { background: var(--bg-tertiary); color: var(--accent-green); border-bottom: 1px solid var(--border-light); }
-        .status-bar-msg.error { background: rgba(239, 68, 68, 0.08); color: #f87171; border-bottom: 1px solid rgba(239, 68, 68, 0.2); }
+        .btn-commit-action {
+          background: #f59e0b !important;
+          border-color: #f59e0b !important;
+          color: #18181b !important;
+          font-weight: 600;
+          border-radius: 9999px;
+        }
+        .btn-commit-action:hover {
+          background: #d97706 !important;
+          border-color: #d97706 !important;
+        }
+
+        .status-bar-msg {
+          position: absolute;
+          bottom: 50px;
+          left: 50%;
+          transform: translateX(-50%);
+          z-index: 50;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 8px 18px;
+          font-size: 12px;
+          font-weight: 500;
+          border-radius: 9999px;
+          background: var(--bg-card);
+          backdrop-filter: blur(16px);
+          -webkit-backdrop-filter: blur(16px);
+          box-shadow: 0 12px 32px -4px rgba(0, 0, 0, 0.5);
+          animation: floatDockIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+          white-space: nowrap;
+          pointer-events: auto;
+        }
+        .status-bar-msg.success {
+          border: 1px solid rgba(16, 185, 129, 0.45);
+          color: #34d399;
+        }
+        .status-bar-msg.error {
+          border: 1px solid rgba(239, 68, 68, 0.45);
+          color: #f87171;
+        }
+
+        @keyframes floatDockIn {
+          from {
+            opacity: 0;
+            transform: translate(-50%, 14px) scale(0.96);
+          }
+          to {
+            opacity: 1;
+            transform: translate(-50%, 0) scale(1);
+          }
+        }
 
         .spin { animation: spin 1s linear infinite; }
         @keyframes spin { 100% { transform: rotate(360deg); } }
@@ -2844,11 +2908,13 @@ export const DataGrid: React.FC<DataGridProps> = ({
         }
 
         .transaction-bar.has-deletions {
-          border-left: 3px solid rgba(239, 68, 68, 0.6);
+          border-color: rgba(239, 68, 68, 0.55);
+          box-shadow: 0 12px 32px -4px rgba(0, 0, 0, 0.55), 0 4px 12px -2px rgba(239, 68, 68, 0.2);
+          color: #f87171;
         }
         .tx-delete-highlight {
           color: #f87171;
-          font-weight: 600;
+          margin-left: 6px;
         }
 
         .pro-table td {
