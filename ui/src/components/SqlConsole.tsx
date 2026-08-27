@@ -5,7 +5,7 @@ import {
   Play, Clock, Database, CheckCircle2, AlertCircle, FileCode, Sparkles,
   Layers, Table2, Code2, Copy, Check, Download, WrapText, Globe,
   Edit2, Edit3, Trash2, RotateCcw, Eye, Search, X, Plus, Key, Zap,
-  GripHorizontal, ListFilter
+  GripHorizontal, ListFilter, History
 } from "lucide-react";
 import { QueryExecutionResult, ColumnInfo, ConnectionProfile } from "../types";
 import { PendingChanges, CommitResult } from "./DataGrid";
@@ -39,6 +39,28 @@ export interface StatementResultItem {
   sql: string;
   result: QueryExecutionResult;
   executionTimeMs: number;
+}
+
+export interface SqlHistoryEntry {
+  id: string;
+  sql: string;
+  database: string;
+  timestamp: number;
+  status: "success" | "error";
+  durationMs: number;
+  rowsCount?: number;
+  error?: string;
+}
+
+function formatRelativeTime(timestamp: number): string {
+  const diffSec = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
+  if (diffSec < 60) return "just now";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  return `${diffDay}d ago`;
 }
 
 const SQL_KEYWORDS = [
@@ -184,6 +206,137 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
   const [commitMsg, setCommitMsg] = useState<{ success: boolean; text: string } | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // SQL Execution History Configuration & Limits
+  // - Keeps max 100 entries
+  // - Auto-prunes entries older than 14 days
+  // - Caps individual query length to prevent localStorage bloat
+  const MAX_HISTORY_ITEMS = 100;
+  const MAX_HISTORY_AGE_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
+  const MAX_SQL_TEXT_LENGTH = 3000;
+
+  const [sqlHistory, setSqlHistory] = useState<SqlHistoryEntry[]>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("dodb_sql_history_v1");
+        if (saved) {
+          const parsed: SqlHistoryEntry[] = JSON.parse(saved);
+          const now = Date.now();
+          // Filter out expired items on initial load
+          return parsed.filter((item) => now - item.timestamp < 14 * 24 * 60 * 60 * 1000).slice(0, 100);
+        }
+      } catch { }
+    }
+    return [];
+  });
+  const [showHistory, setShowHistory] = useState(false);
+  const [historySearch, setHistorySearch] = useState("");
+  const [copiedHistoryId, setCopiedHistoryId] = useState<string | null>(null);
+  const [historyScope, setHistoryScope] = useState<"current" | "all">("current");
+
+  const addHistoryEntries = useCallback((entries: SqlHistoryEntry[]) => {
+    setSqlHistory((prev) => {
+      const now = Date.now();
+      // Sanitize and limit entry text length
+      const sanitizedEntries = entries.map((e) => ({
+        ...e,
+        sql: e.sql.length > MAX_SQL_TEXT_LENGTH ? e.sql.slice(0, MAX_SQL_TEXT_LENGTH) + " ...[truncated]" : e.sql,
+      }));
+
+      const merged = [
+        ...sanitizedEntries,
+        ...prev.filter(
+          (p) =>
+            now - p.timestamp < MAX_HISTORY_AGE_MS &&
+            !sanitizedEntries.some(
+              (e) =>
+                e.sql.trim() === p.sql.trim() &&
+                e.database === p.database &&
+                Math.abs(e.timestamp - p.timestamp) < 2000
+            )
+        ),
+      ].slice(0, MAX_HISTORY_ITEMS);
+
+      try {
+        localStorage.setItem("dodb_sql_history_v1", JSON.stringify(merged));
+      } catch { }
+      return merged;
+    });
+  }, []);
+
+  const handleClearHistory = useCallback(() => {
+    if (historyScope === "current" && activeDatabase) {
+      setSqlHistory((prev) => {
+        const remaining = prev.filter((h) => h.database !== activeDatabase);
+        try {
+          localStorage.setItem("dodb_sql_history_v1", JSON.stringify(remaining));
+        } catch { }
+        return remaining;
+      });
+    } else {
+      setSqlHistory([]);
+      try {
+        localStorage.removeItem("dodb_sql_history_v1");
+      } catch { }
+    }
+  }, [historyScope, activeDatabase]);
+
+  const handleDeleteHistoryItem = useCallback((id: string) => {
+    setSqlHistory((prev) => {
+      const remaining = prev.filter((h) => h.id !== id);
+      try {
+        localStorage.setItem("dodb_sql_history_v1", JSON.stringify(remaining));
+      } catch { }
+      return remaining;
+    });
+  }, []);
+
+  const handleUseHistorySql = useCallback((sqlText: string, append = false) => {
+    if (append) {
+      const current = editorRef.current ? editorRef.current.getValue() : sql;
+      const separator = current.trim().endsWith(";") ? "\n\n" : ";\n\n";
+      handleSqlChange(current.trim() ? `${current.trim()}${separator}${sqlText}` : sqlText);
+    } else {
+      handleSqlChange(sqlText);
+    }
+    setShowHistory(false);
+  }, [sql, handleSqlChange]);
+
+  const handleCopyHistory = useCallback((id: string, text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedHistoryId(id);
+    setTimeout(() => setCopiedHistoryId(null), 1800);
+  }, []);
+
+  const handleRunHistorySql = useCallback((sqlText: string) => {
+    handleSqlChange(sqlText);
+    setShowHistory(false);
+    setTimeout(() => {
+      executeStatements([sqlText]);
+    }, 60);
+  }, [handleSqlChange]);
+
+  const filteredHistory = useMemo(() => {
+    return sqlHistory.filter((item) => {
+      if (historyScope === "current" && activeDatabase && item.database && item.database !== activeDatabase) {
+        return false;
+      }
+      if (historySearch.trim()) {
+        const q = historySearch.toLowerCase();
+        return item.sql.toLowerCase().includes(q) || (item.database && item.database.toLowerCase().includes(q));
+      }
+      return true;
+    });
+  }, [sqlHistory, historyScope, activeDatabase, historySearch]);
+
+  // Auto-dismiss commit/status toast after 3.5 seconds
+  useEffect(() => {
+    if (!commitMsg) return;
+    const timer = setTimeout(() => {
+      setCommitMsg(null);
+    }, 3500);
+    return () => clearTimeout(timer);
+  }, [commitMsg]);
+
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<Monaco | null>(null);
   const completionProviderRef = useRef<any>(null);
@@ -241,13 +394,13 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
             tList.push(t.name);
             const cols: ColumnInfo[] = Array.isArray(t.columns)
               ? t.columns.map((c: any) => ({
-                  name: c.name,
-                  type: c.type || "text",
-                  nullable: !!c.nullable,
-                  primaryKey: !!c.primaryKey,
-                  defaultValue: c.default || null,
-                  autoIncrement: !!c.autoIncrement,
-                }))
+                name: c.name,
+                type: c.type || "text",
+                nullable: !!c.nullable,
+                primaryKey: !!c.primaryKey,
+                defaultValue: c.default || null,
+                autoIncrement: !!c.autoIncrement,
+              }))
               : [];
             tMap.set(t.name.toLowerCase(), cols);
             if (t.name.includes(".")) {
@@ -461,17 +614,17 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
     });
   };
 
-// Helper to quote table name or schema.table correctly for SQL
-const quoteTableIdentifier = (tbl: string): string => {
-  if (!tbl) return '"table_name"';
-  const parts = tbl.split(".");
-  return parts
-    .map((p) => {
-      const clean = p.replace(/^["`\[]+|["`\]]+$/g, "").trim();
-      return `"${clean}"`;
-    })
-    .join(".");
-};
+  // Helper to quote table name or schema.table correctly for SQL
+  const quoteTableIdentifier = (tbl: string): string => {
+    if (!tbl) return '"table_name"';
+    const parts = tbl.split(".");
+    return parts
+      .map((p) => {
+        const clean = p.replace(/^["`\[]+|["`\]]+$/g, "").trim();
+        return `"${clean}"`;
+      })
+      .join(".");
+  };
 
   // Discard / Rollback changes
   const handleRollback = () => {
@@ -735,6 +888,18 @@ const quoteTableIdentifier = (tbl: string): string => {
     setLoading(false);
 
     if (resultsList.length > 0) {
+      const historyEntries: SqlHistoryEntry[] = resultsList.map((item) => ({
+        id: `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+        sql: item.sql,
+        database: activeDatabase || "",
+        timestamp: Date.now(),
+        status: item.result.error ? "error" : "success",
+        durationMs: item.executionTimeMs,
+        rowsCount: item.result.rows?.length ?? (typeof item.result.affectedRows === "number" ? item.result.affectedRows : undefined),
+        error: item.result.error,
+      }));
+      addHistoryEntries(historyEntries);
+
       // Pick best tab: error tab if any, else first tab with rows, else last tab
       let defaultTab = 0;
       const errorTabIdx = resultsList.findIndex((r) => r.result.error);
@@ -810,6 +975,39 @@ const quoteTableIdentifier = (tbl: string): string => {
     if (!statementResults[idx]) return;
     setActiveResultTab(idx);
     setResult(statementResults[idx].result);
+    setEditedCells({});
+    setDeletedRowIndices(new Set());
+    setEditingCell(null);
+  };
+
+  // Close a specific result tab
+  const closeResultTab = (idx: number, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const newResults = statementResults.filter((_, i) => i !== idx);
+    setStatementResults(newResults);
+    if (newResults.length === 0) {
+      setResult(null);
+      setActiveResultTab(0);
+    } else {
+      let nextTab = activeResultTab;
+      if (activeResultTab === idx) {
+        nextTab = Math.max(0, Math.min(idx, newResults.length - 1));
+      } else if (activeResultTab > idx) {
+        nextTab = activeResultTab - 1;
+      }
+      setActiveResultTab(nextTab);
+      setResult(newResults[nextTab]?.result || null);
+    }
+    setEditedCells({});
+    setDeletedRowIndices(new Set());
+    setEditingCell(null);
+  };
+
+  // Close all result tabs
+  const closeAllResults = () => {
+    setStatementResults([]);
+    setResult(null);
+    setActiveResultTab(0);
     setEditedCells({});
     setDeletedRowIndices(new Set());
     setEditingCell(null);
@@ -1197,7 +1395,7 @@ const quoteTableIdentifier = (tbl: string): string => {
             ],
           };
         },
-        freeInlineCompletions: () => {},
+        freeInlineCompletions: () => { },
       });
     }
   }, []);
@@ -1359,6 +1557,18 @@ const quoteTableIdentifier = (tbl: string): string => {
                 Recent Rows
               </button>
             )}
+
+            <button
+              className={`btn btn-secondary btn-sm chip-btn ${showHistory ? "history-btn-active" : ""}`}
+              onClick={() => setShowHistory(!showHistory)}
+              title="Query Execution History (ประวัติการรันคำสั่ง)"
+            >
+              <History size={12} />
+              <span>History</span>
+              {filteredHistory.length > 0 && (
+                <span className="history-pill-count">{filteredHistory.length}</span>
+              )}
+            </button>
           </div>
         </div>
 
@@ -1407,8 +1617,8 @@ const quoteTableIdentifier = (tbl: string): string => {
                 selectionInfo
                   ? "Run highlighted text (Cmd + Enter)"
                   : parsedStatements.length > 1
-                  ? `Run query #${currentStmtIndex >= 0 ? currentStmtIndex + 1 : 1} at cursor (Cmd + Enter)`
-                  : "Run SQL (Cmd + Enter)"
+                    ? `Run query #${currentStmtIndex >= 0 ? currentStmtIndex + 1 : 1} at cursor (Cmd + Enter)`
+                    : "Run SQL (Cmd + Enter)"
               }
             >
               <Play size={13} fill={selectionInfo ? "currentColor" : "none"} />
@@ -1418,10 +1628,10 @@ const quoteTableIdentifier = (tbl: string): string => {
                     ? `Running (${batchProgress.current}/${batchProgress.total})...`
                     : "Executing..."
                   : selectionInfo
-                  ? `Run Selection (${selectionInfo.lines}L)`
-                  : parsedStatements.length > 1
-                  ? `Run Current (#${currentStmtIndex >= 0 ? currentStmtIndex + 1 : 1})`
-                  : "Run (Cmd + Enter)"}
+                    ? `Run Selection (${selectionInfo.lines}L)`
+                    : parsedStatements.length > 1
+                      ? `Run Current (#${currentStmtIndex >= 0 ? currentStmtIndex + 1 : 1})`
+                      : "Run (Cmd + Enter)"}
               </span>
             </button>
 
@@ -1507,8 +1717,15 @@ const quoteTableIdentifier = (tbl: string): string => {
                       {hasErr
                         ? "Error"
                         : typeof item.result.affectedRows === "number"
-                        ? `${item.result.affectedRows} aff`
-                        : `${item.result.rowsReturned ?? item.result.rows?.length ?? 0} rows`}
+                          ? `${item.result.affectedRows} aff`
+                          : `${item.result.rowsReturned ?? item.result.rows?.length ?? 0} rows`}
+                    </span>
+                    <span
+                      className="tab-close-icon"
+                      onClick={(e) => closeResultTab(idx, e)}
+                      title="Close this tab (ปิดแท็บนี้)"
+                    >
+                      <X size={10} />
                     </span>
                   </button>
                 );
@@ -1521,6 +1738,14 @@ const quoteTableIdentifier = (tbl: string): string => {
               <span>
                 {statementResults.reduce((acc, r) => acc + (r.executionTimeMs || 0), 0)} ms
               </span>
+              <button
+                className="btn-clear-tabs"
+                onClick={closeAllResults}
+                title="Close all result tabs (ปิดแท็บผลลัพธ์ทั้งหมด)"
+              >
+                <X size={10} />
+                <span>Close All</span>
+              </button>
             </div>
           </div>
         )}
@@ -1787,17 +2012,17 @@ const quoteTableIdentifier = (tbl: string): string => {
                               return (
                                 <td
                                   key={col}
-                                  className={`cell-data ${isModified ? "cell-modified" : ""} ${isNull ? "cell-null" : ""}`}
+                                  className={`cell-data ${isModified ? "cell-modified" : ""} ${isNull ? "cell-null" : ""} ${isEditing ? "cell-editing" : ""}`}
                                   onDoubleClick={() => !isDeleted && startEditing(rIdx, col, val)}
                                   title={
                                     isDeleted
                                       ? "Row marked for deletion"
                                       : gisSummary
-                                      ? "Click badge to view on GIS map; double-click to edit cell"
-                                      : "Double-click to edit cell (ดับเบิลคลิกเพื่อแก้ไข)"
+                                        ? "Click badge to view on GIS map; double-click to edit cell"
+                                        : "Double-click to edit cell (ดับเบิลคลิกเพื่อแก้ไข)"
                                   }
                                 >
-                                  {isEditing ? (
+                                  {isEditing && (
                                     <div className="inline-edit-wrap">
                                       <input
                                         autoFocus
@@ -1812,29 +2037,32 @@ const quoteTableIdentifier = (tbl: string): string => {
                                         }}
                                       />
                                     </div>
-                                  ) : isNull ? (
-                                    <span className="null-val">NULL</span>
-                                  ) : gisSummary ? (
-                                    <span
-                                      className="gis-badge-pill"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setGisModalData({
-                                          title: `Query Result — ${col}`,
-                                          subtitle: `Row #${rIdx + 1}`,
-                                          value: val,
-                                        });
-                                      }}
-                                      title="Click to view spatial shape on interactive map"
-                                    >
-                                      <Globe size={10} />
-                                      <span>{gisSummary.label}</span>
-                                    </span>
-                                  ) : typeof val === "object" ? (
-                                    JSON.stringify(val)
-                                  ) : (
-                                    String(val)
                                   )}
+                                  <div className={`cell-text-flow ${isEditing ? "cell-hidden-flow" : ""}`}>
+                                    {isNull ? (
+                                      <span className="null-val">NULL</span>
+                                    ) : gisSummary ? (
+                                      <span
+                                        className="gis-badge-pill"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setGisModalData({
+                                            title: `Query Result — ${col}`,
+                                            subtitle: `Row #${rIdx + 1}`,
+                                            value: val,
+                                          });
+                                        }}
+                                        title="Click to view spatial shape on interactive map"
+                                      >
+                                        <Globe size={10} />
+                                        <span>{gisSummary.label}</span>
+                                      </span>
+                                    ) : typeof val === "object" ? (
+                                      JSON.stringify(val)
+                                    ) : (
+                                      String(val)
+                                    )}
+                                  </div>
                                 </td>
                               );
                             })}
@@ -2287,6 +2515,141 @@ const quoteTableIdentifier = (tbl: string): string => {
           onClose={() => setGisModalData(null)}
         />
       )}
+      {/* SQL History Drawer */}
+      {showHistory && (
+        <div className="sql-history-overlay" onClick={() => setShowHistory(false)}>
+          <div className="sql-history-drawer" onClick={(e) => e.stopPropagation()}>
+            {/* Minimal Header */}
+            <div className="history-header">
+              <div className="history-header-title">
+                <History size={14} className="history-icon" />
+                <span>Query History</span>
+                <span className="history-count-badge font-mono">{filteredHistory.length}</span>
+              </div>
+              <button className="icon-close-btn" onClick={() => setShowHistory(false)} title="Close (Esc)">
+                <X size={13} />
+              </button>
+            </div>
+
+            {/* Clean Filter & Scope Bar */}
+            <div className="history-filter-bar">
+              <div className="history-search-wrap">
+                <Search size={11} className="history-search-icon" />
+                <input
+                  type="text"
+                  className="history-search-input"
+                  placeholder="Filter queries..."
+                  value={historySearch}
+                  onChange={(e) => setHistorySearch(e.target.value)}
+                  autoFocus
+                />
+                {historySearch && (
+                  <button className="clear-search-btn" onClick={() => setHistorySearch("")}>
+                    <X size={9} />
+                  </button>
+                )}
+              </div>
+
+              <div className="history-scope-tabs">
+                <button
+                  className={`scope-tab ${historyScope === "current" ? "active" : ""}`}
+                  onClick={() => setHistoryScope("current")}
+                >
+                  {activeDatabase || "Current"}
+                </button>
+                <button
+                  className={`scope-tab ${historyScope === "all" ? "active" : ""}`}
+                  onClick={() => setHistoryScope("all")}
+                >
+                  All
+                </button>
+              </div>
+            </div>
+
+            {/* Minimal Query List */}
+            <div className="history-list">
+              {filteredHistory.length === 0 ? (
+                <div className="history-empty">
+                  <Clock size={22} className="history-empty-icon" />
+                  <p>No history yet</p>
+                  <span>Executed SQL will appear here automatically.</span>
+                </div>
+              ) : (
+                filteredHistory.map((item) => {
+                  const isCopied = copiedHistoryId === item.id;
+                  const isErr = item.status === "error";
+                  return (
+                    <div
+                      key={item.id}
+                      className={`history-item ${isErr ? "item-error" : ""}`}
+                      onClick={() => handleUseHistorySql(item.sql, false)}
+                      title="Click to use in Editor"
+                    >
+                      <div className="item-status-dot-wrap">
+                        <span className={`status-dot ${isErr ? "dot-err" : "dot-ok"}`} />
+                      </div>
+
+                      <div className="item-content">
+                        <div className="item-sql font-mono">
+                          {item.sql}
+                        </div>
+                        <div className="item-meta">
+                          <span className="item-time">{formatRelativeTime(item.timestamp)}</span>
+                          {item.database && <span className="item-db font-mono">{item.database}</span>}
+                          {typeof item.durationMs === "number" && (
+                            <span className="item-dur font-mono">{item.durationMs}ms</span>
+                          )}
+                          {typeof item.rowsCount === "number" && (
+                            <span className="item-rows font-mono">{item.rowsCount}r</span>
+                          )}
+                          {isErr && <span className="item-err-tag">Failed</span>}
+                        </div>
+                      </div>
+
+                      {/* Hover Quick Actions */}
+                      <div className="item-actions" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          className="item-btn"
+                          onClick={() => handleRunHistorySql(item.sql)}
+                          title="Run query immediately"
+                        >
+                          <Play size={10} fill="currentColor" />
+                        </button>
+                        <button
+                          className="item-btn"
+                          onClick={() => handleCopyHistory(item.id, item.sql)}
+                          title="Copy SQL"
+                        >
+                          {isCopied ? <Check size={10} color="#10b981" /> : <Copy size={10} />}
+                        </button>
+                        <button
+                          className="item-btn item-del-btn"
+                          onClick={() => handleDeleteHistoryItem(item.id)}
+                          title="Delete from history"
+                        >
+                          <Trash2 size={10} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Minimal Footer */}
+            {filteredHistory.length > 0 && (
+              <div className="history-footer">
+                <span className="history-footer-count font-mono">
+                  {filteredHistory.length} queries
+                </span>
+                <button className="btn-clear-link" onClick={handleClearHistory}>
+                  Clear {historyScope === "current" ? "Current DB" : "All"}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       <style jsx>{`
         .sql-console {
@@ -2548,6 +2911,23 @@ const quoteTableIdentifier = (tbl: string): string => {
           background: var(--bg-card);
           color: var(--text-sub);
         }
+        .tab-close-icon {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 14px;
+          height: 14px;
+          border-radius: 2px;
+          color: var(--text-muted);
+          opacity: 0.6;
+          transition: all 0.12s ease;
+          margin-left: 2px;
+        }
+        .tab-close-icon:hover {
+          background: rgba(239, 68, 68, 0.15);
+          color: #f87171;
+          opacity: 1;
+        }
         .tabs-summary {
           display: flex;
           align-items: center;
@@ -2555,6 +2935,24 @@ const quoteTableIdentifier = (tbl: string): string => {
           font-size: 10px;
           color: var(--text-muted);
           white-space: nowrap;
+        }
+        .btn-clear-tabs {
+          display: inline-flex;
+          align-items: center;
+          gap: 3px;
+          background: transparent;
+          border: 1px solid var(--border-light);
+          border-radius: var(--radius-xs, 3px);
+          color: var(--text-muted);
+          font-size: 10px;
+          padding: 1.5px 6px;
+          cursor: pointer;
+          transition: all 0.12s ease;
+        }
+        .btn-clear-tabs:hover {
+          background: var(--bg-card);
+          color: #f87171;
+          border-color: rgba(239, 68, 68, 0.35);
         }
 
         .results-pane {
@@ -2593,11 +2991,11 @@ const quoteTableIdentifier = (tbl: string): string => {
 
         /* Transaction Commit / Rollback Floating Dock */
         .transaction-bar {
-          position: absolute;
-          bottom: 24px;
+          position: fixed;
+          bottom: 28px;
           left: 50%;
           transform: translateX(-50%);
-          z-index: 50;
+          z-index: 1000;
           display: flex;
           align-items: center;
           justify-content: space-between;
@@ -2605,20 +3003,19 @@ const quoteTableIdentifier = (tbl: string): string => {
           background: var(--bg-card);
           backdrop-filter: blur(16px);
           -webkit-backdrop-filter: blur(16px);
-          border: 1px solid rgba(245, 158, 11, 0.45);
+          border: 1px solid var(--border-light);
           border-radius: 9999px;
-          box-shadow: 0 12px 32px -4px rgba(0, 0, 0, 0.5), 0 4px 12px -2px rgba(245, 158, 11, 0.15);
+          box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.45);
           font-size: 11.5px;
-          color: #fbbf24;
+          color: var(--text-main);
           gap: 16px;
-          animation: floatDockIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+          animation: floatDockIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
           white-space: nowrap;
           pointer-events: auto;
+          max-width: calc(100vw - 32px);
         }
         .transaction-bar.has-deletions {
-          border-color: rgba(239, 68, 68, 0.55);
-          box-shadow: 0 12px 32px -4px rgba(0, 0, 0, 0.55), 0 4px 12px -2px rgba(239, 68, 68, 0.2);
-          color: #f87171;
+          color: var(--text-main);
         }
         .tx-info {
           display: flex;
@@ -2628,6 +3025,7 @@ const quoteTableIdentifier = (tbl: string): string => {
         }
         .tx-icon {
           flex-shrink: 0;
+          color: #f59e0b;
         }
         .tx-actions {
           display: flex;
@@ -2651,11 +3049,11 @@ const quoteTableIdentifier = (tbl: string): string => {
         }
 
         .status-bar-msg {
-          position: absolute;
-          bottom: 24px;
+          position: fixed;
+          bottom: 28px;
           left: 50%;
           transform: translateX(-50%);
-          z-index: 50;
+          z-index: 1000;
           display: flex;
           align-items: center;
           gap: 8px;
@@ -2666,28 +3064,28 @@ const quoteTableIdentifier = (tbl: string): string => {
           background: var(--bg-card);
           backdrop-filter: blur(16px);
           -webkit-backdrop-filter: blur(16px);
-          box-shadow: 0 12px 32px -4px rgba(0, 0, 0, 0.5);
-          animation: floatDockIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+          border: 1px solid var(--border-light);
+          box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.45);
+          animation: floatDockIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
           white-space: nowrap;
           pointer-events: auto;
+          max-width: calc(100vw - 32px);
         }
         .status-bar-msg.success {
-          border: 1px solid rgba(16, 185, 129, 0.45);
           color: #34d399;
         }
         .status-bar-msg.error {
-          border: 1px solid rgba(239, 68, 68, 0.45);
           color: #f87171;
         }
 
         @keyframes floatDockIn {
           from {
             opacity: 0;
-            transform: translate(-50%, 14px) scale(0.96);
+            transform: translate(-50%, 14px);
           }
           to {
             opacity: 1;
-            transform: translate(-50%, 0) scale(1);
+            transform: translate(-50%, 0);
           }
         }
 
@@ -2813,6 +3211,7 @@ const quoteTableIdentifier = (tbl: string): string => {
         }
 
         .sql-table td {
+          position: relative;
           padding: 5px 10px;
           border-bottom: 1px solid var(--border-light);
           border-right: 1px solid var(--border-light);
@@ -2820,8 +3219,16 @@ const quoteTableIdentifier = (tbl: string): string => {
           cursor: default;
         }
 
-        .sql-table tr:hover td {
-          background: var(--bg-hover);
+        .cell-text-flow {
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          line-height: inherit;
+        }
+        .cell-hidden-flow {
+          visibility: hidden !important;
+          pointer-events: none !important;
+          user-select: none !important;
         }
 
         .row-deleted {
@@ -2836,21 +3243,27 @@ const quoteTableIdentifier = (tbl: string): string => {
         }
 
         .inline-edit-wrap {
+          position: absolute;
+          inset: 0;
           width: 100%;
+          height: 100%;
           display: flex;
           align-items: center;
+          z-index: 5;
         }
         .cell-edit-input {
           width: 100%;
-          padding: 2px 6px;
-          font-size: 11px;
+          height: 100%;
+          padding: 4px 8px;
+          font-size: 11.5px;
           font-family: inherit;
           background: var(--bg-card);
-          border: 1px solid var(--accent-blue);
-          border-radius: var(--radius-xs);
+          border: 1.5px solid var(--accent-blue, #3b82f6);
+          border-radius: var(--radius-xs, 3px);
           color: var(--text-main);
           outline: none;
-          box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+          box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+          box-sizing: border-box;
         }
 
         .row-idx {
@@ -3102,6 +3515,324 @@ const quoteTableIdentifier = (tbl: string): string => {
           padding: 2px;
           display: flex;
           align-items: center;
+        }
+
+        /* Simple Minimal SQL History Drawer */
+        .history-btn-active {
+          background: var(--bg-tertiary) !important;
+          border-color: var(--accent-blue) !important;
+          color: var(--accent-blue) !important;
+        }
+        .history-pill-count {
+          font-size: 9.5px;
+          background: rgba(59, 130, 246, 0.12);
+          color: var(--accent-blue, #3b82f6);
+          padding: 1px 5px;
+          border-radius: 9999px;
+          font-weight: 700;
+        }
+
+        .sql-history-overlay {
+          position: fixed;
+          inset: 0;
+          background: rgba(0, 0, 0, 0.35);
+          backdrop-filter: blur(2px);
+          z-index: 1200;
+          display: flex;
+          justify-content: flex-end;
+          animation: fadeIn 0.15s ease-out;
+        }
+
+        .sql-history-drawer {
+          width: 420px;
+          max-width: 90vw;
+          height: 100%;
+          background: var(--bg-card);
+          border-left: 1px solid var(--border-light);
+          box-shadow: -6px 0 20px rgba(0, 0, 0, 0.25);
+          display: flex;
+          flex-direction: column;
+          animation: slideInRight 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        @keyframes slideInRight {
+          from { transform: translateX(100%); }
+          to { transform: translateX(0); }
+        }
+
+        .history-header {
+          padding: 10px 14px;
+          border-bottom: 1px solid var(--border-light);
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          background: var(--bg-header);
+        }
+
+        .history-header-title {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-weight: 600;
+          font-size: 12px;
+          color: var(--text-main);
+        }
+
+        .history-header-title .history-icon {
+          color: var(--text-muted);
+        }
+
+        .history-count-badge {
+          font-size: 9.5px;
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-light);
+          color: var(--text-muted);
+          padding: 1px 5px;
+          border-radius: 4px;
+        }
+
+        .history-filter-bar {
+          padding: 8px 12px;
+          border-bottom: 1px solid var(--border-light);
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          background: var(--bg-card);
+        }
+
+        .history-search-wrap {
+          position: relative;
+          display: flex;
+          align-items: center;
+          flex: 1;
+        }
+
+        .history-search-icon {
+          position: absolute;
+          left: 8px;
+          color: var(--text-muted);
+          pointer-events: none;
+        }
+
+        .history-search-input {
+          width: 100%;
+          padding: 4px 24px 4px 24px;
+          font-size: 11px;
+          border-radius: var(--radius-xs, 3px);
+          background: var(--bg-input, var(--bg-tertiary));
+          border: 1px solid var(--border-light);
+          color: var(--text-main);
+          outline: none;
+        }
+
+        .history-search-input:focus {
+          border-color: var(--accent-blue);
+        }
+
+        .clear-search-btn {
+          position: absolute;
+          right: 6px;
+          background: transparent;
+          border: none;
+          color: var(--text-muted);
+          cursor: pointer;
+          padding: 2px;
+          display: flex;
+        }
+
+        .history-scope-tabs {
+          display: flex;
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-light);
+          border-radius: var(--radius-xs, 3px);
+          padding: 1.5px;
+          gap: 2px;
+        }
+
+        .scope-tab {
+          font-size: 10px;
+          padding: 2px 7px;
+          border: none;
+          background: transparent;
+          color: var(--text-muted);
+          cursor: pointer;
+          border-radius: 2px;
+          transition: all 0.12s ease;
+        }
+
+        .scope-tab.active {
+          background: var(--bg-card);
+          color: var(--text-main);
+          font-weight: 600;
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+        }
+
+        .history-list {
+          flex: 1;
+          overflow-y: auto;
+          padding: 4px 0;
+        }
+
+        .history-empty {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          padding: 40px 20px;
+          text-align: center;
+          color: var(--text-muted);
+        }
+
+        .history-empty-icon {
+          margin-bottom: 8px;
+          opacity: 0.3;
+        }
+
+        .history-empty p {
+          font-size: 12px;
+          font-weight: 500;
+          margin: 0 0 2px 0;
+          color: var(--text-main);
+        }
+
+        .history-empty span {
+          font-size: 10.5px;
+        }
+
+        .history-item {
+          display: flex;
+          align-items: flex-start;
+          gap: 8px;
+          padding: 8px 12px;
+          border-bottom: 1px solid var(--border-light);
+          cursor: pointer;
+          transition: background 0.1s ease;
+          position: relative;
+        }
+
+        .history-item:hover {
+          background: var(--bg-hover);
+        }
+
+        .item-status-dot-wrap {
+          padding-top: 4px;
+        }
+
+        .status-dot {
+          display: block;
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+        }
+
+        .dot-ok {
+          background: #10b981;
+        }
+
+        .dot-err {
+          background: #f87171;
+        }
+
+        .item-content {
+          flex: 1;
+          min-width: 0;
+        }
+
+        .item-sql {
+          font-size: 11px;
+          line-height: 1.35;
+          color: var(--text-main);
+          white-space: pre-wrap;
+          word-break: break-all;
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+        }
+
+        .item-meta {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 9.5px;
+          color: var(--text-muted);
+          margin-top: 3px;
+        }
+
+        .item-db {
+          color: var(--text-sub);
+          background: var(--bg-tertiary);
+          padding: 0 4px;
+          border-radius: 2px;
+        }
+
+        .item-err-tag {
+          color: #f87171;
+          font-weight: 600;
+        }
+
+        .item-actions {
+          display: flex;
+          align-items: center;
+          gap: 2px;
+          opacity: 0;
+          transition: opacity 0.12s ease;
+        }
+
+        .history-item:hover .item-actions {
+          opacity: 1;
+        }
+
+        .item-btn {
+          width: 22px;
+          height: 22px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: transparent;
+          border: 1px solid transparent;
+          border-radius: 3px;
+          color: var(--text-muted);
+          cursor: pointer;
+          transition: all 0.12s ease;
+        }
+
+        .item-btn:hover {
+          background: var(--bg-tertiary);
+          border-color: var(--border-light);
+          color: var(--text-main);
+        }
+
+        .item-del-btn:hover {
+          color: #f87171 !important;
+        }
+
+        .history-footer {
+          padding: 8px 12px;
+          border-top: 1px solid var(--border-light);
+          background: var(--bg-header);
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+        }
+
+        .history-footer-count {
+          font-size: 10px;
+          color: var(--text-muted);
+        }
+
+        .btn-clear-link {
+          background: transparent;
+          border: none;
+          font-size: 10px;
+          color: var(--text-muted);
+          cursor: pointer;
+          padding: 0;
+        }
+
+        .btn-clear-link:hover {
+          color: #f87171;
+          text-decoration: underline;
         }
 
         /* Small Screen Responsive Layout */

@@ -239,7 +239,13 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
             <HardDrive size={12} />
             <span>{t("sidebarDatabase", language)}</span>
           </div>
-          <button className="icon-action-btn" onClick={onRefresh} disabled={isConnecting} title={t("shortcutRefresh", language)}>
+          <button
+            className="icon-action-btn"
+            onClick={onRefresh}
+            disabled={isConnecting}
+            title={t("shortcutRefresh", language)}
+            suppressHydrationWarning
+          >
             <RefreshCw size={11} className={loading || isConnecting ? "spin" : ""} />
           </button>
         </div>
@@ -249,6 +255,7 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
             value={isConnecting ? "" : activeDatabase}
             onChange={(e) => onSelectDatabase(e.target.value)}
             disabled={isConnecting}
+            suppressHydrationWarning
           >
             {isConnecting ? (
               <option value="">{t("connecting", language)}</option>
@@ -359,6 +366,7 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
                 onClick={onCreateTable}
                 title={t("sidebarCreateTable", language)}
                 disabled={!activeDatabase}
+                suppressHydrationWarning
               >
                 <Plus size={12} />
               </button>
