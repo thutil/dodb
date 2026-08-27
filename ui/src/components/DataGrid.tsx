@@ -358,6 +358,15 @@ export const DataGrid: React.FC<DataGridProps> = ({
   const [commitMsg, setCommitMsg] = useState<{ success: boolean; text: string } | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // Auto-dismiss commit/status toast after 3.5 seconds
+  useEffect(() => {
+    if (!commitMsg) return;
+    const timer = setTimeout(() => {
+      setCommitMsg(null);
+    }, 3500);
+    return () => clearTimeout(timer);
+  }, [commitMsg]);
+
   // Reset local transaction draft on table, database, or page/sort change
   const filtersKey = JSON.stringify(filters);
   useEffect(() => {
@@ -878,32 +887,49 @@ export const DataGrid: React.FC<DataGridProps> = ({
   };
 
   const handleFetchExport = async (type: "sql" | "csv" | "json") => {
-    if (!activeProfile || !activeDatabase || !tableName) return;
+    if (!tableName) return;
     setExporting(true);
     setExportType(type);
     setExportModalOpen(true);
-    if (type === "json") {
-      setExportContent(JSON.stringify(allJsonRows, null, 2));
-      setExporting(false);
-      return;
-    }
     try {
-      const endpoint = type === "sql" ? "export-sql" : "export-csv";
-      const apiBase = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:5820/api";
-      const res = await fetch(`${apiBase}/list/${endpoint}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...activeProfile,
-          database: activeDatabase,
-          table: tableName,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setExportContent(type === "sql" ? data.sql : data.csv);
-      } else {
-        setExportContent(`Failed to export ${type.toUpperCase()}`);
+      if (type === "json") {
+        setExportContent(JSON.stringify(allJsonRows, null, 2));
+        return;
+      }
+
+      if (type === "csv") {
+        const colNames = columns.map((c) => c.name);
+        const csvHeader = colNames.map((col) => `"${col.replace(/"/g, '""')}"`).join(",");
+        const csvRows = allJsonRows.map((row) =>
+          colNames
+            .map((col) => {
+              const val = row[col];
+              if (val === null || val === undefined) return "";
+              if (typeof val === "object") return `"${JSON.stringify(val).replace(/"/g, '""')}"`;
+              return `"${String(val).replace(/"/g, '""')}"`;
+            })
+            .join(",")
+        );
+        setExportContent([csvHeader, ...csvRows].join("\n"));
+        return;
+      }
+
+      if (type === "sql") {
+        const colNames = columns.map((c) => c.name);
+        const quotedCols = colNames.map((c) => `"${c.replace(/"/g, '""')}"`).join(", ");
+        const sqlStatements = allJsonRows.map((row) => {
+          const vals = colNames.map((c) => {
+            const val = row[c];
+            if (val === null || val === undefined) return "NULL";
+            if (typeof val === "number" || typeof val === "boolean") return String(val);
+            if (typeof val === "object") return `'${JSON.stringify(val).replace(/'/g, "''")}'`;
+            return `'${String(val).replace(/'/g, "''")}'`;
+          }).join(", ");
+          return `INSERT INTO "${tableName}" (${quotedCols}) VALUES (${vals});`;
+        });
+        const sqlText = `-- Table: ${tableName}\n-- Exported: ${new Date().toISOString()}\n-- Rows: ${allJsonRows.length}\n\n${sqlStatements.join("\n")}`;
+        setExportContent(sqlText);
+        return;
       }
     } catch {
       setExportContent("Export error");
@@ -1540,16 +1566,16 @@ export const DataGrid: React.FC<DataGridProps> = ({
                         return (
                           <td
                             key={col.name}
-                            className={`cell-data ${isNull ? "cell-null" : ""} ${isEdited ? "cell-modified" : ""}`}
+                            className={`cell-data ${isNull ? "cell-null" : ""} ${isEdited ? "cell-modified" : ""} ${isEditing ? "cell-editing" : ""}`}
                             onDoubleClick={() => startEditing(pkKey, false, undefined, col.name, val)}
                             title={gisSummary ? "Click badge to view on GIS map; double-click to edit" : "Double-click to edit cell"}
                           >
-                            {isEditing ? (
-                              <div className="input-with-picker inline-edit-wrap">
+                            {isEditing && (
+                              <div className="inline-edit-wrap">
                                 <input
                                   autoFocus
                                   type={isDateCol ? (col.type.toLowerCase().includes("timestamp") || col.type.toLowerCase().includes("datetime") ? "datetime-local" : "date") : "text"}
-                                  className="input cell-edit-input"
+                                  className="cell-edit-input"
                                   value={editValue}
                                   onChange={(e) => setEditValue(e.target.value)}
                                   onBlur={() => saveCellEdit()}
@@ -1559,29 +1585,32 @@ export const DataGrid: React.FC<DataGridProps> = ({
                                   }}
                                 />
                               </div>
-                            ) : isNull ? (
-                              <span className="null-tag">NULL</span>
-                            ) : gisSummary ? (
-                              <span
-                                className="gis-badge-pill"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setGisModalData({
-                                    title: `${tableName} — ${col.name}`,
-                                    subtitle: `Record #${page * pageSize + idx + 1}`,
-                                    value: val,
-                                  });
-                                }}
-                                title="Click to view spatial shape on interactive map"
-                              >
-                                <Globe size={10} />
-                                <span>{gisSummary.label}</span>
-                              </span>
-                            ) : typeof val === "object" ? (
-                              JSON.stringify(val)
-                            ) : (
-                              String(val)
                             )}
+                            <div className={`cell-text-flow ${isEditing ? "cell-hidden-flow" : ""}`}>
+                              {isNull ? (
+                                <span className="null-tag">NULL</span>
+                              ) : gisSummary ? (
+                                <span
+                                  className="gis-badge-pill"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setGisModalData({
+                                      title: `${tableName} — ${col.name}`,
+                                      subtitle: `Record #${page * pageSize + idx + 1}`,
+                                      value: val,
+                                    });
+                                  }}
+                                  title="Click to view spatial shape on interactive map"
+                                >
+                                  <Globe size={10} />
+                                  <span>{gisSummary.label}</span>
+                                </span>
+                              ) : typeof val === "object" ? (
+                                JSON.stringify(val)
+                              ) : (
+                                String(val)
+                              )}
+                            </div>
                           </td>
                         );
                       })}
@@ -2610,11 +2639,11 @@ export const DataGrid: React.FC<DataGridProps> = ({
 
         /* Transaction Commit / Rollback Floating Dock */
         .transaction-bar {
-          position: absolute;
-          bottom: 50px;
+          position: fixed;
+          bottom: 28px;
           left: 50%;
           transform: translateX(-50%);
-          z-index: 50;
+          z-index: 1000;
           display: flex;
           justify-content: space-between;
           align-items: center;
@@ -2622,15 +2651,16 @@ export const DataGrid: React.FC<DataGridProps> = ({
           background: var(--bg-card);
           backdrop-filter: blur(16px);
           -webkit-backdrop-filter: blur(16px);
-          border: 1px solid rgba(245, 158, 11, 0.45);
+          border: 1px solid var(--border-light);
           border-radius: 9999px;
-          box-shadow: 0 12px 32px -4px rgba(0, 0, 0, 0.5), 0 4px 12px -2px rgba(245, 158, 11, 0.15);
+          box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.45);
           font-size: 11.5px;
-          color: #fbbf24;
+          color: var(--text-main);
           gap: 16px;
-          animation: floatDockIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+          animation: floatDockIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
           white-space: nowrap;
           pointer-events: auto;
+          max-width: calc(100vw - 32px);
         }
         .tx-info {
           display: flex;
@@ -2640,6 +2670,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
         }
         .tx-icon {
           flex-shrink: 0;
+          color: #f59e0b;
         }
         .tx-actions {
           display: flex;
@@ -2659,11 +2690,11 @@ export const DataGrid: React.FC<DataGridProps> = ({
         }
 
         .status-bar-msg {
-          position: absolute;
-          bottom: 50px;
+          position: fixed;
+          bottom: 28px;
           left: 50%;
           transform: translateX(-50%);
-          z-index: 50;
+          z-index: 1000;
           display: flex;
           align-items: center;
           gap: 8px;
@@ -2674,28 +2705,28 @@ export const DataGrid: React.FC<DataGridProps> = ({
           background: var(--bg-card);
           backdrop-filter: blur(16px);
           -webkit-backdrop-filter: blur(16px);
-          box-shadow: 0 12px 32px -4px rgba(0, 0, 0, 0.5);
-          animation: floatDockIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+          border: 1px solid var(--border-light);
+          box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.45);
+          animation: floatDockIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
           white-space: nowrap;
           pointer-events: auto;
+          max-width: calc(100vw - 32px);
         }
         .status-bar-msg.success {
-          border: 1px solid rgba(16, 185, 129, 0.45);
           color: #34d399;
         }
         .status-bar-msg.error {
-          border: 1px solid rgba(239, 68, 68, 0.45);
           color: #f87171;
         }
 
         @keyframes floatDockIn {
           from {
             opacity: 0;
-            transform: translate(-50%, 14px) scale(0.96);
+            transform: translate(-50%, 14px);
           }
           to {
             opacity: 1;
-            transform: translate(-50%, 0) scale(1);
+            transform: translate(-50%, 0);
           }
         }
 
@@ -2918,6 +2949,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
         }
 
         .pro-table td {
+          position: relative;
           padding: 6px 10px;
           border-bottom: 1px solid var(--border-light);
           border-right: 1px solid var(--border-light);
@@ -2927,6 +2959,18 @@ export const DataGrid: React.FC<DataGridProps> = ({
           text-overflow: ellipsis;
           font-size: 11.5px;
           line-height: 1.4;
+        }
+
+        .cell-text-flow {
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          line-height: inherit;
+        }
+        .cell-hidden-flow {
+          visibility: hidden !important;
+          pointer-events: none !important;
+          user-select: none !important;
         }
 
         .pro-table tr:hover td {
@@ -3132,11 +3176,28 @@ export const DataGrid: React.FC<DataGridProps> = ({
           letter-spacing: 0.2px;
         }
 
-        .placeholder-text { color: var(--text-muted); font-style: italic; }
+        .inline-edit-wrap {
+          position: absolute;
+          inset: 0;
+          width: 100%;
+          height: 100%;
+          display: flex;
+          align-items: center;
+          z-index: 5;
+        }
         .cell-edit-input {
           width: 100%;
-          padding: 2px 4px;
-          font-size: 11px;
+          height: 100%;
+          padding: 4px 8px;
+          font-size: 11.5px;
+          font-family: inherit;
+          background: var(--bg-card);
+          border: 1.5px solid var(--accent-blue, #3b82f6);
+          border-radius: var(--radius-xs, 3px);
+          color: var(--text-main);
+          outline: none;
+          box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+          box-sizing: border-box;
         }
 
         .grid-state-msg, .empty-cell {
