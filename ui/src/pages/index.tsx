@@ -213,12 +213,11 @@ export default function Home() {
     } catch (e) { }
   };
 
-  // Dynamically load Tauri version at runtime if running in desktop app
+  // Ask the backend for its version; falls back to the build-time value.
   useEffect(() => {
     const loadVersion = async () => {
       try {
-        const { getVersion } = await import("@tauri-apps/api/app");
-        const v = await getVersion();
+        const v = await apiClient.appVersion();
         if (v) setAppVersion(v);
       } catch {
         // Fallback to build-time process.env.NEXT_PUBLIC_APP_VERSION

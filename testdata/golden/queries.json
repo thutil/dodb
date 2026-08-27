@@ -1,0 +1,1065 @@
+{
+  "results": [
+    {
+      "target": "postgres",
+      "case": "hazards-all",
+      "sql": "SELECT * FROM hazards ORDER BY id",
+      "rows": [
+        {
+          "id": 1,
+          "exact_money": "12345678901234.5678901234",
+          "big_int": 9223372036854775807,
+          "small_int": -32768,
+          "real_num": 0.1,
+          "is_true": true,
+          "int_not_bool": 1,
+          "ts_zoned": "2026-08-27T03:30:00+00:00",
+          "ts_naive": "2026-08-27 10:30:00",
+          "d": "2026-08-27",
+          "t": "10:30:00",
+          "ident": "3f2504e0-4f89-11d3-9a0c-0305e82c3301",
+          "doc": {
+            "a": {
+              "nested": [
+                1,
+                2,
+                3
+              ]
+            },
+            "m": "ก ไก่",
+            "z": 1
+          },
+          "tags": [
+            "ก",
+            "ข",
+            "ค"
+          ],
+          "nums": [
+            1,
+            2,
+            3
+          ],
+          "raw": "00FF10",
+          "geom": "0101000020E61000008048BF7D1D205940FAEDEBC039832B40",
+          "geog": "0101000020E61000008048BF7D1D205940FAEDEBC039832B40",
+          "feeling": "happy",
+          "plain_text": "ทดสอบภาษาไทย"
+        },
+        {
+          "id": 2,
+          "exact_money": "-0.0000000001",
+          "big_int": -9223372036854775808,
+          "small_int": 32767,
+          "real_num": 0.0,
+          "is_true": false,
+          "int_not_bool": 0,
+          "ts_zoned": "1970-01-01T00:00:00+00:00",
+          "ts_naive": "1970-01-01 00:00:00",
+          "d": "1970-01-01",
+          "t": "00:00:00",
+          "ident": "00000000-0000-0000-0000-000000000000",
+          "doc": [],
+          "tags": [],
+          "nums": [],
+          "raw": "",
+          "geom": "0101000020E610000000000000000000000000000000000000",
+          "geog": "0101000020E610000000000000000000000000000000000000",
+          "feeling": "sad",
+          "plain_text": ""
+        },
+        {
+          "id": 3,
+          "exact_money": null,
+          "big_int": null,
+          "small_int": null,
+          "real_num": null,
+          "is_true": null,
+          "int_not_bool": null,
+          "ts_zoned": null,
+          "ts_naive": null,
+          "d": null,
+          "t": null,
+          "ident": null,
+          "doc": null,
+          "tags": null,
+          "nums": null,
+          "raw": null,
+          "geom": null,
+          "geog": null,
+          "feeling": null,
+          "plain_text": null
+        }
+      ]
+    },
+    {
+      "target": "postgres",
+      "case": "count-star",
+      "sql": "SELECT COUNT(*) FROM hazards",
+      "rows": [
+        {
+          "count": 3
+        }
+      ]
+    },
+    {
+      "target": "postgres",
+      "case": "duplicate-column-labels",
+      "sql": "SELECT p.a AS id, p.label, c.id, c.pa AS label FROM parent p JOIN child c ON c.pa = p.a ORDER BY p.a",
+      "rows": [
+        {
+          "id": 1,
+          "label": "first",
+          "id_1": 1,
+          "label_1": 1
+        },
+        {
+          "id": 2,
+          "label": "second",
+          "id_1": 2,
+          "label_1": 2
+        }
+      ]
+    },
+    {
+      "target": "postgres",
+      "case": "boolean-vs-integer",
+      "sql": "SELECT id, is_true, int_not_bool FROM hazards ORDER BY id",
+      "rows": [
+        {
+          "id": 1,
+          "is_true": true,
+          "int_not_bool": 1
+        },
+        {
+          "id": 2,
+          "is_true": false,
+          "int_not_bool": 0
+        },
+        {
+          "id": 3,
+          "is_true": null,
+          "int_not_bool": null
+        }
+      ]
+    },
+    {
+      "target": "postgres",
+      "case": "numeric-precision",
+      "sql": "SELECT id, exact_money, big_int FROM hazards ORDER BY id",
+      "rows": [
+        {
+          "id": 1,
+          "exact_money": "12345678901234.5678901234",
+          "big_int": 9223372036854775807
+        },
+        {
+          "id": 2,
+          "exact_money": "-0.0000000001",
+          "big_int": -9223372036854775808
+        },
+        {
+          "id": 3,
+          "exact_money": null,
+          "big_int": null
+        }
+      ]
+    },
+    {
+      "target": "postgres",
+      "case": "expression-labels",
+      "sql": "SELECT 1 AS one, 'txt' AS s, NULL AS nothing_at_all",
+      "rows": [
+        {
+          "one": 1,
+          "s": "txt",
+          "nothing_at_all": null
+        }
+      ]
+    },
+    {
+      "target": "postgres",
+      "case": "pg-arrays",
+      "sql": "SELECT id, tags, nums FROM hazards ORDER BY id",
+      "rows": [
+        {
+          "id": 1,
+          "tags": [
+            "ก",
+            "ข",
+            "ค"
+          ],
+          "nums": [
+            1,
+            2,
+            3
+          ]
+        },
+        {
+          "id": 2,
+          "tags": [],
+          "nums": []
+        },
+        {
+          "id": 3,
+          "tags": null,
+          "nums": null
+        }
+      ]
+    },
+    {
+      "target": "postgres",
+      "case": "pg-geometry",
+      "sql": "SELECT id, geom, geog FROM hazards ORDER BY id",
+      "rows": [
+        {
+          "id": 1,
+          "geom": "0101000020E61000008048BF7D1D205940FAEDEBC039832B40",
+          "geog": "0101000020E61000008048BF7D1D205940FAEDEBC039832B40"
+        },
+        {
+          "id": 2,
+          "geom": "0101000020E610000000000000000000000000000000000000",
+          "geog": "0101000020E610000000000000000000000000000000000000"
+        },
+        {
+          "id": 3,
+          "geom": null,
+          "geog": null
+        }
+      ]
+    },
+    {
+      "target": "postgres",
+      "case": "pg-enum-uuid-json",
+      "sql": "SELECT id, feeling, ident, doc FROM hazards ORDER BY id",
+      "rows": [
+        {
+          "id": 1,
+          "feeling": "happy",
+          "ident": "3f2504e0-4f89-11d3-9a0c-0305e82c3301",
+          "doc": {
+            "a": {
+              "nested": [
+                1,
+                2,
+                3
+              ]
+            },
+            "m": "ก ไก่",
+            "z": 1
+          }
+        },
+        {
+          "id": 2,
+          "feeling": "sad",
+          "ident": "00000000-0000-0000-0000-000000000000",
+          "doc": []
+        },
+        {
+          "id": 3,
+          "feeling": null,
+          "ident": null,
+          "doc": null
+        }
+      ]
+    },
+    {
+      "target": "postgres",
+      "case": "pg-schema-qualified",
+      "sql": "SELECT * FROM extra.elsewhere ORDER BY id",
+      "rows": [
+        {
+          "id": 1,
+          "note": "not in public"
+        }
+      ]
+    },
+    {
+      "target": "postgres",
+      "case": "empty-result",
+      "sql": "SELECT * FROM hazards WHERE id = -1",
+      "rows": []
+    },
+    {
+      "target": "postgres",
+      "case": "timestamp-precision",
+      "sql": "SELECT * FROM ts_precision ORDER BY id",
+      "rows": [
+        {
+          "id": 1,
+          "zoned": "2026-08-27T03:30:00+00:00",
+          "naive": "2026-08-27 10:30:00",
+          "t_only": "10:30:00"
+        },
+        {
+          "id": 2,
+          "zoned": "2026-08-27T03:30:00.123+00:00",
+          "naive": "2026-08-27 10:30:00.123",
+          "t_only": "10:30:00.123"
+        },
+        {
+          "id": 3,
+          "zoned": "2026-08-27T03:30:00.123456+00:00",
+          "naive": "2026-08-27 10:30:00.123456",
+          "t_only": "10:30:00.123456"
+        },
+        {
+          "id": 4,
+          "zoned": "2026-08-27T03:30:00.000001+00:00",
+          "naive": "2026-08-27 10:30:00.000001",
+          "t_only": "10:30:00.000001"
+        },
+        {
+          "id": 5,
+          "zoned": "2026-08-27T15:30:00+00:00",
+          "naive": "2026-08-27 10:30:00",
+          "t_only": "00:00:00"
+        }
+      ]
+    },
+    {
+      "target": "mysql",
+      "case": "hazards-all",
+      "sql": "SELECT * FROM hazards ORDER BY id",
+      "rows": [
+        {
+          "id": 1,
+          "exact_money": "12345678901234.5678901234",
+          "big_int": 9223372036854775807,
+          "ubig_int": 18446744073709551615,
+          "small_int": -32768,
+          "real_num": 0.1,
+          "is_true": true,
+          "int_not_bool": 1,
+          "ts_zoned": "2026-08-27T03:30:00+00:00",
+          "dt_naive": "2026-08-27T10:30:00+00:00",
+          "d": "2026-08-27",
+          "t": "10:30:00",
+          "ident": "3f2504e0-4f89-11d3-9a0c-0305e82c3301",
+          "doc": {
+            "a": {
+              "nested": [
+                1,
+                2,
+                3
+              ]
+            },
+            "m": "ก ไก่",
+            "z": 1
+          },
+          "raw": "00FF10",
+          "blob_col": "00FF10",
+          "geom": "E610000001010000008048BF7D1D205940FAEDEBC039832B40",
+          "feeling": "happy",
+          "plain_text": "ทดสอบภาษาไทย"
+        },
+        {
+          "id": 2,
+          "exact_money": "-0.0000000001",
+          "big_int": -9223372036854775808,
+          "ubig_int": 0,
+          "small_int": 32767,
+          "real_num": 0.0,
+          "is_true": false,
+          "int_not_bool": 0,
+          "ts_zoned": "1970-01-02T00:00:01+00:00",
+          "dt_naive": "1970-01-01T00:00:00+00:00",
+          "d": "1970-01-01",
+          "t": "00:00:00",
+          "ident": "00000000-0000-0000-0000-000000000000",
+          "doc": [],
+          "raw": "",
+          "blob_col": "",
+          "geom": "E6100000010100000000000000000000000000000000000000",
+          "feeling": "sad",
+          "plain_text": ""
+        },
+        {
+          "id": 3,
+          "exact_money": null,
+          "big_int": null,
+          "ubig_int": null,
+          "small_int": null,
+          "real_num": null,
+          "is_true": null,
+          "int_not_bool": null,
+          "ts_zoned": null,
+          "dt_naive": null,
+          "d": null,
+          "t": null,
+          "ident": null,
+          "doc": null,
+          "raw": null,
+          "blob_col": null,
+          "geom": null,
+          "feeling": null,
+          "plain_text": null
+        }
+      ]
+    },
+    {
+      "target": "mysql",
+      "case": "count-star",
+      "sql": "SELECT COUNT(*) FROM hazards",
+      "rows": [
+        {
+          "COUNT(*)": 3
+        }
+      ]
+    },
+    {
+      "target": "mysql",
+      "case": "duplicate-column-labels",
+      "sql": "SELECT p.a AS id, p.label, c.id, c.pa AS label FROM parent p JOIN child c ON c.pa = p.a ORDER BY p.a",
+      "rows": [
+        {
+          "id": 1,
+          "label": "first",
+          "id_1": 1,
+          "label_1": 1
+        },
+        {
+          "id": 2,
+          "label": "second",
+          "id_1": 2,
+          "label_1": 2
+        }
+      ]
+    },
+    {
+      "target": "mysql",
+      "case": "boolean-vs-integer",
+      "sql": "SELECT id, is_true, int_not_bool FROM hazards ORDER BY id",
+      "rows": [
+        {
+          "id": 1,
+          "is_true": true,
+          "int_not_bool": 1
+        },
+        {
+          "id": 2,
+          "is_true": false,
+          "int_not_bool": 0
+        },
+        {
+          "id": 3,
+          "is_true": null,
+          "int_not_bool": null
+        }
+      ]
+    },
+    {
+      "target": "mysql",
+      "case": "numeric-precision",
+      "sql": "SELECT id, exact_money, big_int FROM hazards ORDER BY id",
+      "rows": [
+        {
+          "id": 1,
+          "exact_money": "12345678901234.5678901234",
+          "big_int": 9223372036854775807
+        },
+        {
+          "id": 2,
+          "exact_money": "-0.0000000001",
+          "big_int": -9223372036854775808
+        },
+        {
+          "id": 3,
+          "exact_money": null,
+          "big_int": null
+        }
+      ]
+    },
+    {
+      "target": "mysql",
+      "case": "expression-labels",
+      "sql": "SELECT 1 AS one, 'txt' AS s, NULL AS nothing_at_all",
+      "rows": [
+        {
+          "one": 1,
+          "s": "txt",
+          "nothing_at_all": null
+        }
+      ]
+    },
+    {
+      "target": "mysql",
+      "case": "my-unsigned-and-geometry",
+      "sql": "SELECT id, ubig_int, geom, blob_col FROM hazards ORDER BY id",
+      "rows": [
+        {
+          "id": 1,
+          "ubig_int": 18446744073709551615,
+          "geom": "E610000001010000008048BF7D1D205940FAEDEBC039832B40",
+          "blob_col": "00FF10"
+        },
+        {
+          "id": 2,
+          "ubig_int": 0,
+          "geom": "E6100000010100000000000000000000000000000000000000",
+          "blob_col": ""
+        },
+        {
+          "id": 3,
+          "ubig_int": null,
+          "geom": null,
+          "blob_col": null
+        }
+      ]
+    },
+    {
+      "target": "mysql",
+      "case": "my-enum-json",
+      "sql": "SELECT id, feeling, doc FROM hazards ORDER BY id",
+      "rows": [
+        {
+          "id": 1,
+          "feeling": "happy",
+          "doc": {
+            "a": {
+              "nested": [
+                1,
+                2,
+                3
+              ]
+            },
+            "m": "ก ไก่",
+            "z": 1
+          }
+        },
+        {
+          "id": 2,
+          "feeling": "sad",
+          "doc": []
+        },
+        {
+          "id": 3,
+          "feeling": null,
+          "doc": null
+        }
+      ]
+    },
+    {
+      "target": "mysql",
+      "case": "empty-result",
+      "sql": "SELECT * FROM hazards WHERE id = -1",
+      "rows": []
+    },
+    {
+      "target": "mysql",
+      "case": "timestamp-precision",
+      "sql": "SELECT * FROM ts_precision ORDER BY id",
+      "rows": [
+        {
+          "id": 1,
+          "zoned": "2026-08-27T03:30:00+00:00",
+          "naive": "2026-08-27T10:30:00+00:00",
+          "t_only": "10:30:00"
+        },
+        {
+          "id": 2,
+          "zoned": "2026-08-27T03:30:00.123+00:00",
+          "naive": "2026-08-27T10:30:00.123+00:00",
+          "t_only": "10:30:00.123"
+        },
+        {
+          "id": 3,
+          "zoned": "2026-08-27T03:30:00.123456+00:00",
+          "naive": "2026-08-27T10:30:00.123456+00:00",
+          "t_only": "10:30:00.123456"
+        },
+        {
+          "id": 4,
+          "zoned": "2026-08-27T03:30:00.000001+00:00",
+          "naive": "2026-08-27T10:30:00.000001+00:00",
+          "t_only": "10:30:00.000001"
+        },
+        {
+          "id": 5,
+          "zoned": "2026-08-27T15:30:00+00:00",
+          "naive": "2026-08-27T10:30:00+00:00",
+          "t_only": "00:00:00"
+        }
+      ]
+    },
+    {
+      "target": "mariadb",
+      "case": "hazards-all",
+      "sql": "SELECT * FROM hazards ORDER BY id",
+      "rows": [
+        {
+          "id": 1,
+          "exact_money": "12345678901234.5678901234",
+          "big_int": 9223372036854775807,
+          "ubig_int": 18446744073709551615,
+          "small_int": -32768,
+          "real_num": 0.1,
+          "is_true": true,
+          "int_not_bool": 1,
+          "ts_zoned": "2026-08-27T03:30:00+00:00",
+          "dt_naive": "2026-08-27T10:30:00+00:00",
+          "d": "2026-08-27",
+          "t": "10:30:00",
+          "ident": "3f2504e0-4f89-11d3-9a0c-0305e82c3301",
+          "doc": {
+            "z": 1,
+            "a": {
+              "nested": [
+                1,
+                2,
+                3
+              ]
+            },
+            "m": "ก ไก่"
+          },
+          "raw": "00FF10",
+          "blob_col": "00FF10",
+          "geom": "E61000000101000000FAEDEBC039832B408048BF7D1D205940",
+          "feeling": "happy",
+          "plain_text": "ทดสอบภาษาไทย"
+        },
+        {
+          "id": 2,
+          "exact_money": "-0.0000000001",
+          "big_int": -9223372036854775808,
+          "ubig_int": 0,
+          "small_int": 32767,
+          "real_num": 0.0,
+          "is_true": false,
+          "int_not_bool": 0,
+          "ts_zoned": "1970-01-02T00:00:01+00:00",
+          "dt_naive": "1970-01-01T00:00:00+00:00",
+          "d": "1970-01-01",
+          "t": "00:00:00",
+          "ident": "00000000-0000-0000-0000-000000000000",
+          "doc": [],
+          "raw": "",
+          "blob_col": "",
+          "geom": "E6100000010100000000000000000000000000000000000000",
+          "feeling": "sad",
+          "plain_text": ""
+        },
+        {
+          "id": 3,
+          "exact_money": null,
+          "big_int": null,
+          "ubig_int": null,
+          "small_int": null,
+          "real_num": null,
+          "is_true": null,
+          "int_not_bool": null,
+          "ts_zoned": null,
+          "dt_naive": null,
+          "d": null,
+          "t": null,
+          "ident": null,
+          "doc": null,
+          "raw": null,
+          "blob_col": null,
+          "geom": null,
+          "feeling": null,
+          "plain_text": null
+        }
+      ]
+    },
+    {
+      "target": "mariadb",
+      "case": "count-star",
+      "sql": "SELECT COUNT(*) FROM hazards",
+      "rows": [
+        {
+          "COUNT(*)": 3
+        }
+      ]
+    },
+    {
+      "target": "mariadb",
+      "case": "duplicate-column-labels",
+      "sql": "SELECT p.a AS id, p.label, c.id, c.pa AS label FROM parent p JOIN child c ON c.pa = p.a ORDER BY p.a",
+      "rows": [
+        {
+          "id": 1,
+          "label": "first",
+          "id_1": 1,
+          "label_1": 1
+        },
+        {
+          "id": 2,
+          "label": "second",
+          "id_1": 2,
+          "label_1": 2
+        }
+      ]
+    },
+    {
+      "target": "mariadb",
+      "case": "boolean-vs-integer",
+      "sql": "SELECT id, is_true, int_not_bool FROM hazards ORDER BY id",
+      "rows": [
+        {
+          "id": 1,
+          "is_true": true,
+          "int_not_bool": 1
+        },
+        {
+          "id": 2,
+          "is_true": false,
+          "int_not_bool": 0
+        },
+        {
+          "id": 3,
+          "is_true": null,
+          "int_not_bool": null
+        }
+      ]
+    },
+    {
+      "target": "mariadb",
+      "case": "numeric-precision",
+      "sql": "SELECT id, exact_money, big_int FROM hazards ORDER BY id",
+      "rows": [
+        {
+          "id": 1,
+          "exact_money": "12345678901234.5678901234",
+          "big_int": 9223372036854775807
+        },
+        {
+          "id": 2,
+          "exact_money": "-0.0000000001",
+          "big_int": -9223372036854775808
+        },
+        {
+          "id": 3,
+          "exact_money": null,
+          "big_int": null
+        }
+      ]
+    },
+    {
+      "target": "mariadb",
+      "case": "expression-labels",
+      "sql": "SELECT 1 AS one, 'txt' AS s, NULL AS nothing_at_all",
+      "rows": [
+        {
+          "one": 1,
+          "s": "txt",
+          "nothing_at_all": null
+        }
+      ]
+    },
+    {
+      "target": "mariadb",
+      "case": "my-unsigned-and-geometry",
+      "sql": "SELECT id, ubig_int, geom, blob_col FROM hazards ORDER BY id",
+      "rows": [
+        {
+          "id": 1,
+          "ubig_int": 18446744073709551615,
+          "geom": "E61000000101000000FAEDEBC039832B408048BF7D1D205940",
+          "blob_col": "00FF10"
+        },
+        {
+          "id": 2,
+          "ubig_int": 0,
+          "geom": "E6100000010100000000000000000000000000000000000000",
+          "blob_col": ""
+        },
+        {
+          "id": 3,
+          "ubig_int": null,
+          "geom": null,
+          "blob_col": null
+        }
+      ]
+    },
+    {
+      "target": "mariadb",
+      "case": "my-enum-json",
+      "sql": "SELECT id, feeling, doc FROM hazards ORDER BY id",
+      "rows": [
+        {
+          "id": 1,
+          "feeling": "happy",
+          "doc": {
+            "z": 1,
+            "a": {
+              "nested": [
+                1,
+                2,
+                3
+              ]
+            },
+            "m": "ก ไก่"
+          }
+        },
+        {
+          "id": 2,
+          "feeling": "sad",
+          "doc": []
+        },
+        {
+          "id": 3,
+          "feeling": null,
+          "doc": null
+        }
+      ]
+    },
+    {
+      "target": "mariadb",
+      "case": "empty-result",
+      "sql": "SELECT * FROM hazards WHERE id = -1",
+      "rows": []
+    },
+    {
+      "target": "mariadb",
+      "case": "timestamp-precision",
+      "sql": "SELECT * FROM ts_precision ORDER BY id",
+      "rows": [
+        {
+          "id": 1,
+          "zoned": "2026-08-27T03:30:00+00:00",
+          "naive": "2026-08-27T10:30:00+00:00",
+          "t_only": "10:30:00"
+        },
+        {
+          "id": 2,
+          "zoned": "2026-08-27T03:30:00.123+00:00",
+          "naive": "2026-08-27T10:30:00.123+00:00",
+          "t_only": "10:30:00.123"
+        },
+        {
+          "id": 3,
+          "zoned": "2026-08-27T03:30:00.123456+00:00",
+          "naive": "2026-08-27T10:30:00.123456+00:00",
+          "t_only": "10:30:00.123456"
+        },
+        {
+          "id": 4,
+          "zoned": "2026-08-27T03:30:00.000001+00:00",
+          "naive": "2026-08-27T10:30:00.000001+00:00",
+          "t_only": "10:30:00.000001"
+        },
+        {
+          "id": 5,
+          "zoned": "2026-08-27T15:30:00+00:00",
+          "naive": "2026-08-27T10:30:00+00:00",
+          "t_only": "00:00:00"
+        }
+      ]
+    },
+    {
+      "target": "sqlite",
+      "case": "hazards-all",
+      "sql": "SELECT * FROM hazards ORDER BY id",
+      "rows": [
+        {
+          "id": 1,
+          "exact_money": 12345678901234.568,
+          "big_int": 9223372036854775807,
+          "real_num": 0.1,
+          "is_true": true,
+          "int_not_bool": 1,
+          "dt_naive": "2026-08-27 10:30:00",
+          "d": "2026-08-27",
+          "ident": "3f2504e0-4f89-11d3-9a0c-0305e82c3301",
+          "doc": "{\"z\":1,\"a\":{\"nested\":[1,2,3]},\"m\":\"ก ไก่\"}",
+          "raw": "00FF10",
+          "geom": "0101000020E6100000B4C876BE9F214059A8C64B3789412B40",
+          "plain_text": "ทดสอบภาษาไทย"
+        },
+        {
+          "id": 2,
+          "exact_money": -1e-10,
+          "big_int": -9223372036854775808,
+          "real_num": 0.0,
+          "is_true": false,
+          "int_not_bool": 0,
+          "dt_naive": "1970-01-01 00:00:00",
+          "d": "1970-01-01",
+          "ident": "00000000-0000-0000-0000-000000000000",
+          "doc": "[]",
+          "raw": "",
+          "geom": "",
+          "plain_text": ""
+        },
+        {
+          "id": 3,
+          "exact_money": null,
+          "big_int": null,
+          "real_num": null,
+          "is_true": null,
+          "int_not_bool": null,
+          "dt_naive": null,
+          "d": null,
+          "ident": null,
+          "doc": null,
+          "raw": null,
+          "geom": null,
+          "plain_text": null
+        }
+      ]
+    },
+    {
+      "target": "sqlite",
+      "case": "count-star",
+      "sql": "SELECT COUNT(*) FROM hazards",
+      "rows": [
+        {
+          "COUNT(*)": 3
+        }
+      ]
+    },
+    {
+      "target": "sqlite",
+      "case": "duplicate-column-labels",
+      "sql": "SELECT p.a AS id, p.label, c.id, c.pa AS label FROM parent p JOIN child c ON c.pa = p.a ORDER BY p.a",
+      "rows": [
+        {
+          "id": 1,
+          "label": "first",
+          "id_1": 1,
+          "label_1": 1
+        },
+        {
+          "id": 2,
+          "label": "second",
+          "id_1": 2,
+          "label_1": 2
+        }
+      ]
+    },
+    {
+      "target": "sqlite",
+      "case": "boolean-vs-integer",
+      "sql": "SELECT id, is_true, int_not_bool FROM hazards ORDER BY id",
+      "rows": [
+        {
+          "id": 1,
+          "is_true": true,
+          "int_not_bool": 1
+        },
+        {
+          "id": 2,
+          "is_true": false,
+          "int_not_bool": 0
+        },
+        {
+          "id": 3,
+          "is_true": null,
+          "int_not_bool": null
+        }
+      ]
+    },
+    {
+      "target": "sqlite",
+      "case": "numeric-precision",
+      "sql": "SELECT id, exact_money, big_int FROM hazards ORDER BY id",
+      "rows": [
+        {
+          "id": 1,
+          "exact_money": 12345678901234.568,
+          "big_int": 9223372036854775807
+        },
+        {
+          "id": 2,
+          "exact_money": -1e-10,
+          "big_int": -9223372036854775808
+        },
+        {
+          "id": 3,
+          "exact_money": null,
+          "big_int": null
+        }
+      ]
+    },
+    {
+      "target": "sqlite",
+      "case": "expression-labels",
+      "sql": "SELECT 1 AS one, 'txt' AS s, NULL AS nothing_at_all",
+      "rows": [
+        {
+          "one": 1,
+          "s": "txt",
+          "nothing_at_all": null
+        }
+      ]
+    },
+    {
+      "target": "sqlite",
+      "case": "sqlite-affinity",
+      "sql": "SELECT id, exact_money, real_num, dt_naive, d, raw, geom FROM hazards ORDER BY id",
+      "rows": [
+        {
+          "id": 1,
+          "exact_money": 12345678901234.568,
+          "real_num": 0.1,
+          "dt_naive": "2026-08-27 10:30:00",
+          "d": "2026-08-27",
+          "raw": "00FF10",
+          "geom": "0101000020E6100000B4C876BE9F214059A8C64B3789412B40"
+        },
+        {
+          "id": 2,
+          "exact_money": -1e-10,
+          "real_num": 0.0,
+          "dt_naive": "1970-01-01 00:00:00",
+          "d": "1970-01-01",
+          "raw": "",
+          "geom": ""
+        },
+        {
+          "id": 3,
+          "exact_money": null,
+          "real_num": null,
+          "dt_naive": null,
+          "d": null,
+          "raw": null,
+          "geom": null
+        }
+      ]
+    },
+    {
+      "target": "sqlite",
+      "case": "empty-result",
+      "sql": "SELECT * FROM hazards WHERE id = -1",
+      "rows": []
+    },
+    {
+      "target": "sqlite",
+      "case": "timestamp-precision",
+      "sql": "SELECT * FROM ts_precision ORDER BY id",
+      "rows": [
+        {
+          "id": 1,
+          "zoned": "2026-08-27 03:30:00",
+          "naive": "2026-08-27 10:30:00",
+          "t_only": "10:30:00"
+        },
+        {
+          "id": 2,
+          "zoned": "2026-08-27 03:30:00.123",
+          "naive": "2026-08-27 10:30:00.123",
+          "t_only": "10:30:00.123"
+        },
+        {
+          "id": 3,
+          "zoned": "2026-08-27 03:30:00.123456",
+          "naive": "2026-08-27 10:30:00.123456",
+          "t_only": "10:30:00.123456"
+        },
+        {
+          "id": 4,
+          "zoned": "2026-08-27 03:30:00.000001",
+          "naive": "2026-08-27 10:30:00.000001",
+          "t_only": "10:30:00.000001"
+        },
+        {
+          "id": 5,
+          "zoned": "2026-08-27 15:30:00",
+          "naive": "2026-08-27 10:30:00",
+          "t_only": "00:00:00"
+        }
+      ]
+    }
+  ]
+}

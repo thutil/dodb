@@ -1,0 +1,50 @@
+[
+  {
+    "id": "p-postgres",
+    "name": "prod pg",
+    "type": "postgres",
+    "host": "db.example.com",
+    "port": 5432,
+    "user": "dodb",
+    "password": "enc:v2:3017c994a2397480dd9e3683:09667d860d035aeabec4ec59b883d0ed:445e617bc717b5",
+    "database": "app",
+    "filePath": null,
+    "group": "production",
+    "keepAlive": true,
+    "savePassword": true,
+    "createdAt": "2026-01-02T03:04:05Z",
+    "updatedAt": "2026-08-27T10:00:00Z"
+  },
+  {
+    "id": "p-sqlite",
+    "name": "local file",
+    "type": "sqlite",
+    "host": "",
+    "port": 0,
+    "user": "",
+    "password": "",
+    "database": "",
+    "filePath": "/tmp/local.sqlite",
+    "group": null,
+    "keepAlive": false,
+    "savePassword": false,
+    "createdAt": "2026-02-03T00:00:00Z",
+    "updatedAt": ""
+  },
+  {
+    "id": "p-maria",
+    "name": "ทดสอบไทย <staging & qa>",
+    "type": "mariadb",
+    "host": "127.0.0.1",
+    "port": 3306,
+    "user": "root",
+    "password": "",
+    "database": "dodb_fixture",
+    "filePath": null,
+    "group": null,
+    "keepAlive": false,
+    "savePassword": true,
+    "createdAt": "",
+    "updatedAt": ""
+  }
+]

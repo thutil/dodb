@@ -1,57 +1,64 @@
-name: Release App (Windows & macOS)
+name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    tags: ['v*']
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (without the v), e.g. 0.3.0'
+        required: true
+
+env:
+  GO_VERSION: '1.27'
+  NODE_VERSION: '20'
+  PNPM_VERSION: '9'
 
 jobs:
-  build-and-release:
+  macos:
+    name: macOS (universal .dmg)
+    runs-on: macos-latest
     permissions:
       contents: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: 'windows-latest'
-            args: ''
-          - platform: 'macos-latest'
-            args: '--target universal-apple-darwin'
-
-    runs-on: ${{ matrix.platform }}
-
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v3
+      - uses: pnpm/action-setup@v3
         with:
-          version: 9
+          version: ${{ env.PNPM_VERSION }}
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'pnpm'
 
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-go@v5
         with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
 
-      - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile
+      - run: pnpm install --no-frozen-lockfile
 
-      - name: Sync Version from Git Tag
-        run: node scripts/sync-version.js "${{ github.ref_name }}"
+      - name: Resolve version
+        id: version
+        run: |
+          set -euo pipefail
+          RAW="${{ inputs.version || github.ref_name }}"
+          VERSION="${RAW#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          node scripts/sync-version.js "$VERSION"
 
-      # Signing stays off until APPLE_CERTIFICATE exists, and the Apple variables are
-      # only exported when they do - an empty APPLE_SIGNING_IDENTITY would make the
-      # bundler try to sign with no identity. See docs/SIGNING.md.
-      - name: Set up macOS code signing
-        if: matrix.platform == 'macos-latest'
+      # This block is unchanged from the Tauri era on purpose: it is plain
+      # security(1) and codesign plumbing with nothing framework-specific in it.
+      # All it does is put an identity in the keychain and export the variables
+      # scripts/build-macos.sh reads.
+      #
+      # Signing stays off until APPLE_CERTIFICATE exists, and the Apple variables
+      # are only exported when they do -- an empty APPLE_SIGNING_IDENTITY would
+      # make codesign try to sign with no identity. See docs/SIGNING.md.
+      - name: Set up code signing
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -64,7 +71,7 @@ jobs:
           set -euo pipefail
 
           if [ -z "${APPLE_CERTIFICATE:-}" ]; then
-            echo "::warning::APPLE_CERTIFICATE is not set - releasing an ad-hoc signed build. macOS will ask for keychain access again after every update, and Gatekeeper will warn on first launch. See docs/SIGNING.md."
+            echo "::warning::APPLE_CERTIFICATE is not set - releasing an ad-hoc signed build. Gatekeeper will warn on first launch and every user must clear quarantine by hand. See docs/SIGNING.md."
             exit 0
           fi
 
@@ -75,6 +82,7 @@ jobs:
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
           security set-keychain-settings -t 3600 -u build.keychain
           security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          # Suppresses the interactive prompt codesign would otherwise raise.
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
           rm -f certificate.p12
 
@@ -82,8 +90,8 @@ jobs:
             IDENTITY="$IDENTITY_OVERRIDE"
           else
             IDENTITIES=$(security find-identity -v -p codesigning build.keychain || true)
-            # Prefer a Developer ID; fall back to whatever code signing identity the
-            # certificate carries, so a self-signed one works too.
+            # Prefer a Developer ID; fall back to whatever code signing identity
+            # the certificate carries, so a self-signed one works too.
             IDENTITY=$(printf '%s' "$IDENTITIES" | awk -F'"' '/Developer ID Application/ {print $2; exit}')
             if [ -z "$IDENTITY" ]; then
               IDENTITY=$(printf '%s' "$IDENTITIES" | awk -F'"' 'NF > 1 {print $2; exit}')
@@ -95,14 +103,7 @@ jobs:
             exit 1
           fi
           echo "Signing as: $IDENTITY"
-
-          {
-            echo "APPLE_CERTIFICATE<<__DODB_EOF__"
-            echo "$APPLE_CERTIFICATE"
-            echo "__DODB_EOF__"
-            echo "APPLE_CERTIFICATE_PASSWORD=$APPLE_CERTIFICATE_PASSWORD"
-            echo "APPLE_SIGNING_IDENTITY=$IDENTITY"
-          } >> "$GITHUB_ENV"
+          echo "APPLE_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
 
           if [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_PASSWORD:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ]; then
             {
@@ -110,68 +111,178 @@ jobs:
               echo "APPLE_PASSWORD=$APPLE_PASSWORD"
               echo "APPLE_TEAM_ID=$APPLE_TEAM_ID"
             } >> "$GITHUB_ENV"
-            echo "Notarization credentials found - the bundle will be notarized and stapled."
+            echo "Notarization credentials found - the DMG will be notarized and stapled."
           else
-            echo "::warning::Signing without notarization (APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID incomplete). Keychain prompts stop recurring, but Gatekeeper still warns on first launch."
+            echo "::warning::Signing without notarization (APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID incomplete). Gatekeeper still warns on first launch."
           fi
 
-      - name: Build Tauri App & Create Release
-        uses: tauri-apps/tauri-action@v0
+      - name: Build
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NEXT_PUBLIC_APP_VERSION: ${{ github.ref_name }}
-        with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'dodb ${{ github.ref_name }}'
-          releaseBody: 'dodb Database Manager for Windows (.exe / .msi) and macOS (.dmg)'
-          releaseDraft: false
-          prerelease: false
-          args: ${{ matrix.args }}
+          NEXT_PUBLIC_APP_VERSION: ${{ steps.version.outputs.version }}
+        run: ./scripts/build-macos.sh "${{ steps.version.outputs.version }}"
 
-  update-homebrew-cask:
-    name: Update Homebrew Cask
-    needs: build-and-release
+      - name: Verify the artifact
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          DMG="dist/dodb_${VERSION}_universal.dmg"
+          [ -f "$DMG" ] || { echo "::error::$DMG was not produced"; exit 1; }
+
+          # The filename is a contract: Casks/dodb.rb and the cask job below both
+          # hardcode dodb_<version>_universal.dmg.
+          ARCHS=$(lipo -archs dist/dodb.app/Contents/MacOS/dodb)
+          echo "architectures: $ARCHS"
+          case "$ARCHS" in
+            *x86_64*arm64*|*arm64*x86_64*) ;;
+            *) echo "::warning::the DMG is named universal but the binary is only $ARCHS" ;;
+          esac
+          codesign --verify --verbose=1 dist/dodb.app
+          if codesign -dvv dist/dodb.app 2>&1 | grep -q 'Signature=adhoc'; then
+            echo "::warning::this release is ad-hoc signed; users must clear quarantine by hand"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dodb-macos
+          path: dist/dodb_*.dmg
+
+  windows:
+    name: Windows (.exe)
+    runs-on: windows-latest
     permissions:
       contents: write
-    runs-on: macos-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Generate & Update Homebrew Cask
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN || secrets.GH_PAT }}
-          TAG_NAME: ${{ github.ref_name }}
+      - uses: pnpm/action-setup@v3
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - run: pnpm install --no-frozen-lockfile
+
+      - name: Resolve version
+        id: version
+        shell: bash
         run: |
-          VERSION="${TAG_NAME#v}"
-          echo "Processing version: ${VERSION}"
+          RAW="${{ inputs.version || github.ref_name }}"
+          echo "version=${RAW#v}" >> "$GITHUB_OUTPUT"
 
-          DMG_URL="https://github.com/thutil/dodb/releases/download/${TAG_NAME}/dodb_${VERSION}_universal.dmg"
+      - name: Build frontend
+        shell: bash
+        env:
+          NEXT_PUBLIC_APP_VERSION: ${{ steps.version.outputs.version }}
+        run: pnpm build:ui
 
-          # Retry fetching DMG to calculate SHA256 checksum
-          MAX_RETRIES=15
-          COUNT=0
+      # CGO is required by the SQLite driver, and the Go toolchain on Windows
+      # runners has no C compiler by default.
+      - name: Set up MinGW
+        uses: msys2/setup-msys2@v2
+        with:
+          install: mingw-w64-x86_64-gcc
+          path-type: inherit
+
+      - name: Build
+        shell: bash
+        env:
+          CGO_ENABLED: '1'
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          go build -trimpath \
+            -ldflags "-H windowsgui -X main.version=${{ steps.version.outputs.version }}" \
+            -o "dist/dodb.exe" ./cmd/dodb
+          ls -la dist/
+
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          cd dist
+          # A zip rather than an installer: the Tauri build produced .msi/.exe
+          # via WiX and NSIS, and neither has been ported yet. Shipping a zip is
+          # honest; a broken installer would not be.
+          7z a "dodb_${VERSION}_windows_x64.zip" dodb.exe
+          ls -la
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dodb-windows
+          path: dist/dodb_*_windows_x64.zip
+
+  release:
+    name: Publish release
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.version && format('v{0}', inputs.version) || github.ref_name }}
+        run: |
+          set -euo pipefail
+          find artifacts -type f | sort
+          gh release create "$TAG" \
+            --title "dodb $TAG" \
+            --notes "dodb Database Manager for macOS (.dmg, universal) and Windows (.zip)." \
+            $(find artifacts -type f \( -name '*.dmg' -o -name '*.zip' \))
+
+  homebrew:
+    name: Update Homebrew cask
+    needs: [macos, release]
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Regenerate and publish the cask
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN || secrets.GH_PAT }}
+          VERSION: ${{ needs.macos.outputs.version }}
+        run: |
+          set -euo pipefail
+          TAG="v${VERSION}"
+          DMG_URL="https://github.com/thutil/dodb/releases/download/${TAG}/dodb_${VERSION}_universal.dmg"
+
+          # The release asset is not immediately fetchable, so this polls rather
+          # than failing on the first miss.
           SHA256=""
-
-          while [ $COUNT -lt $MAX_RETRIES ]; do
-            echo "Attempt $((COUNT+1)) to fetch DMG for SHA256..."
+          for attempt in $(seq 1 15); do
+            echo "attempt ${attempt}: fetching the DMG to checksum it"
             if curl --fail -sL "$DMG_URL" -o dodb.dmg; then
               SHA256=$(shasum -a 256 dodb.dmg | awk '{print $1}')
-              echo "Calculated SHA256: $SHA256"
               break
             fi
-            COUNT=$((COUNT+1))
             sleep 10
           done
-
           if [ -z "$SHA256" ]; then
-            echo "Failed to download DMG to compute SHA256"
+            echo "::error::could not download $DMG_URL to compute its checksum"
             exit 1
           fi
+          echo "sha256: $SHA256"
 
           mkdir -p Casks
-          cat <<EOF > Casks/dodb.rb
+          cat > Casks/dodb.rb <<EOF
           cask "dodb" do
             version "${VERSION}"
             sha256 "${SHA256}"
@@ -186,12 +297,18 @@ jobs:
               strategy :github_latest
             end
 
-            auto_updates true
+            # The app does not update itself yet, so brew must be allowed to
+            # replace it. Flip to true only once the in-app updater ships:
+            # claiming it now leaves \`brew upgrade --cask dodb\` users stale.
+            auto_updates false
             depends_on macos: ">= :big_sur"
 
             app "dodb.app"
 
             zap trash: [
+              # Saved connections and the master key that decrypts their
+              # passwords. Omitting this left credentials on disk after uninstall.
+              "~/.dodb",
               "~/Library/Application Support/com.thutil.dodb",
               "~/Library/Caches/com.thutil.dodb",
               "~/Library/Preferences/com.thutil.dodb.plist",
@@ -201,35 +318,24 @@ jobs:
           end
           EOF
 
-          echo "Generated Casks/dodb.rb:"
+          echo "--- generated cask ---"
           cat Casks/dodb.rb
+          brew style --cask Casks/dodb.rb || echo "::warning::brew style reported issues"
 
-          # Upload dodb.rb to GitHub Release assets
-          if command -v gh >/dev/null 2>&1; then
-            echo "Uploading Casks/dodb.rb to GitHub Release ${TAG_NAME}..."
-            gh release upload "${TAG_NAME}" Casks/dodb.rb --clobber || true
+          gh release upload "$TAG" Casks/dodb.rb --clobber || true
+
+          if [ -z "${TAP_TOKEN:-}" ]; then
+            echo "HOMEBREW_TAP_TOKEN not configured; skipping the tap push"
+            exit 0
           fi
 
-          # If tap token is provided, automatically push to Homebrew tap repository
-          if [ -n "$TAP_TOKEN" ]; then
-            echo "Pushing updated cask to thutil/homebrew-tap..."
-            git config --global user.name "github-actions[bot]"
-            git config --global user.email "github-actions[bot]@users.noreply.github.com"
-
-            git clone "https://x-access-token:${TAP_TOKEN}@github.com/thutil/homebrew-tap.git" tap_repo || \
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/thutil/homebrew-tap.git" tap_repo || \
             git clone "https://x-access-token:${TAP_TOKEN}@github.com/thutil/tap.git" tap_repo
-
-            if [ -d "tap_repo" ]; then
-              mkdir -p tap_repo/Casks
-              cp Casks/dodb.rb tap_repo/Casks/dodb.rb
-              cd tap_repo
-              git add Casks/dodb.rb
-              git commit -m "feat(cask): update dodb to v${VERSION}" || echo "No changes to commit"
-              git push origin main || git push origin master
-              echo "Successfully updated Homebrew tap repository!"
-            else
-              echo "Warning: Could not clone tap repository. Please ensure thutil/homebrew-tap or thutil/tap exists."
-            fi
-          else
-            echo "HOMEBREW_TAP_TOKEN not configured. Skipping tap push."
-          fi
+          mkdir -p tap_repo/Casks
+          cp Casks/dodb.rb tap_repo/Casks/dodb.rb
+          cd tap_repo
+          git add Casks/dodb.rb
+          git commit -m "feat(cask): update dodb to v${VERSION}" || { echo "nothing to commit"; exit 0; }
+          git push origin main || git push origin master

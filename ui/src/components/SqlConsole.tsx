@@ -21,6 +21,7 @@ import {
   getAutocompleteContext,
   predictInlineSqlCompletion,
 } from "../utils/sqlAutocomplete";
+import { saveTextFileAsync } from "../utils/saveFile";
 
 interface SqlConsoleProps {
   activeProfile?: ConnectionProfile | null;
@@ -675,15 +676,7 @@ const quoteTableIdentifier = (tbl: string): string => {
     const jsonStr = resultJsonFormat === "pretty"
       ? JSON.stringify(rowsData, null, 2)
       : JSON.stringify(rowsData);
-    const blob = new Blob([jsonStr], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `query_result_${Date.now()}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    saveTextFileAsync(`query_result_${Date.now()}.json`, jsonStr);
   };
 
   // Execution Engine for single or multiple SQL statements

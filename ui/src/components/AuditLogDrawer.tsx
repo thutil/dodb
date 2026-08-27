@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { X, Search, RefreshCw, Trash2, Download, CheckCircle2, XCircle, FileText } from "lucide-react";
 import { AuditLogEntry, ConnectionProfile } from "../types";
 import { auditLogger } from "../utils/auditLogger";
+import { saveTextFileAsync } from "../utils/saveFile";
 
 interface AuditLogDrawerProps {
   isOpen: boolean;
@@ -118,13 +119,7 @@ export const AuditLogDrawer: React.FC<AuditLogDrawerProps> = ({
       });
     }
 
-    const blob = new Blob([content], { type: mimeType });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
+    saveTextFileAsync(filename, content);
   };
 
   const formatTimestamp = (ts: string) => {

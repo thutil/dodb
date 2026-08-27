@@ -1,4 +1,3 @@
-import { Channel, invoke } from "@tauri-apps/api/core";
 import { ConnectionProfile } from "../types";
 import type {
   ImportFileInfo,
@@ -9,6 +8,66 @@ import type {
   CsvOptions,
   ImportFormat,
 } from "./importManager";
+
+/**
+ * Transport for the Go backend.
+ *
+ * Every call goes to POST /invoke/<command_name>, served by the Wails asset
+ * server in the packaged app and by cmd/dodb-devserver in the browser. The
+ * command names and argument objects are byte-identical to the ones the Tauri
+ * build used, so this file is the only place that changed -- no component knows
+ * the transport moved.
+ *
+ * A failed command returns a non-2xx with {"error": "..."} and is re-thrown as
+ * an Error, which is how Tauri's invoke() rejected too.
+ */
+/**
+ * Base URL for the backend.
+ *
+ * Empty in the packaged app, where the Wails asset server handles /invoke on the
+ * page's own origin. During development `next dev` serves the UI on its own port
+ * and cannot proxy (Next.js rewrites do not work under `output: "export"`), so
+ * NEXT_PUBLIC_DODB_API points at cmd/dodb-devserver instead.
+ */
+const API_BASE = process.env.NEXT_PUBLIC_DODB_API ?? "";
+
+/** Full URL for a command. */
+export function invokeUrl(command: string): string {
+  return `${API_BASE}/invoke/${command}`;
+}
+
+async function invoke<T = unknown>(
+  command: string,
+  args?: Record<string, unknown>,
+): Promise<T> {
+  const response = await fetch(invokeUrl(command), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(args ?? {}),
+  });
+
+  if (!response.ok) {
+    let message = `${command} failed (${response.status})`;
+    try {
+      const body = await response.json();
+      if (body && typeof body.error === "string") message = body.error;
+    } catch {
+      // A body that is not JSON leaves the status-code message in place.
+    }
+    throw new Error(message);
+  }
+
+  // A command returning nothing sends `null`; callers expecting void ignore it.
+  const text = await response.text();
+  return (text ? JSON.parse(text) : null) as T;
+}
+
+/** Progress channel for a streaming command. Replaces Tauri's `Channel`. */
+export class ProgressChannel<T> {
+  onmessage: (value: T) => void = () => {};
+  /** Set by runImport so cancellation can close the stream. */
+  close: () => void = () => {};
+}
 
 export const apiClient = {
   getProfiles: async () => {
@@ -109,6 +168,23 @@ export const apiClient = {
   selectFile: async (): Promise<string | null> => {
     return await invoke("select_file");
   },
+  /** App version, replacing @tauri-apps/api/app's getVersion(). */
+  appVersion: async (): Promise<string> => {
+    return await invoke("app_version");
+  },
+  /**
+   * Writes an export through a native save dialog.
+   *
+   * Replaces the `<a download>` + blob-URL pattern the UI used: under Wails'
+   * webview that click dispatches without error and produces no file, which the
+   * Phase 0 spike confirmed. Returns the chosen path, or null if cancelled.
+   */
+  saveTextFile: async (
+    suggestedName: string,
+    contents: string,
+  ): Promise<string | null> => {
+    return await invoke("save_text_file", { suggestedName, contents });
+  },
   // Data Import
   pickImportFile: async (): Promise<ImportFileInfo | null> => {
     return await invoke("pick_import_file");
@@ -123,15 +199,73 @@ export const apiClient = {
   ): Promise<ImportPreview> => {
     return await invoke("preview_import_file", { path, format, csv });
   },
-  // `onProgress` is a Tauri Channel: the Rust side pushes a tick per batch
-  // rather than the frontend polling for one.
+  /**
+   * Streams progress over Server-Sent Events rather than a Tauri Channel.
+   *
+   * The Go side pushes one `progress` event per batch and a final `report`
+   * event, so the loop still lives in the backend and the frontend never polls.
+   * importManager re-broadcasts each tick through its own observer, so nothing
+   * downstream of it notices the change.
+   */
   runImport: async (
     id: string,
     database: string,
     request: ImportRequest,
-    onProgress: Channel<ImportProgress>,
+    onProgress: ProgressChannel<ImportProgress>,
   ): Promise<ImportReport> => {
-    return await invoke("run_import", { id, database, request, onProgress });
+    const response = await fetch(invokeUrl("run_import"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id, database, request }),
+    });
+    if (!response.ok || !response.body) {
+      let message = `run_import failed (${response.status})`;
+      try {
+        const body = await response.json();
+        if (body && typeof body.error === "string") message = body.error;
+      } catch {
+        /* keep the status message */
+      }
+      throw new Error(message);
+    }
+
+    const reader = response.body.getReader();
+    onProgress.close = () => void reader.cancel();
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let report: ImportReport | null = null;
+    let failure: string | null = null;
+
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      // SSE frames are separated by a blank line.
+      let split: number;
+      while ((split = buffer.indexOf("\n\n")) >= 0) {
+        const frame = buffer.slice(0, split);
+        buffer = buffer.slice(split + 2);
+
+        let event = "message";
+        const dataLines: string[] = [];
+        for (const line of frame.split("\n")) {
+          if (line.startsWith("event:")) event = line.slice(6).trim();
+          else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+        }
+        if (!dataLines.length) continue;
+        const payload = JSON.parse(dataLines.join("\n"));
+
+        if (event === "progress") onProgress.onmessage(payload as ImportProgress);
+        else if (event === "report") report = payload as ImportReport;
+        else if (event === "error") failure = String(payload?.error ?? "import failed");
+      }
+    }
+
+    if (failure) throw new Error(failure);
+    if (!report) throw new Error("the import ended without reporting a result");
+    return report;
   },
   cancelImport: async (): Promise<void> => {
     return await invoke("cancel_import");
