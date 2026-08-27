@@ -7,8 +7,8 @@ on:
 
 env:
   GO_VERSION: '1.27'
-  NODE_VERSION: '20'
-  PNPM_VERSION: '9'
+  NODE_VERSION: '24'
+  PNPM_VERSION: '11'
 
 jobs:
   # The parity suite runs on Linux because it needs the fixture databases, and
