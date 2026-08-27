@@ -6,6 +6,7 @@ import {
   JoinType,
   VisualFilterOperator,
 } from "../types";
+import { quoteTableIdent } from "./ddlBuilder";
 
 export interface VisualTableSelection {
   tableName: string;
@@ -61,7 +62,7 @@ export function buildVisualSql({
   for (const tbl of tables) {
     if (tbl.selectedColumns.length === 0) continue;
     for (const col of tbl.selectedColumns) {
-      const qTbl = quoteIdent(tbl.tableName, dbType);
+      const qTbl = quoteTableIdent(tbl.tableName, dbType);
       const qCol = quoteIdent(col, dbType);
       if (hasMultipleTables) {
         if (colNameCount[col] > 1) {
@@ -82,10 +83,10 @@ export function buildVisualSql({
   let fromClause = "";
 
   if (tables.length === 1) {
-    fromClause = quoteIdent(tables[0].tableName, dbType);
+    fromClause = quoteTableIdent(tables[0].tableName, dbType);
   } else {
     const startTable = tables[0].tableName;
-    fromClause = quoteIdent(startTable, dbType);
+    fromClause = quoteTableIdent(startTable, dbType);
     joinedTableSet.add(startTable);
 
     const remainingJoins = [...joins];
@@ -108,7 +109,7 @@ export function buildVisualSql({
                   ? "RIGHT JOIN"
                   : "FULL OUTER JOIN";
 
-          fromClause += `\n${joinKeyword} ${quoteIdent(j.toTable, dbType)} ON ${quoteIdent(j.fromTable, dbType)}.${quoteIdent(j.fromColumn, dbType)} = ${quoteIdent(j.toTable, dbType)}.${quoteIdent(j.toColumn, dbType)}`;
+          fromClause += `\n${joinKeyword} ${quoteTableIdent(j.toTable, dbType)} ON ${quoteTableIdent(j.fromTable, dbType)}.${quoteIdent(j.fromColumn, dbType)} = ${quoteTableIdent(j.toTable, dbType)}.${quoteIdent(j.toColumn, dbType)}`;
           joinedTableSet.add(j.toTable);
           remainingJoins.splice(i, 1);
           progress = true;
@@ -123,7 +124,7 @@ export function buildVisualSql({
                   ? "RIGHT JOIN"
                   : "FULL OUTER JOIN";
 
-          fromClause += `\n${joinKeyword} ${quoteIdent(j.fromTable, dbType)} ON ${quoteIdent(j.toTable, dbType)}.${quoteIdent(j.toColumn, dbType)} = ${quoteIdent(j.fromTable, dbType)}.${quoteIdent(j.fromColumn, dbType)}`;
+          fromClause += `\n${joinKeyword} ${quoteTableIdent(j.fromTable, dbType)} ON ${quoteTableIdent(j.toTable, dbType)}.${quoteIdent(j.toColumn, dbType)} = ${quoteTableIdent(j.fromTable, dbType)}.${quoteIdent(j.fromColumn, dbType)}`;
           joinedTableSet.add(j.fromTable);
           remainingJoins.splice(i, 1);
           progress = true;
@@ -140,7 +141,7 @@ export function buildVisualSql({
     // Add any remaining unjoined tables (Cartesian / Cross join style)
     for (const tbl of tables) {
       if (!joinedTableSet.has(tbl.tableName)) {
-        fromClause += `,\n  ${quoteIdent(tbl.tableName, dbType)}`;
+        fromClause += `,\n  ${quoteTableIdent(tbl.tableName, dbType)}`;
         joinedTableSet.add(tbl.tableName);
       }
     }
@@ -155,7 +156,7 @@ export function buildVisualSql({
   if (validFilters.length > 0) {
     const filterClauses = validFilters.map((f, idx) => {
       const qCol = hasMultipleTables
-        ? `${quoteIdent(f.table, dbType)}.${quoteIdent(f.column, dbType)}`
+        ? `${quoteTableIdent(f.table, dbType)}.${quoteIdent(f.column, dbType)}`
         : quoteIdent(f.column, dbType);
 
       let cond = "";
@@ -192,7 +193,7 @@ export function buildVisualSql({
   if (validSorts.length > 0) {
     const sortItems = validSorts.map((s) => {
       const qCol = hasMultipleTables
-        ? `${quoteIdent(s.table, dbType)}.${quoteIdent(s.column, dbType)}`
+        ? `${quoteTableIdent(s.table, dbType)}.${quoteIdent(s.column, dbType)}`
         : quoteIdent(s.column, dbType);
       return `${qCol} ${s.direction}`;
     });
@@ -204,7 +205,7 @@ export function buildVisualSql({
     const idCol = baseCols.includes("id") ? "id" : baseCols[0];
     if (idCol) {
       const qCol = hasMultipleTables
-        ? `${quoteIdent(baseTable, dbType)}.${quoteIdent(idCol, dbType)}`
+        ? `${quoteTableIdent(baseTable, dbType)}.${quoteIdent(idCol, dbType)}`
         : quoteIdent(idCol, dbType);
       orderByClause = `\nORDER BY ${qCol} ASC`;
     }

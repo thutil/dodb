@@ -1,6 +1,7 @@
 import { saveTextFileAsync } from "./saveFile";
 import { apiClient } from "./apiClient";
-import { ColumnInfo } from "../types";
+import { ColumnInfo, DBType } from "../types";
+import { quoteIdent, quoteTableIdent } from "./ddlBuilder";
 
 export interface DumpConfig {
   profileId: string;
@@ -277,12 +278,19 @@ class DumpManager {
             this.notify();
 
             if (config.format === "sql") {
+              const dialect: DBType =
+                config.dbType === "mariadb" || config.dbType === "mysql"
+                  ? "mariadb"
+                  : config.dbType === "sqlite"
+                    ? "sqlite"
+                    : "postgres";
+
               // Generate SQL INSERT statements
               const colNames =
                 cols.length > 0
-                  ? cols.map((c) => `"${c.name}"`).join(", ")
+                  ? cols.map((c) => quoteIdent(c.name, dialect)).join(", ")
                   : Object.keys(rows[0])
-                      .map((k) => `"${k}"`)
+                      .map((k) => quoteIdent(k, dialect))
                       .join(", ");
               const valueLines: string[] = [];
 
@@ -303,7 +311,7 @@ class DumpManager {
               }
 
               chunks.push(
-                `INSERT INTO "${table}" (${colNames}) VALUES\n${valueLines.join(",\n")};\n`,
+                `INSERT INTO ${quoteTableIdent(table, dialect)} (${colNames}) VALUES\n${valueLines.join(",\n")};\n`,
               );
             } else {
               // Format as JSON stream

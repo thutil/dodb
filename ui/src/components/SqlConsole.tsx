@@ -7,13 +7,14 @@ import {
   Edit2, Edit3, Trash2, RotateCcw, Eye, Search, X, Plus, Key, Zap,
   GripHorizontal, ListFilter, History
 } from "lucide-react";
-import { QueryExecutionResult, ColumnInfo, ConnectionProfile } from "../types";
+import { QueryExecutionResult, ColumnInfo, ConnectionProfile, DBType } from "../types";
 import { PendingChanges, CommitResult } from "./DataGrid";
 import { isGeometryColumn, isGisData, formatGisSummary, parseGisToGeoJson } from "../utils/gisUtils";
 import { GisMapViewer, GisFeatureRecord } from "./GisMapViewer";
 import { splitSqlStatements, getStatementAtLine, stripCommentsAndTrim, extractTableFromSql, extractColumnMappingsFromSql } from "../utils/sqlUtils";
 import { apiClient } from "../utils/apiClient";
 import { getSharedSql, setSharedSql, useSharedSql } from "../utils/queryWorkspaceStore";
+import { quoteIdent, quoteTableIdent } from "../utils/ddlBuilder";
 import {
   DatabaseSchemaInfo,
   SchemaRelation,
@@ -646,17 +647,21 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
     });
   };
 
+  const dialect: DBType =
+    activeProfile?.type === "mariadb"
+      ? "mariadb"
+      : activeProfile?.type === "sqlite"
+        ? "sqlite"
+        : "postgres";
+
   // Helper to quote table name or schema.table correctly for SQL
-  const quoteTableIdentifier = (tbl: string): string => {
-    if (!tbl) return '"table_name"';
-    const parts = tbl.split(".");
-    return parts
-      .map((p) => {
-        const clean = p.replace(/^["`\[]+|["`\]]+$/g, "").trim();
-        return `"${clean}"`;
-      })
-      .join(".");
-  };
+  const quoteTableIdentifier = useCallback(
+    (tbl: string): string => {
+      if (!tbl) return quoteTableIdent("table_name", dialect);
+      return quoteTableIdent(tbl, dialect);
+    },
+    [dialect],
+  );
 
   // Discard / Rollback changes
   const handleRollback = () => {
@@ -746,10 +751,11 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
       keyCols.forEach((colKey) => {
         const mapping = colMappings[colKey];
         const realCol = mapping?.realColumn || colKey;
+        const qCol = quoteIdent(realCol, dialect);
         const v = orig[colKey];
-        if (v === null || v === undefined) whereParts.push(`"${realCol}" IS NULL`);
-        else if (typeof v === "number" || typeof v === "boolean") whereParts.push(`"${realCol}" = ${v}`);
-        else whereParts.push(`"${realCol}" = '${String(v).replace(/'/g, "''")}'`);
+        if (v === null || v === undefined) whereParts.push(`${qCol} IS NULL`);
+        else if (typeof v === "number" || typeof v === "boolean") whereParts.push(`${qCol} = ${v}`);
+        else whereParts.push(`${qCol} = '${String(v).replace(/'/g, "''")}'`);
       });
       if (whereParts.length > 0) {
         statements.push(`DELETE FROM ${tbl} WHERE ${whereParts.join(" AND ")};`);
@@ -771,10 +777,11 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
           throw new Error(`Cannot update computed/expression column "${colKey}".`);
         }
         const realCol = mapping?.realColumn || colKey;
+        const qCol = quoteIdent(realCol, dialect);
         const v = edits[colKey];
-        if (v === null || v === undefined) setParts.push(`"${realCol}" = NULL`);
-        else if (typeof v === "number" || typeof v === "boolean") setParts.push(`"${realCol}" = ${v}`);
-        else setParts.push(`"${realCol}" = '${String(v).replace(/'/g, "''")}'`);
+        if (v === null || v === undefined) setParts.push(`${qCol} = NULL`);
+        else if (typeof v === "number" || typeof v === "boolean") setParts.push(`${qCol} = ${v}`);
+        else setParts.push(`${qCol} = '${String(v).replace(/'/g, "''")}'`);
       });
 
       if (setParts.length === 0) return;
@@ -784,10 +791,11 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
       keyCols.forEach((colKey) => {
         const mapping = colMappings[colKey];
         const realCol = mapping?.realColumn || colKey;
+        const qCol = quoteIdent(realCol, dialect);
         const v = orig[colKey];
-        if (v === null || v === undefined) whereParts.push(`"${realCol}" IS NULL`);
-        else if (typeof v === "number" || typeof v === "boolean") whereParts.push(`"${realCol}" = ${v}`);
-        else whereParts.push(`"${realCol}" = '${String(v).replace(/'/g, "''")}'`);
+        if (v === null || v === undefined) whereParts.push(`${qCol} IS NULL`);
+        else if (typeof v === "number" || typeof v === "boolean") whereParts.push(`${qCol} = ${v}`);
+        else whereParts.push(`${qCol} = '${String(v).replace(/'/g, "''")}'`);
       });
 
       if (whereParts.length === 0) {
@@ -798,7 +806,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
     });
 
     return statements;
-  }, [result?.rows, statementResults, activeResultTab, sql, getTargetTable, deletedRowIndices, columns, editedCells]);
+  }, [result?.rows, statementResults, activeResultTab, sql, getTargetTable, quoteTableIdentifier, deletedRowIndices, columns, editedCells, dialect]);
 
   // Copy SQL changes
   const handleCopyChangesSql = () => {
@@ -1555,7 +1563,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
             {activeTable && (
               <button
                 className="btn btn-secondary btn-sm chip-btn"
-                onClick={() => handleSqlChange(`SELECT * FROM ${activeTable} LIMIT 50;`)}
+                onClick={() => handleSqlChange(`SELECT * FROM ${quoteTableIdent(activeTable, dialect)} LIMIT 50;`)}
                 title="Select 50 rows from active table"
               >
                 SELECT *
@@ -1566,7 +1574,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
               onClick={() =>
                 handleSqlChange(
                   activeTable
-                    ? `SELECT COUNT(*) AS total_count FROM ${activeTable};`
+                    ? `SELECT COUNT(*) AS total_count FROM ${quoteTableIdent(activeTable, dialect)};`
                     : "SELECT COUNT(*) FROM information_schema.tables;"
                 )
               }
@@ -1580,8 +1588,8 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                 onClick={() =>
                   handleSqlChange(
                     activeTable
-                      ? `SELECT * FROM ${activeTable} ORDER BY 1 DESC LIMIT 10;`
-                      : `SELECT * FROM ${tables[0]} LIMIT 10;`
+                      ? `SELECT * FROM ${quoteTableIdent(activeTable, dialect)} ORDER BY 1 DESC LIMIT 10;`
+                      : `SELECT * FROM ${quoteTableIdent(tables[0], dialect)} LIMIT 10;`
                   )
                 }
                 title="Order by recent rows"
@@ -2180,7 +2188,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
               const rawTbl = getTargetTable() || "table_name";
               const tbl = quoteTableIdentifier(rawTbl);
               const cols = Object.keys(contextMenu.row).filter((k) => contextMenu.row[k] !== undefined);
-              const colList = cols.map((c) => `"${c}"`).join(", ");
+              const colList = cols.map((c) => quoteIdent(c, dialect)).join(", ");
               const valList = cols.map((c) => {
                 const v = contextMenu.row[c];
                 if (v === null) return "NULL";
@@ -2343,7 +2351,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                     const rawTbl = getTargetTable() || "table_name";
                     const tbl = quoteTableIdentifier(rawTbl);
                     const cols = Object.keys(inspectRowModal.row).filter((k) => inspectRowModal.row[k] !== undefined);
-                    const colList = cols.map((c) => `"${c}"`).join(", ");
+                    const colList = cols.map((c) => quoteIdent(c, dialect)).join(", ");
                     const valList = cols.map((c) => {
                       const v = inspectRowModal.row[c];
                       if (v === null) return "NULL";

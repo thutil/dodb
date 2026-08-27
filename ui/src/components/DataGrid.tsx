@@ -38,7 +38,8 @@ import {
   Eye,
   Crosshair,
 } from "lucide-react";
-import { ColumnInfo, TableRowData, ConnectionProfile, ColumnFilter, FilterOperator } from "../types";
+import { ColumnInfo, TableRowData, ConnectionProfile, ColumnFilter, FilterOperator, DBType } from "../types";
+import { quoteIdent, quoteTableIdent } from "../utils/ddlBuilder";
 import {
   isGeometryColumn,
   isGisData,
@@ -142,6 +143,13 @@ export const DataGrid: React.FC<DataGridProps> = ({
   onCreateTable,
   language = "en",
 }) => {
+  const dialect: DBType =
+    activeProfile?.type === "mariadb"
+      ? "mariadb"
+      : activeProfile?.type === "sqlite"
+        ? "sqlite"
+        : "postgres";
+
   const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
 
   // View Mode: Table vs JSON vs GIS Map
@@ -315,7 +323,8 @@ export const DataGrid: React.FC<DataGridProps> = ({
       navigator.clipboard.writeText(`${header}\n${body}`);
       setBatchCopied("Copied CSV");
     } else if (format === "sql") {
-      const colList = columns.map((c) => `"${c.name}"`).join(", ");
+      const colList = columns.map((c) => quoteIdent(c.name, dialect)).join(", ");
+      const qTable = tableName ? quoteTableIdent(tableName, dialect) : "table_name";
       const lines = selRows
         .map((r) => {
           const valList = columns
@@ -326,7 +335,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
               return `'${String(v).replace(/'/g, "''")}'`;
             })
             .join(", ");
-          return `INSERT INTO "${tableName}" (${colList}) VALUES (${valList});`;
+          return `INSERT INTO ${qTable} (${colList}) VALUES (${valList});`;
         })
         .join("\n");
       navigator.clipboard.writeText(lines);
@@ -916,7 +925,8 @@ export const DataGrid: React.FC<DataGridProps> = ({
 
       if (type === "sql") {
         const colNames = columns.map((c) => c.name);
-        const quotedCols = colNames.map((c) => `"${c.replace(/"/g, '""')}"`).join(", ");
+        const quotedCols = colNames.map((c) => quoteIdent(c, dialect)).join(", ");
+        const qTable = tableName ? quoteTableIdent(tableName, dialect) : "table_name";
         const sqlStatements = allJsonRows.map((row) => {
           const vals = colNames.map((c) => {
             const val = row[c];
@@ -925,9 +935,9 @@ export const DataGrid: React.FC<DataGridProps> = ({
             if (typeof val === "object") return `'${JSON.stringify(val).replace(/'/g, "''")}'`;
             return `'${String(val).replace(/'/g, "''")}'`;
           }).join(", ");
-          return `INSERT INTO "${tableName}" (${quotedCols}) VALUES (${vals});`;
+          return `INSERT INTO ${qTable} (${quotedCols}) VALUES (${vals});`;
         });
-        const sqlText = `-- Table: ${tableName}\n-- Exported: ${new Date().toISOString()}\n-- Rows: ${allJsonRows.length}\n\n${sqlStatements.join("\n")}`;
+        const sqlText = `-- Table: ${tableName || "table_name"}\n-- Exported: ${new Date().toISOString()}\n-- Rows: ${allJsonRows.length}\n\n${sqlStatements.join("\n")}`;
         setExportContent(sqlText);
         return;
       }
@@ -2216,14 +2226,15 @@ export const DataGrid: React.FC<DataGridProps> = ({
                 className="context-menu-item"
                 onClick={() => {
                   const cols = Object.keys(contextMenu.row).filter((k) => contextMenu.row[k] !== undefined);
-                  const colList = cols.map((c) => `"${c}"`).join(", ");
+                  const colList = cols.map((c) => quoteIdent(c, dialect)).join(", ");
+                  const qTable = tableName ? quoteTableIdent(tableName, dialect) : "table_name";
                   const valList = cols.map((c) => {
                     const v = contextMenu.row[c];
                     if (v === null) return "NULL";
                     if (typeof v === "number" || typeof v === "boolean") return String(v);
                     return `'${String(v).replace(/'/g, "''")}'`;
                   }).join(", ");
-                  const sql = `INSERT INTO "${tableName}" (${colList}) VALUES (${valList});`;
+                  const sql = `INSERT INTO ${qTable} (${colList}) VALUES (${valList});`;
                   navigator.clipboard.writeText(sql);
                   setContextMenu(null);
                 }}
@@ -2395,14 +2406,15 @@ export const DataGrid: React.FC<DataGridProps> = ({
                   className="btn btn-secondary btn-sm"
                   onClick={() => {
                     const cols = Object.keys(inspectRowModal.row).filter((k) => inspectRowModal.row[k] !== undefined);
-                    const colList = cols.map((c) => `"${c}"`).join(", ");
+                    const colList = cols.map((c) => quoteIdent(c, dialect)).join(", ");
+                    const qTable = tableName ? quoteTableIdent(tableName, dialect) : "table_name";
                     const valList = cols.map((c) => {
                       const v = inspectRowModal.row[c];
                       if (v === null) return "NULL";
                       if (typeof v === "number" || typeof v === "boolean") return String(v);
                       return `'${String(v).replace(/'/g, "''")}'`;
                     }).join(", ");
-                    const sql = `INSERT INTO "${tableName}" (${colList}) VALUES (${valList});`;
+                    const sql = `INSERT INTO ${qTable} (${colList}) VALUES (${valList});`;
                     navigator.clipboard.writeText(sql);
                   }}
                   title="Copy full row as SQL INSERT statement"

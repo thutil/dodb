@@ -202,28 +202,49 @@ jobs:
           CGO_ENABLED: '1'
         run: |
           set -euo pipefail
+          # Checked before building: without cgo the SQLite driver still
+          # registers itself and only fails on the first query, so a
+          # misconfigured runner would ship a binary that looks fine and breaks
+          # in the user's hands. internal/dbcore/cgo_required.go also fails the
+          # compile, but naming the compiler here says why.
+          gcc --version | head -1
+          [ "$(go env CGO_ENABLED)" = "1" ] || { echo "::error::CGO is off; SQLite would ship as a stub"; exit 1; }
+
+          # Compile Windows application icon into syso so it links into dodb.exe
+          windres -i build/windows/app.rc -O coff -o cmd/dodb/rsrc_windows_amd64.syso -I build/windows
+
           mkdir -p dist
           go build -trimpath \
             -ldflags "-H windowsgui -X main.version=${{ steps.version.outputs.version }}" \
             -o "dist/dodb.exe" ./cmd/dodb
           ls -la dist/
 
-      - name: Package
-        shell: bash
+      - name: Package installer (Inno Setup)
+        shell: pwsh
         run: |
-          set -euo pipefail
-          VERSION="${{ steps.version.outputs.version }}"
-          cd dist
-          # A zip rather than an installer: the Tauri build produced .msi/.exe
-          # via WiX and NSIS, and neither has been ported yet. Shipping a zip is
-          # honest; a broken installer would not be.
-          7z a "dodb_${VERSION}_windows_x64.zip" dodb.exe
-          ls -la
+          $ErrorActionPreference = 'Stop'
+          $version = '${{ steps.version.outputs.version }}'
+          if (-not (Get-Command iscc.exe -ErrorAction SilentlyContinue)) {
+            choco install innosetup --no-progress
+            $env:Path += ";C:\Program Files (x86)\Inno Setup 6"
+          }
+          & iscc.exe "/DMyAppVersion=$version" build\windows\installer.iss
+
+      - name: Package portable zip
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '${{ steps.version.outputs.version }}'
+          $zip = "dist/dodb_${version}_windows_x64.zip"
+          Compress-Archive -Path dist/dodb.exe -DestinationPath $zip -Force
+          Get-ChildItem dist | Format-Table Name, Length
 
       - uses: actions/upload-artifact@v4
         with:
           name: dodb-windows
-          path: dist/dodb_*_windows_x64.zip
+          path: |
+            dist/dodb_*_windows_x64.zip
+            dist/dodb_*_windows_x64_setup.exe
 
   release:
     name: Publish release
@@ -245,7 +266,7 @@ jobs:
         run: |
           set -euo pipefail
           find artifacts -type f | sort
-          FILES=$(find artifacts -type f \( -name '*.dmg' -o -name '*.zip' \))
+          FILES=$(find artifacts -type f \( -name '*.dmg' -o -name '*.zip' -o -name '*.exe' \))
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG already exists; updating assets with --clobber"
             gh release upload "$TAG" --clobber $FILES
@@ -253,7 +274,7 @@ jobs:
             echo "Creating release $TAG..."
             gh release create "$TAG" \
               --title "dodb $TAG" \
-              --notes "dodb Database Manager for macOS (.dmg, universal) and Windows (.zip)." \
+              --notes "dodb Database Manager for macOS (.dmg, universal) and Windows (.exe installer, .zip)." \
               $FILES
           fi
 
