@@ -53,7 +53,7 @@ interface GisMapViewerProps {
   isInline?: boolean;
 }
 
-type BasemapStyle = "dark" | "light" | "osm" | "satellite";
+type BasemapStyle = "osm" | "satellite";
 
 const BASEMAP_STORAGE_KEY = "dodb_gis_selected_basemap";
 const TILE_CACHE_NAME = "dodb-map-tiles-v1";
@@ -75,7 +75,7 @@ function initTileCacheProtocol() {
           }
           const resp = await fetch(rawUrl, { signal: abortController.signal });
           if (resp.ok) {
-            cache.put(rawUrl, resp.clone()).catch(() => {});
+            cache.put(rawUrl, resp.clone()).catch(() => { });
             const buffer = await resp.arrayBuffer();
             return { data: buffer };
           }
@@ -96,26 +96,6 @@ function initTileCacheProtocol() {
 }
 
 const BASEMAP_TILES: Record<BasemapStyle, { name: string; tiles: string[]; maxzoom: number; attribution: string }> = {
-  dark: {
-    name: "Dark Matter",
-    tiles: [
-      "cached-tile://https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
-      "cached-tile://https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
-      "cached-tile://https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png",
-    ],
-    maxzoom: 19,
-    attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; OpenStreetMap',
-  },
-  light: {
-    name: "Light Positron",
-    tiles: [
-      "cached-tile://https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png",
-      "cached-tile://https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png",
-      "cached-tile://https://c.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png",
-    ],
-    maxzoom: 19,
-    attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; OpenStreetMap',
-  },
   osm: {
     name: "OpenStreetMap",
     tiles: [
@@ -160,9 +140,9 @@ export const GisMapViewer: React.FC<GisMapViewerProps> = ({
       try {
         const saved = localStorage.getItem(BASEMAP_STORAGE_KEY) as BasemapStyle;
         if (saved && BASEMAP_TILES[saved]) return saved;
-      } catch {}
+      } catch { }
     }
-    return "dark";
+    return "osm";
   });
   const [copiedFormat, setCopiedFormat] = useState<string | null>(null);
   const [activeFeature, setActiveFeature] = useState<GisFeatureRecord | null>(null);
@@ -307,7 +287,7 @@ export const GisMapViewer: React.FC<GisMapViewerProps> = ({
     if (typeof window !== "undefined") {
       try {
         localStorage.setItem(BASEMAP_STORAGE_KEY, newStyle);
-      } catch {}
+      } catch { }
     }
 
     const map = mapInstanceRef.current;
@@ -338,8 +318,8 @@ export const GisMapViewer: React.FC<GisMapViewerProps> = ({
       const beforeLayerId = map.getLayer("gis-polygons-fill")
         ? "gis-polygons-fill"
         : map.getLayer("gis-lines")
-        ? "gis-lines"
-        : undefined;
+          ? "gis-lines"
+          : undefined;
 
       map.addLayer(
         {
@@ -548,6 +528,8 @@ export const GisMapViewer: React.FC<GisMapViewerProps> = ({
       `dodb_gis_export_${Date.now()}.geojson`,
       JSON.stringify(geojson, null, 2),
     );
+    setCopiedFormat("export");
+    setTimeout(() => setCopiedFormat(null), 2000);
   };
 
   const currentWkt = features.length === 1 ? geoJsonToWkt(features[0].geometry) : "";
@@ -577,8 +559,6 @@ export const GisMapViewer: React.FC<GisMapViewerProps> = ({
               onChange={(e) => handleSwitchBasemap(e.target.value as BasemapStyle)}
               title="Select Basemap Layer"
             >
-              <option value="dark">Dark Matter</option>
-              <option value="light">Positron Light</option>
               <option value="osm">OpenStreetMap</option>
               <option value="satellite">Satellite Imagery</option>
             </select>
@@ -613,8 +593,8 @@ export const GisMapViewer: React.FC<GisMapViewerProps> = ({
               onClick={handleExportGeoJson}
               title="Export all geometries to .geojson file"
             >
-              <Download size={12} />
-              <span>Export</span>
+              {copiedFormat === "export" ? <Check size={12} color="#10b981" /> : <Download size={12} />}
+              <span>{copiedFormat === "export" ? "Exported!" : "Export"}</span>
             </button>
           )}
 
