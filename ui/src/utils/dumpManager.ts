@@ -1,3 +1,4 @@
+import { saveTextFileAsync } from "./saveFile";
 import { apiClient } from "./apiClient";
 import { ColumnInfo } from "../types";
 
@@ -22,7 +23,6 @@ export interface DumpProgress {
   elapsedSeconds: number;
   fileName?: string;
   fileSizeBytes?: number;
-  downloadUrl?: string;
   error?: string;
 }
 
@@ -30,6 +30,8 @@ type ProgressListener = (progress: DumpProgress) => void;
 
 class DumpManager {
   private isCancelled = false;
+  /** The finished dump, held until the user picks a destination. */
+  private currentDumpText = "";
   private isPaused = false;
   private currentProgress: DumpProgress = {
     status: "idle",
@@ -350,7 +352,10 @@ class DumpManager {
       const mimeType =
         config.format === "sql" ? "application/sql" : "application/json";
       const blob = new Blob(chunks, { type: mimeType });
-      const downloadUrl = URL.createObjectURL(blob);
+      // The dump text is kept, not a blob URL: the file is written by the
+      // backend through a native save dialog, so there is nothing for the
+      // webview to download. See utils/saveFile.ts.
+      this.currentDumpText = chunks.join("");
 
       this.currentProgress = {
         ...this.currentProgress,
@@ -358,7 +363,6 @@ class DumpManager {
         percentage: 100,
         rowsExported: totalRowsExported,
         fileSizeBytes: blob.size,
-        downloadUrl,
         elapsedSeconds: Math.floor((Date.now() - startTime) / 1000),
       };
       this.notify();
@@ -380,15 +384,10 @@ class DumpManager {
     }
   }
 
+  /** Writes the finished dump through the host's native save dialog. */
   public downloadCurrentBlob() {
-    if (!this.currentProgress.downloadUrl || !this.currentProgress.fileName)
-      return;
-    const a = document.createElement("a");
-    a.href = this.currentProgress.downloadUrl;
-    a.download = this.currentProgress.fileName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    if (!this.currentDumpText || !this.currentProgress.fileName) return;
+    saveTextFileAsync(this.currentProgress.fileName, this.currentDumpText);
   }
 }
 

@@ -24,6 +24,7 @@ import {
   getGisCenter,
   formatGisSummary,
 } from "../utils/gisUtils";
+import { saveTextFileAsync } from "../utils/saveFile";
 
 export interface GisFeatureRecord {
   id: string | number;
@@ -543,13 +544,10 @@ export const GisMapViewer: React.FC<GisMapViewerProps> = ({
         geometry: f.geometry,
       })),
     };
-    const blob = new Blob([JSON.stringify(geojson, null, 2)], { type: "application/geo+json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `dodb_gis_export_${Date.now()}.geojson`;
-    a.click();
-    URL.revokeObjectURL(url);
+    saveTextFileAsync(
+      `dodb_gis_export_${Date.now()}.geojson`,
+      JSON.stringify(geojson, null, 2),
+    );
   };
 
   const currentWkt = features.length === 1 ? geoJsonToWkt(features[0].geometry) : "";

@@ -1,0 +1,172 @@
+{
+  "_comment": [
+    "The parity query list. Both src-tauri/examples/gen_query_golden.rs and",
+    "internal/dbcore's tests read THIS file, so neither side can drift onto a",
+    "different statement. Each case names the fixture targets it applies to.",
+    "",
+    "Targets: postgres | mysql | mariadb | sqlite.",
+    "'mysql' and 'mariadb' are separate targets even though both use the",
+    "SupportedDB 'mariadb' tag, because the two servers decode differently.",
+    "A case with a 'table' models the table-scoped get_rows path, where the backend can look up column metadata. Cases without one model arbitrary console SQL, where it cannot."
+  ],
+  "cases": [
+    {
+      "name": "hazards-all",
+      "why": "every decoding hazard at once: numeric precision, boolean vs int, zoned vs naive timestamps, json, bytes, geometry, nulls",
+      "targets": [
+        "postgres",
+        "mysql",
+        "mariadb",
+        "sqlite"
+      ],
+      "sql": "SELECT * FROM hazards ORDER BY id",
+      "table": "hazards"
+    },
+    {
+      "name": "count-star",
+      "why": "MySQL returns COUNT(*) as BIGINT UNSIGNED; it must not surface as a string or a bool",
+      "targets": [
+        "postgres",
+        "mysql",
+        "mariadb",
+        "sqlite"
+      ],
+      "sql": "SELECT COUNT(*) FROM hazards",
+      "table": "hazards"
+    },
+    {
+      "name": "duplicate-column-labels",
+      "why": "unique_col_name: a join exposing id and label twice must yield id, label, id_1, label_1 in that order",
+      "targets": [
+        "postgres",
+        "mysql",
+        "mariadb",
+        "sqlite"
+      ],
+      "sql": "SELECT p.a AS id, p.label, c.id, c.pa AS label FROM parent p JOIN child c ON c.pa = p.a ORDER BY p.a"
+    },
+    {
+      "name": "boolean-vs-integer",
+      "why": "the is_boolean_column rule in isolation: one declared boolean, one integer holding the same 0/1",
+      "targets": [
+        "postgres",
+        "mysql",
+        "mariadb",
+        "sqlite"
+      ],
+      "sql": "SELECT id, is_true, int_not_bool FROM hazards ORDER BY id",
+      "table": "hazards"
+    },
+    {
+      "name": "numeric-precision",
+      "why": "a numeric that loses digits if it is routed through a float must arrive as a string",
+      "targets": [
+        "postgres",
+        "mysql",
+        "mariadb",
+        "sqlite"
+      ],
+      "sql": "SELECT id, exact_money, big_int FROM hazards ORDER BY id",
+      "table": "hazards"
+    },
+    {
+      "name": "expression-labels",
+      "why": "computed columns with no table behind them, plus a NULL literal",
+      "targets": [
+        "postgres",
+        "mysql",
+        "mariadb",
+        "sqlite"
+      ],
+      "sql": "SELECT 1 AS one, 'txt' AS s, NULL AS nothing_at_all"
+    },
+    {
+      "name": "pg-arrays",
+      "why": "Postgres text[] and bigint[] decode to JSON arrays, not to strings",
+      "targets": [
+        "postgres"
+      ],
+      "sql": "SELECT id, tags, nums FROM hazards ORDER BY id",
+      "table": "hazards"
+    },
+    {
+      "name": "pg-geometry",
+      "why": "PostGIS geometry and geography have no driver type; they must fall through to uppercase hex, never to null",
+      "targets": [
+        "postgres"
+      ],
+      "sql": "SELECT id, geom, geog FROM hazards ORDER BY id",
+      "table": "hazards"
+    },
+    {
+      "name": "pg-enum-uuid-json",
+      "why": "enum, uuid and jsonb each take a distinct branch of the decode chain",
+      "targets": [
+        "postgres"
+      ],
+      "sql": "SELECT id, feeling, ident, doc FROM hazards ORDER BY id",
+      "table": "hazards"
+    },
+    {
+      "name": "pg-schema-qualified",
+      "why": "a table outside the public schema",
+      "targets": [
+        "postgres"
+      ],
+      "sql": "SELECT * FROM extra.elsewhere ORDER BY id"
+    },
+    {
+      "name": "my-unsigned-and-geometry",
+      "why": "BIGINT UNSIGNED above i64::MAX, plus MySQL Spatial geometry falling through to hex",
+      "targets": [
+        "mysql",
+        "mariadb"
+      ],
+      "sql": "SELECT id, ubig_int, geom, blob_col FROM hazards ORDER BY id",
+      "table": "hazards"
+    },
+    {
+      "name": "my-enum-json",
+      "why": "MySQL enum arrives as a string and json as a parsed value",
+      "targets": [
+        "mysql",
+        "mariadb"
+      ],
+      "sql": "SELECT id, feeling, doc FROM hazards ORDER BY id",
+      "table": "hazards"
+    },
+    {
+      "name": "sqlite-affinity",
+      "why": "SQLite stores whatever it was given; the declared type is all the decoder has to go on",
+      "targets": [
+        "sqlite"
+      ],
+      "sql": "SELECT id, exact_money, real_num, dt_naive, d, raw, geom FROM hazards ORDER BY id",
+      "table": "hazards"
+    },
+    {
+      "name": "empty-result",
+      "why": "a zero-row result must be an empty array, not null",
+      "targets": [
+        "postgres",
+        "mysql",
+        "mariadb",
+        "sqlite"
+      ],
+      "sql": "SELECT * FROM hazards WHERE id = -1",
+      "table": "hazards"
+    },
+    {
+      "name": "timestamp-precision",
+      "why": "chrono to_rfc3339 writes +00:00 and auto-sizes the fraction to 0/3/6/9 places; Go's time.RFC3339 writes Z and trims. Both differences are invisible without this case.",
+      "targets": [
+        "postgres",
+        "mysql",
+        "mariadb",
+        "sqlite"
+      ],
+      "sql": "SELECT * FROM ts_precision ORDER BY id",
+      "table": "ts_precision"
+    }
+  ]
+}

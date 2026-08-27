@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Written by hand because Wails, unlike Tauri's bundler, generates none of this.
+  Keep CFBundleIdentifier as com.thutil.dodb: it is the keychain service name in
+  internal/crypto and every zap path in Casks/dodb.rb, so changing it orphans
+  both.
+-->
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>dodb</string>
+    <key>CFBundleDisplayName</key>
+    <string>dodb</string>
+    <key>CFBundleExecutable</key>
+    <string>dodb</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.thutil.dodb</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>{{VERSION}}</string>
+    <key>CFBundleVersion</key>
+    <string>{{VERSION}}</string>
+    <key>CFBundleIconFile</key>
+    <string>icon</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleSignature</key>
+    <string>????</string>
+    <!-- Matches the Cask's `depends_on macos: ">= :big_sur"`. -->
+    <key>LSMinimumSystemVersion</key>
+    <string>11.0</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <!-- The webview needs to reach map tiles and the Monaco CDN. Without this
+         key, an app built against a recent SDK has no outbound HTTP at all. -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
+    </dict>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>SQLite database</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.database</string>
+            </array>
+        </dict>
+    </array>
+</dict>
+</plist>

@@ -5,42 +5,199 @@ on:
   push:
     branches: [main]
 
+env:
+  GO_VERSION: '1.27'
+  NODE_VERSION: '24'
+  PNPM_VERSION: '11'
+
 jobs:
+  # The parity suite runs on Linux because it needs the fixture databases, and
+  # GitHub's macOS runners have no Docker. What it proves is engine behaviour, not
+  # host behaviour, so Linux is the right place for it.
   test:
-    name: Test & typecheck
-    runs-on: macos-latest
+    name: Go tests + parity
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        # postgis/postgis publishes no arm64 manifest; imresamu/postgis is the
+        # multi-arch rebuild of the same Dockerfile.
+        image: imresamu/postgis:17-3.5
+        env:
+          POSTGRES_USER: dodb
+          POSTGRES_PASSWORD: dodb
+          POSTGRES_DB: dodb_fixture
+        ports: ['55432:5432']
+        options: >-
+          --health-cmd "pg_isready -U dodb -d dodb_fixture"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: dodb
+          MYSQL_DATABASE: dodb_fixture
+        ports: ['53306:3306']
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pdodb"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+
+      mariadb:
+        image: mariadb:11
+        env:
+          MARIADB_ROOT_PASSWORD: dodb
+          MARIADB_DATABASE: dodb_fixture
+        ports: ['53307:3306']
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 5s --health-timeout 5s --health-retries 30
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v3
+      - uses: actions/setup-go@v5
         with:
-          version: 9
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l $(git ls-files '*.go'))
+          if [ -n "$unformatted" ]; then
+            echo "::error::these files are not gofmt'd:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      # cmd/dodb is the only package that imports Wails, and Wails on Linux needs
+      # GTK4 and WebKitGTK development headers through pkg-config. dodb ships no
+      # Linux build, so installing several hundred megabytes of GUI toolkit to
+      # type-check a binary nobody runs would be pure waste -- it is vetted and
+      # built on macOS instead. Everything else, including the whole backend and
+      # cmd/dodb-devserver, is toolkit-free and compiles here.
+      #
+      # assets.go embeds ui/out at compile time. ui/out/EMBED_PLACEHOLDER keeps
+      # the pattern satisfiable without a frontend build, and assets_test.go
+      # skips itself here; the macOS job below runs it for real.
+      - name: Resolve the toolkit-free packages
+        id: pkgs
+        run: echo "list=$(go list ./... | grep -v '/cmd/dodb$' | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
+
+      - run: go vet ${{ steps.pkgs.outputs.list }}
+
+      # Service containers start before the repo is checked out, so the fixture
+      # schemas cannot be mounted as init scripts and are applied here instead.
+      - name: Seed fixture databases
+        run: |
+          set -euo pipefail
+          # xxd is used by the UTF-8 check below. It ships on GitHub's runners today,
+          # but naming it here removes a dependency on the image's contents.
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client mysql-client sqlite3 xxd
+
+          PGPASSWORD=dodb psql -h 127.0.0.1 -p 55432 -U dodb -d dodb_fixture \
+            -v ON_ERROR_STOP=1 -f testdata/fixtures/postgres.sql
+
+          # --default-character-set matters: the client's default is latin1 on
+          # some images, which double-encodes every UTF-8 byte in the file and
+          # would teach the parity suite to expect mojibake.
+          mysql -h 127.0.0.1 -P 53306 -uroot -pdodb --default-character-set=utf8mb4 \
+            dodb_fixture < testdata/fixtures/mysql.sql
+          mysql -h 127.0.0.1 -P 53307 -uroot -pdodb --default-character-set=utf8mb4 \
+            dodb_fixture < testdata/fixtures/mysql.sql
+
+          sqlite3 testdata/fixtures/fixture.sqlite < testdata/fixtures/sqlite.sql
+
+      - name: Verify the fixtures really hold UTF-8
+        run: |
+          set -euo pipefail
+          expected=$(printf 'ทดสอบภาษาไทย' | xxd -p | tr -d '\n' | tr 'a-f' 'A-F')
+          for port in 53306 53307; do
+            got=$(mysql -h 127.0.0.1 -P "$port" -uroot -pdodb -N --default-character-set=binary \
+              dodb_fixture -e "select hex(plain_text) from hazards where id=1")
+            if [ "$got" != "$expected" ]; then
+              echo "::error::port $port stored mangled UTF-8; the seed step's charset is wrong"
+              exit 1
+            fi
+          done
+          echo "UTF-8 round-trip OK on both MySQL and MariaDB"
+
+      - name: Go tests
+        run: go test -count=1 ${{ steps.pkgs.outputs.list }}
+
+      - name: Parity against the recorded Rust output
+        run: go test -count=1 -v ./internal/dbcore -run TestParity
+
+  # Proves the desktop app still compiles and bundles. Kept separate from the
+  # tests so a macOS runner is not held up waiting on database containers.
+  build:
+    name: Build macOS app
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v3
         with:
-          node-version: 20
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'pnpm'
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-go@v5
         with:
-          workspaces: src-tauri
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
 
-      - name: Install dependencies
-        run: |
-          pnpm install --no-frozen-lockfile
-          pnpm --prefix ui install --no-frozen-lockfile
+      - run: pnpm install --no-frozen-lockfile
 
-      # Runs tsc + next lint, and produces ui/out, which tauri-build expects.
+      # Runs tsc and next lint, and produces ui/out, which assets.go embeds.
       - name: Build frontend (typecheck + lint)
         run: pnpm build:ui
 
-      - name: Rust tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+      # The one package the Linux job cannot compile.
+      - name: Vet the Wails entrypoint
+        run: go vet ./cmd/dodb
+
+      - name: Build the app bundle
+        run: ./scripts/build-macos.sh 0.0.0-ci
+
+      # Run here rather than in the Go job: this is the only place a real
+      # frontend bundle exists, so it is the only place the embed can be checked.
+      - name: Verify the embedded frontend
+        run: go test -count=1 -v ./ -run 'TestFrontend|TestNaiveEmbed'
+
+      - name: Check the bundle is well formed
+        run: |
+          set -euo pipefail
+          lipo -archs dist/dodb.app/Contents/MacOS/dodb
+          codesign --verify --verbose=1 dist/dodb.app
+          test -f dist/dodb.app/Contents/Info.plist
+          # Generated from assets/icon.png. Without it the app is a generic
+          # Finder document, which looks enough like a failed build that people
+          # report it as one.
+          test -f dist/dodb.app/Contents/Resources/icon.icns
+
+          # assets.go embeds ui/out at compile time, and go:embed silently skips
+          # directories starting with "_" unless the pattern says all:. A binary
+          # missing these chunks launches to a blank window, so the shipped
+          # artifact is checked, not just the source tree.
+          #
+          # grep -c rather than -q: -q exits at the first match and closes the
+          # pipe, `strings` then dies of EPIPE, and under `pipefail` that becomes
+          # the pipeline's status -- which reported "not embedded" for a binary
+          # that contained the chunk four times.
+          chunk=$(basename "$(ls ui/out/_next/static/chunks/*.js | head -1)")
+          found=$(strings dist/dodb.app/Contents/MacOS/dodb | grep -c "$chunk" || true)
+          if [ "$found" -eq 0 ]; then
+            echo "::error::the frontend is not embedded in the binary (check the all: prefix in assets.go)"
+            exit 1
+          fi
+          echo "bundle OK ($chunk appears $found times)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dodb-macos-ci
+          path: dist/dodb_0.0.0-ci_universal.dmg
+          retention-days: 7

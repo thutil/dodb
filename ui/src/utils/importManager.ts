@@ -1,4 +1,4 @@
-import { Channel } from "@tauri-apps/api/core";
+import { ProgressChannel } from "./apiClient";
 import { apiClient } from "./apiClient";
 
 // ==========================================
@@ -167,7 +167,7 @@ type ProgressListener = (progress: ImportProgress) => void;
  * export, so progress survives closing the wizard or switching views.
  *
  * Unlike the export side the loop itself lives in Rust: `start` opens a Tauri
- * Channel, forwards every tick to the subscribers, and awaits a single
+ * progress stream, forwards every tick to the subscribers, and awaits a single
  * `run_import` call. There is no pause/resume because the backend has no way
  * to hold a transaction open indefinitely.
  */
@@ -270,7 +270,7 @@ class ImportManager {
       this.notify();
     }, 1000);
 
-    const channel = new Channel<ImportTick>();
+    const channel = new ProgressChannel<ImportTick>();
     channel.onmessage = (tick) => {
       // A late tick must not resurrect a finished job.
       if (this.currentProgress.status !== "running") return;

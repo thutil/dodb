@@ -10,8 +10,8 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Windows-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Platform macOS and Windows" />
-  <img src="https://img.shields.io/badge/Tauri-v2-24C8D8?style=for-the-badge&logo=tauri&logoColor=white" alt="Tauri 2" />
-  <img src="https://img.shields.io/badge/Rust-SQLx-DEA584?style=for-the-badge&logo=rust&logoColor=white" alt="Rust" />
+  <img src="https://img.shields.io/badge/Wails-v3-DF0000?style=for-the-badge&logo=go&logoColor=white" alt="Wails 3" />
+  <img src="https://img.shields.io/badge/Go-pgx%20%C2%B7%20database%2Fsql-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go" />
   <img src="https://img.shields.io/badge/Next.js-16%20Turbopack-000000?style=for-the-badge&logo=next.js&logoColor=white" alt="Next.js" />
   <img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="License MIT" />
 </p>
@@ -26,7 +26,7 @@
 
 **dodb** is a blazing-fast, lightweight native database client for **macOS & Windows** built around a core philosophy: **working with a database should start with seeing it clearly.**
 
-No bloated Java runtimes, no slow Electron shells, and no hidden cloud proxies. Just pure Rust performance, crisp native aesthetics, and modern visual workflow tools.
+No bloated Java runtimes, no slow Electron shells, and no hidden cloud proxies. Just a small native binary, crisp native aesthetics, and modern visual workflow tools.
 
 ---
 
@@ -37,7 +37,7 @@ No bloated Java runtimes, no slow Electron shells, and no hidden cloud proxies. 
 - 🕸️ **Visual ER Diagrams** — Auto-generated entity relationship diagrams with foreign key topology and relationship highlighting.
 - ⚡ **Monaco SQL Console** — Full-featured code editor with smart autocomplete, highlight-to-run (`Cmd + Enter`), and multi-tab results.
 - 📝 **Virtual DataGrid & Inline Editing** — Instant double-click edits, staged transactional mutation bar, multi-select rows (`Cmd + Click`), and batch actions.
-- 🔒 **Local & Direct Connection** — Direct socket connections. Saved passwords are encrypted with AES-256-GCM and the master key lives in the macOS Keychain or Windows Credential Manager, not in a file. Zero telemetry.
+- 🔒 **Local & Direct Connection** — Direct socket connections with local AES-256-GCM encryption for saved passwords. Zero telemetry.
 
 ---
 
@@ -156,16 +156,18 @@ Explore and edit database records with safety and speed.
 
 ```
 dodb/
-├── src-tauri/          # High-performance native Rust core
-│   ├── src/            # Database drivers (SQLx), encrypted storage, IPC
-│   └── Cargo.toml
+├── cmd/dodb/           # The desktop app (Wails)
+├── cmd/dodb-devserver/ # The same commands over plain HTTP, for development
+├── internal/           # Database drivers, encrypted storage, import, IPC
+├── build/darwin/       # Info.plist, entitlements
+└── scripts/            # build-macos.sh, sync-version.js
 └── ui/                 # Modern Next.js frontend
     ├── src/components/ # Visual Query Builder, MapLibre GIS, Monaco Console, DataGrid
     └── src/pages/
 ```
 
-- **Desktop Shell**: Tauri 2 (Lightweight, low memory footprint, native WebKit on macOS / WebView2 on Windows)
-- **Application Core**: Rust · Tokio · SQLx (Direct async pooling)
+- **Desktop Shell**: Wails v3 (Lightweight, low memory footprint, native WebKit on macOS / WebView2 on Windows)
+- **Application Core**: Go · pgx · database/sql (Direct connection pooling)
 - **Visual Canvas**: `@xyflow/react` (React Flow)
 - **Map Engine**: MapLibre GL + Custom Offline Tile Cache Protocol
 - **Editor**: Monaco Editor
@@ -234,8 +236,9 @@ Download the `.msi` or `.exe` installer from [GitHub Releases](https://github.co
 
 - **macOS**: macOS 11.0+ (Apple Silicon `aarch64` or Intel `x86_64`)
 - **Windows**: Windows 10/11 (64-bit)
-- Rust Toolchain: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
+- Go 1.25+ (`brew install go`) — must be a **native** build for your CPU, since CGO is required
 - Node.js 18+ and `pnpm`: `npm install -g pnpm`
+- Xcode command line tools (`xcode-select --install`)
 
 ### Start Development Server
 
@@ -247,17 +250,27 @@ cd dodb
 # Install dependencies
 pnpm install
 
-# Start development app (UI + Tauri)
-pnpm dev
+# Check your toolchain can build this
+make doctor
+
+# Fast loop: backend + Next.js dev server, in a browser
+make dev
+
+# Or the real desktop window
+make run
 ```
 
-### Build Production Release (.dmg & .app on macOS / .msi & .exe on Windows)
+### Build Production Release
 
 ```bash
-pnpm build
+make build VERSION=0.3.0
 ```
 
-The compiled bundles will be generated under `src-tauri/target/release/bundle/`.
+Produces `dist/dodb.app` and `dist/dodb_0.3.0_universal.dmg` (a universal binary
+for Apple Silicon and Intel).
+
+📖 **Full guide, including tests, the parity suite, signing and releasing:
+[docs/BUILD.md](docs/BUILD.md)**
 
 ---
 

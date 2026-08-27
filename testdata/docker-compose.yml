@@ -1,0 +1,55 @@
+# Reproducible fixtures for the Rust -> Go parity suite.
+#
+# The point of these is not "a database to talk to" — it is a database holding
+# the values that make row->JSON decoding go wrong: numerics that lose precision
+# through a float, tinyint(1) that is not a boolean, timestamps with and without
+# a zone, geometry that no Go driver knows how to decode, and column labels that
+# collide across a join.
+#
+#   docker compose -f testdata/docker-compose.yml up -d
+#
+services:
+  postgres:
+    # postgis/postgis publishes no arm64 manifest; imresamu/postgis is the
+    # multi-arch rebuild of the same Dockerfile and boots identically.
+    image: imresamu/postgis:17-3.5
+    environment:
+      POSTGRES_PASSWORD: dodb
+      POSTGRES_USER: dodb
+      POSTGRES_DB: dodb_fixture
+    ports: ["55432:5432"]
+    volumes:
+      - ./fixtures/postgres.sql:/docker-entrypoint-initdb.d/10-fixture.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dodb -d dodb_fixture"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: dodb
+      MYSQL_DATABASE: dodb_fixture
+    ports: ["53306:3306"]
+    volumes:
+      - ./fixtures/mysql.sql:/docker-entrypoint-initdb.d/10-fixture.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-pdodb"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+
+  mariadb:
+    image: mariadb:11
+    environment:
+      MARIADB_ROOT_PASSWORD: dodb
+      MARIADB_DATABASE: dodb_fixture
+    ports: ["53307:3306"]
+    volumes:
+      - ./fixtures/mysql.sql:/docker-entrypoint-initdb.d/10-fixture.sql:ro
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 3s
+      timeout: 5s
+      retries: 30

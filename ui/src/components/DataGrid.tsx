@@ -49,6 +49,7 @@ import {
 } from "../utils/gisUtils";
 import { GisMapViewer, GisFeatureRecord } from "./GisMapViewer";
 import { Language, t } from "../utils/i18n";
+import { saveTextFileAsync } from "../utils/saveFile";
 
 
 export interface PendingChanges {
@@ -873,15 +874,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
   const handleDownloadJson = (filename?: string, content?: string) => {
     const dataToDownload = content || formattedJson;
     const name = filename || `${tableName || "data"}_page_${page + 1}.json`;
-    const blob = new Blob([dataToDownload], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = name;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    saveTextFileAsync(name, dataToDownload);
   };
 
   const handleFetchExport = async (type: "sql" | "csv" | "json") => {
@@ -920,14 +913,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
   };
 
   const downloadExportFile = () => {
-    const element = document.createElement("a");
-    const mimeType = exportType === "json" ? "application/json" : "text/plain";
-    const file = new Blob([exportContent], { type: mimeType });
-    element.href = URL.createObjectURL(file);
-    element.download = `${tableName}_export.${exportType}`;
-    document.body.appendChild(element);
-    element.click();
-    document.body.removeChild(element);
+    saveTextFileAsync(`${tableName}_export.${exportType}`, exportContent);
   };
 
   // Filter Management Functions

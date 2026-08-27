@@ -1,0 +1,11 @@
+This file keeps the //go:embed patterns in assets.go and assets_test.go
+satisfiable. It is written by ui/scripts/write-embed-placeholder.mjs, which runs
+at the end of the frontend build, and a copy is committed so that a fresh clone
+can run `go build ./...` before the frontend has ever been built.
+
+Without it, the Go toolchain fails with
+
+    pattern all:ui/out: no matching files found
+
+which says nothing about the real cause. Do not rename it to a dot-file: a plain
+`//go:embed ui/out` skips those, and assets_test.go relies on that pattern.

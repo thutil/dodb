@@ -1,6 +1,6 @@
 {
   "name": "dodb",
-  "version": "0.2.4",
+  "version": "0.3.0",
   "productName": "dodb",
   "description": "dodb - Modern Multi-Platform Database Manager for Postgres, MySQL, MariaDB & SQLite",
   "author": {
@@ -10,16 +10,17 @@
   "scripts": {
     "build:ui": "pnpm --filter dodb-ui build",
     "ui:dev": "pnpm --filter dodb-ui dev",
-    "dev": "tauri dev",
-    "build": "tauri build",
+    "dev": "make dev",
+    "run": "make run",
+    "build": "make build",
+    "test": "make test",
+    "doctor": "make doctor",
     "version:sync": "node scripts/sync-version.js"
   },
   "dependencies": {
     "uuid": "^14.0.2"
   },
   "devDependencies": {
-    "@tauri-apps/api": "^2.11.1",
-    "@tauri-apps/cli": "^2.11.4",
     "typescript": "^5.8.3"
   },
   "pnpm": {

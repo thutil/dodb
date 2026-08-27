@@ -18,5 +18,5 @@
     }
   },
   "include": ["ui/**/*.ts", "ui/**/*.tsx"],
-  "exclude": ["node_modules", "src-tauri", "dist-builds"]
+  "exclude": ["node_modules", "dist", "dist-builds"]
 }

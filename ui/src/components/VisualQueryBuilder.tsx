@@ -70,6 +70,7 @@ import { isGeometryColumn } from "../utils/gisUtils";
 import { extractColumnMappingsFromSql } from "../utils/sqlUtils";
 import { setSharedSql, useSharedSql } from "../utils/queryWorkspaceStore";
 import { PendingChanges, CommitResult } from "./DataGrid";
+import { saveTextFileAsync } from "../utils/saveFile";
 
 interface VisualQueryBuilderProps {
   activeProfile: ConnectionProfile | null;
@@ -2258,14 +2259,12 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
         })
         .join(",")
     );
-    const csvContent = "data:text/csv;charset=utf-8," + [csvHeader, ...csvRows].join("\n");
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `visual_query_${Date.now()}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    // Written as plain text. The old data: URI had to be encodeURI'd, which
+    // mangled any value containing a # or a %.
+    saveTextFileAsync(
+      `visual_query_${Date.now()}.csv`,
+      [csvHeader, ...csvRows].join("\n"),
+    );
   };
 
   // Sort conditions handlers

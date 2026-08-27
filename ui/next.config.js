@@ -7,8 +7,10 @@ const { execSync } = require("child_process");
  * 1. CI / GitHub Actions environment variables (GITHUB_REF_NAME / GITHUB_REF / NEXT_PUBLIC_APP_VERSION)
  * 2. Exact Git tag match (git describe --tags --exact-match)
  * 3. Root package.json version
- * 4. Tauri config version (src-tauri/tauri.conf.json)
- * 5. UI package.json version
+ * 4. UI package.json version
+ *
+ * Note this is only a FALLBACK for the version shown in the UI. The packaged
+ * app asks the backend (apiClient.appVersion), which reports the -ldflags stamp.
  */
 function resolveAppVersion() {
   // 1. Explicit env variable
@@ -52,19 +54,7 @@ function resolveAppVersion() {
     }
   } catch (e) {}
 
-  // 6. Read from src-tauri/tauri.conf.json
-  try {
-    const tauriConfPath = path.resolve(
-      __dirname,
-      "../src-tauri/tauri.conf.json",
-    );
-    if (fs.existsSync(tauriConfPath)) {
-      const tauriConf = JSON.parse(fs.readFileSync(tauriConfPath, "utf8"));
-      if (tauriConf.version) return tauriConf.version.trim();
-    }
-  } catch (e) {}
-
-  // 7. Read from ui/package.json
+  // 6. Read from ui/package.json
   try {
     const uiPkg = require("./package.json");
     if (uiPkg.version) return uiPkg.version.trim();
