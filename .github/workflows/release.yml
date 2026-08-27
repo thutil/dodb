@@ -137,9 +137,14 @@ jobs:
             *) echo "::warning::the DMG is named universal but the binary is only $ARCHS" ;;
           esac
           codesign --verify --verbose=1 dist/dodb.app
-          if codesign -dvv dist/dodb.app 2>&1 | grep -q 'Signature=adhoc'; then
-            echo "::warning::this release is ad-hoc signed; users must clear quarantine by hand"
-          fi
+          # Captured first rather than piped into `grep -q`: that exits at the
+          # first match, and the resulting EPIPE becomes the pipeline's status
+          # under `pipefail`, inverting the test.
+          SIGINFO=$(codesign -dvv dist/dodb.app 2>&1 || true)
+          case "$SIGINFO" in
+            *Signature=adhoc*)
+              echo "::warning::this release is ad-hoc signed; users must clear quarantine by hand" ;;
+          esac
 
       - uses: actions/upload-artifact@v4
         with:

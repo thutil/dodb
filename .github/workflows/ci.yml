@@ -173,15 +173,28 @@ jobs:
           set -euo pipefail
           lipo -archs dist/dodb.app/Contents/MacOS/dodb
           codesign --verify --verbose=1 dist/dodb.app
+          test -f dist/dodb.app/Contents/Info.plist
+          # Generated from assets/icon.png. Without it the app is a generic
+          # Finder document, which looks enough like a failed build that people
+          # report it as one.
+          test -f dist/dodb.app/Contents/Resources/icon.icns
+
           # assets.go embeds ui/out at compile time, and go:embed silently skips
           # directories starting with "_" unless the pattern says all:. A binary
-          # missing these chunks launches to a blank window.
+          # missing these chunks launches to a blank window, so the shipped
+          # artifact is checked, not just the source tree.
+          #
+          # grep -c rather than -q: -q exits at the first match and closes the
+          # pipe, `strings` then dies of EPIPE, and under `pipefail` that becomes
+          # the pipeline's status -- which reported "not embedded" for a binary
+          # that contained the chunk four times.
           chunk=$(basename "$(ls ui/out/_next/static/chunks/*.js | head -1)")
-          if ! strings dist/dodb.app/Contents/MacOS/dodb | grep -q "$chunk"; then
+          found=$(strings dist/dodb.app/Contents/MacOS/dodb | grep -c "$chunk" || true)
+          if [ "$found" -eq 0 ]; then
             echo "::error::the frontend is not embedded in the binary (check the all: prefix in assets.go)"
             exit 1
           fi
-          echo "bundle OK"
+          echo "bundle OK ($chunk appears $found times)"
 
       - uses: actions/upload-artifact@v4
         with:
