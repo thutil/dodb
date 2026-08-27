@@ -22,6 +22,12 @@ func (s *Service) SaveProfile(profile model.ConnectionProfile) (model.Connection
 	if !profile.Type.Valid() {
 		return model.ConnectionProfile{}, fmt.Errorf("unknown connection type %q", profile.Type)
 	}
+
+	// Keep password in memory for the current session if user opted out of saving to disk.
+	if !profile.SavePassword && profile.Password != "" {
+		s.DB.SetRuntimePassword(profile.ID, profile.Password)
+	}
+
 	existing, err := profilestore.Load()
 	if err != nil {
 		return model.ConnectionProfile{}, err
@@ -64,6 +70,7 @@ func (s *Service) DeleteProfile(id string) error {
 	if err := profilestore.Save(kept); err != nil {
 		return err
 	}
+	s.DB.ClearRuntimePassword(id)
 	s.DB.ClosePools(id)
 	return nil
 }
@@ -111,6 +118,11 @@ func (s *Service) ClearRuntimePassword(id string) error {
 func (s *Service) TestConnection(profile model.ConnectionProfile) (bool, error) {
 	if !profile.Type.Valid() {
 		return false, fmt.Errorf("unknown connection type %q", profile.Type)
+	}
+	if profile.Password == "" && profile.ID != "" {
+		if resolved, err := s.DB.ResolveProfile(profile.ID); err == nil && resolved.Password != "" {
+			profile.Password = resolved.Password
+		}
 	}
 	// A throwaway State keeps the probe out of the real pool cache, so a
 	// successful test does not leave a pool behind under a profile id that may

@@ -75,3 +75,43 @@ func TestSaveProfile_ReplacesSessionPrefix(t *testing.T) {
 		t.Fatalf("expected new persistent ID, got %q", saved.ID)
 	}
 }
+
+func TestSaveProfile_SavePasswordFalse(t *testing.T) {
+	svc := setupTestService(t)
+
+	p := model.ConnectionProfile{
+		Name:         "No Save Password Profile",
+		Type:         model.Mariadb,
+		Host:         "localhost",
+		Port:         3306,
+		User:         "root",
+		Password:     "supersecret",
+		SavePassword: false,
+	}
+
+	saved, err := svc.SaveProfile(p)
+	if err != nil {
+		t.Fatalf("SaveProfile failed: %v", err)
+	}
+
+	// Verify disk storage omits password
+	profiles, err := svc.GetProfiles()
+	if err != nil {
+		t.Fatalf("GetProfiles failed: %v", err)
+	}
+	if len(profiles) != 1 {
+		t.Fatalf("expected 1 profile, got %d", len(profiles))
+	}
+	if profiles[0].Password != "" {
+		t.Fatalf("expected empty password on disk, got %q", profiles[0].Password)
+	}
+
+	// Verify ResolveProfile gets in-memory password
+	resolved, err := svc.DB.ResolveProfile(saved.ID)
+	if err != nil {
+		t.Fatalf("ResolveProfile failed: %v", err)
+	}
+	if resolved.Password != "supersecret" {
+		t.Fatalf("expected in-memory password %q, got %q", "supersecret", resolved.Password)
+	}
+}

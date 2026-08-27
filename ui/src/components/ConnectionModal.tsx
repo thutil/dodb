@@ -338,6 +338,10 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
       "keepAlive", "savePassword",
     ];
     return fields.some((f) => {
+      // If savePassword is false on both saved profile and form, typing runtime password does not make the form dirty.
+      if (f === "password" && saved.savePassword === false && current.savePassword === false) {
+        return false;
+      }
       const a = current[f] ?? "";
       const b = saved[f] ?? "";
       return String(a) !== String(b);
@@ -350,6 +354,9 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
     setConnecting(true);
     setTestResult(null);
     try {
+      if (!ephemeral && data.id && data.savePassword === false && data.password && onUnlockProfile) {
+        await onUnlockProfile(data.id, data.password);
+      }
       const res = await onTestConnection(data);
       if (!res.success) {
         setTestResult({ success: false, text: `Connection failed: ${res.error || "Could not reach database"}` });

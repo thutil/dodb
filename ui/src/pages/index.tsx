@@ -626,6 +626,7 @@ export default function Home() {
     }
 
     if (profileData.savePassword === false && profileData.password) {
+      await apiClient.setRuntimePassword(saved.id, profileData.password);
       unlockedIdsRef.current.add(saved.id);
     }
 
