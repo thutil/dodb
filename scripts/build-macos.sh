@@ -106,7 +106,7 @@ STAGE="$DIST/stage"
 mkdir -p "$STAGE"
 cp -R "$APP" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
-hdiutil create -volname "dodb" -srcfolder "$STAGE" -ov -format ULFO "$DMG" >/dev/null
+hdiutil create -volname "dodb" -srcfolder "$STAGE" -ov -format UDZO -fs HFS+ "$DMG" >/dev/null
 rm -rf "$STAGE"
 
 if [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_PASSWORD:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ]; then
