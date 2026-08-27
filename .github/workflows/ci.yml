@@ -69,6 +69,9 @@ jobs:
             exit 1
           fi
 
+      # assets.go embeds ui/out at compile time. ui/out/EMBED_PLACEHOLDER keeps
+      # the pattern satisfiable without a frontend build, and assets_test.go
+      # skips itself here; the macOS job below runs it for real.
       - run: go vet ./...
 
       # Service containers start before the repo is checked out, so the fixture
@@ -141,6 +144,11 @@ jobs:
 
       - name: Build the app bundle
         run: ./scripts/build-macos.sh 0.0.0-ci
+
+      # Run here rather than in the Go job: this is the only place a real
+      # frontend bundle exists, so it is the only place the embed can be checked.
+      - name: Verify the embedded frontend
+        run: go test -count=1 -v ./ -run 'TestFrontend|TestNaiveEmbed'
 
       - name: Check the bundle is well formed
         run: |

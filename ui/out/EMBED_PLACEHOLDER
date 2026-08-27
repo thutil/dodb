@@ -1,0 +1,19 @@
+This file exists so that the //go:embed patterns in assets.go and
+assets_test.go always have something to match.
+
+Without it, `go build ./...` and `go test ./...` fail on a fresh clone with
+
+    pattern all:ui/out: no matching files found
+
+which says nothing about the real cause: the frontend has not been built yet.
+go:embed is resolved at compile time and needs at least one matching file, so a
+placeholder is the only way to keep the Go toolchain usable before
+`pnpm build:ui` has run.
+
+The name deliberately does not start with a dot. A plain `//go:embed ui/out`
+(which assets_test.go uses to prove the `all:` prefix is necessary) skips
+dot-prefixed files, so a .gitkeep here would leave that pattern with nothing to
+match and break the build in a second, more confusing way.
+
+The real bundle lands beside this file and is gitignored. assets_test.go skips
+itself when only this placeholder is present, and says what to run.

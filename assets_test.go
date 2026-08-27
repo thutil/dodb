@@ -31,8 +31,26 @@ func count(t *testing.T, f fs.FS, pred func(string) bool) int {
 	return n
 }
 
+// placeholderName is the committed file that keeps go:embed satisfied before the
+// frontend has been built. See ui/out/EMBED_PLACEHOLDER.
+const placeholderName = "EMBED_PLACEHOLDER"
+
+// bundleIsPlaceholderOnly reports that no real frontend has been built yet.
+//
+// Skipping rather than failing here is deliberate: `go test ./...` on a fresh
+// clone should tell you what to run, not look like a broken repo. The macOS CI
+// job builds the frontend first, so this test does run for real somewhere.
+func bundleIsPlaceholderOnly(t *testing.T, f fs.FS) bool {
+	t.Helper()
+	real := count(t, f, func(p string) bool { return p != placeholderName })
+	return real == 0
+}
+
 func TestFrontendIncludesNextChunks(t *testing.T) {
 	f := Frontend()
+	if bundleIsPlaceholderOnly(t, f) {
+		t.Skip("no frontend bundle embedded yet - run `pnpm build:ui` (or `make ui`) first")
+	}
 
 	if _, err := fs.Stat(f, "index.html"); err != nil {
 		t.Fatalf("index.html missing from embedded bundle: %v", err)
@@ -47,6 +65,10 @@ func TestFrontendIncludesNextChunks(t *testing.T) {
 }
 
 func TestNaiveEmbedDropsNextDirectory(t *testing.T) {
+	if bundleIsPlaceholderOnly(t, Frontend()) {
+		t.Skip("no frontend bundle embedded yet - run `pnpm build:ui` (or `make ui`) first")
+	}
+
 	naive := count(t, naiveBundle, func(string) bool { return true })
 	full := count(t, bundle, func(string) bool { return true })
 

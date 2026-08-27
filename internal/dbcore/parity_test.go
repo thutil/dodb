@@ -350,6 +350,13 @@ func TestParitySQLite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Checked explicitly: the fixture is generated from sqlite.sql rather than
+	// checked in, and sql.Open on SQLite succeeds lazily even for a path that
+	// does not exist -- it would only fail later, as a confusing query error.
+	if _, statErr := os.Stat(abs); statErr != nil {
+		t.Skip("sqlite fixture not built - run `make fixtures-up`")
+	}
+
 	db, err := sql.Open("sqlite3", abs)
 	if err != nil {
 		t.Skipf("sqlite fixture unavailable: %v", err)

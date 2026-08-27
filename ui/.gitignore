@@ -15,7 +15,10 @@
 
 # next.js
 /.next/
-/out/
+# One placeholder is committed so //go:embed always matches;
+# see ui/out/EMBED_PLACEHOLDER.
+/out/*
+!/out/EMBED_PLACEHOLDER
 
 # production
 /build

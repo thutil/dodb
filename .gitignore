@@ -7,7 +7,10 @@ dist/
 dist-dmg/
 dist-builds/
 ui/.next/
-ui/out/
+# The bundle is generated, but one placeholder is committed so that
+# //go:embed all:ui/out always matches -- see ui/out/.gitkeep.
+ui/out/*
+!ui/out/EMBED_PLACEHOLDER
 
 # Environment and Data
 .env

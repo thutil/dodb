@@ -61,6 +61,12 @@ standard setup.
   names begin with `_`, and the Next.js export puts every chunk, style and font
   under `ui/out/_next`. Dropping `all:` compiles fine and ships a **blank
   window**. `assets_test.go` fails if anyone removes it.
+- one placeholder file, `ui/out/EMBED_PLACEHOLDER`, is committed. `go:embed` is
+  resolved at compile time and needs at least one match, so without it
+  `go build ./...` on a fresh clone fails with `pattern all:ui/out: no matching
+  files found` — an error that says nothing about the real cause. With it, the Go
+  toolchain works before the frontend has ever been built, and `assets_test.go`
+  skips itself and tells you to run `make ui`.
 
 ---
 
