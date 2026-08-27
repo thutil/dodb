@@ -202,23 +202,34 @@ jobs:
           CGO_ENABLED: '1'
         run: |
           set -euo pipefail
+          # Checked before building: without cgo the SQLite driver still
+          # registers itself and only fails on the first query, so a
+          # misconfigured runner would ship a binary that looks fine and breaks
+          # in the user's hands. internal/dbcore/cgo_required.go also fails the
+          # compile, but naming the compiler here says why.
+          gcc --version | head -1
+          [ "$(go env CGO_ENABLED)" = "1" ] || { echo "::error::CGO is off; SQLite would ship as a stub"; exit 1; }
+
           mkdir -p dist
           go build -trimpath \
             -ldflags "-H windowsgui -X main.version=${{ steps.version.outputs.version }}" \
             -o "dist/dodb.exe" ./cmd/dodb
           ls -la dist/
 
+      # A zip rather than an installer: the Tauri build produced .msi/.exe through
+      # WiX and NSIS and neither has been ported. Shipping a zip is honest; a
+      # half-working installer would not be.
+      #
+      # Compress-Archive rather than 7z: it is part of PowerShell itself, so this
+      # does not depend on what the runner image happens to preinstall.
       - name: Package
-        shell: bash
+        shell: pwsh
         run: |
-          set -euo pipefail
-          VERSION="${{ steps.version.outputs.version }}"
-          cd dist
-          # A zip rather than an installer: the Tauri build produced .msi/.exe
-          # via WiX and NSIS, and neither has been ported yet. Shipping a zip is
-          # honest; a broken installer would not be.
-          7z a "dodb_${VERSION}_windows_x64.zip" dodb.exe
-          ls -la
+          $ErrorActionPreference = 'Stop'
+          $version = '${{ steps.version.outputs.version }}'
+          $zip = "dist/dodb_${version}_windows_x64.zip"
+          Compress-Archive -Path dist/dodb.exe -DestinationPath $zip -Force
+          Get-ChildItem dist | Format-Table Name, Length
 
       - uses: actions/upload-artifact@v4
         with:

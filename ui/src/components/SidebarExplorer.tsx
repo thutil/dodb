@@ -365,7 +365,7 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
                 className="icon-action-btn"
                 onClick={onCreateTable}
                 title={t("sidebarCreateTable", language)}
-                disabled={!activeDatabase}
+                disabled={mounted ? !activeDatabase : true}
                 suppressHydrationWarning
               >
                 <Plus size={12} />

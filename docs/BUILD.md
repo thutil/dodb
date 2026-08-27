@@ -174,11 +174,32 @@ make clean    # remove dist/, ui/out, ui/.next
 
 CI builds it (`.github/workflows/release.yml`), producing a **zip**, not an
 installer: the Tauri build made `.msi`/`.exe` through WiX and NSIS and neither
-has been ported. Locally, on Windows with MinGW installed:
+has been ported.
+
+You can cross-compile it from macOS, which is how the Windows build was verified
+without a Windows machine:
 
 ```bash
+brew install mingw-w64
 pnpm build:ui
-CGO_ENABLED=1 go build -trimpath -ldflags "-H windowsgui -X main.version=0.3.0" -o dist/dodb.exe ./cmd/dodb
+
+CGO_ENABLED=1 GOOS=windows GOARCH=amd64 \
+  CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ \
+  go build -trimpath -ldflags "-H windowsgui -X main.version=0.3.0" \
+  -o dist/dodb.exe ./cmd/dodb
+
+file dist/dodb.exe    # PE32+ executable (GUI) x86-64, for MS Windows
+```
+
+`CGO_ENABLED=1` is not optional. Wails drives WebView2 through pure Go and the
+Postgres and MySQL drivers are pure Go, so a cgo-less build **compiles cleanly** —
+and then the SQLite driver registers itself, `sql.Open` succeeds, and the first
+query fails with *"Binary was compiled with 'CGO_ENABLED=0', go-sqlite3 requires
+cgo to work. This is a stub"*. A user would find that, not CI. `internal/dbcore/cgo_required.go`
+exists to turn it into a compile error instead:
+
+```
+internal/dbcore/cgo_required.go:24:2: undefined: dodbMustBeBuiltWithCGO_ENABLED_1
 ```
 
 ---
