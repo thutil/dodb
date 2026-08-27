@@ -238,17 +238,24 @@ jobs:
         with:
           path: artifacts
 
-      - name: Create the release
+      - name: Create or update the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ inputs.version && format('v{0}', inputs.version) || github.ref_name }}
         run: |
           set -euo pipefail
           find artifacts -type f | sort
-          gh release create "$TAG" \
-            --title "dodb $TAG" \
-            --notes "dodb Database Manager for macOS (.dmg, universal) and Windows (.zip)." \
-            $(find artifacts -type f \( -name '*.dmg' -o -name '*.zip' \))
+          FILES=$(find artifacts -type f \( -name '*.dmg' -o -name '*.zip' \))
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; updating assets with --clobber"
+            gh release upload "$TAG" --clobber $FILES
+          else
+            echo "Creating release $TAG..."
+            gh release create "$TAG" \
+              --title "dodb $TAG" \
+              --notes "dodb Database Manager for macOS (.dmg, universal) and Windows (.zip)." \
+              $FILES
+          fi
 
   homebrew:
     name: Update Homebrew cask
