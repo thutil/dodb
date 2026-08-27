@@ -24,7 +24,7 @@ same targets, so old muscle memory still works.
 
 | Tool | Version | Why |
 |---|---|---|
-| Go | 1.24+ | 1.24 is the first with `crypto/pbkdf2` and `crypto/hkdf` in the standard library, which the master-key code uses |
+| Go | 1.25+ | the floor comes from a dependency, not from this code; `go.mod` records it, so `go build` will tell you if yours is too old |
 | Node | 18+ | Next.js 16 |
 | pnpm | 9+ | workspace resolution |
 | Xcode command line tools | any recent | CGO needs a C compiler, and the macOS bundle needs `codesign` / `lipo` |

@@ -69,17 +69,31 @@ jobs:
             exit 1
           fi
 
+      # cmd/dodb is the only package that imports Wails, and Wails on Linux needs
+      # GTK4 and WebKitGTK development headers through pkg-config. dodb ships no
+      # Linux build, so installing several hundred megabytes of GUI toolkit to
+      # type-check a binary nobody runs would be pure waste -- it is vetted and
+      # built on macOS instead. Everything else, including the whole backend and
+      # cmd/dodb-devserver, is toolkit-free and compiles here.
+      #
       # assets.go embeds ui/out at compile time. ui/out/EMBED_PLACEHOLDER keeps
       # the pattern satisfiable without a frontend build, and assets_test.go
       # skips itself here; the macOS job below runs it for real.
-      - run: go vet ./...
+      - name: Resolve the toolkit-free packages
+        id: pkgs
+        run: echo "list=$(go list ./... | grep -v '/cmd/dodb$' | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
+
+      - run: go vet ${{ steps.pkgs.outputs.list }}
 
       # Service containers start before the repo is checked out, so the fixture
       # schemas cannot be mounted as init scripts and are applied here instead.
       - name: Seed fixture databases
         run: |
           set -euo pipefail
-          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client mysql-client sqlite3
+          # xxd is used by the UTF-8 check below. It ships on GitHub's runners today,
+          # but naming it here removes a dependency on the image's contents.
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client mysql-client sqlite3 xxd
 
           PGPASSWORD=dodb psql -h 127.0.0.1 -p 55432 -U dodb -d dodb_fixture \
             -v ON_ERROR_STOP=1 -f testdata/fixtures/postgres.sql
@@ -109,7 +123,7 @@ jobs:
           echo "UTF-8 round-trip OK on both MySQL and MariaDB"
 
       - name: Go tests
-        run: go test -count=1 ./...
+        run: go test -count=1 ${{ steps.pkgs.outputs.list }}
 
       - name: Parity against the recorded Rust output
         run: go test -count=1 -v ./internal/dbcore -run TestParity
@@ -141,6 +155,10 @@ jobs:
       # Runs tsc and next lint, and produces ui/out, which assets.go embeds.
       - name: Build frontend (typecheck + lint)
         run: pnpm build:ui
+
+      # The one package the Linux job cannot compile.
+      - name: Vet the Wails entrypoint
+        run: go vet ./cmd/dodb
 
       - name: Build the app bundle
         run: ./scripts/build-macos.sh 0.0.0-ci

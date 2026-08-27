@@ -238,19 +238,23 @@ func (s *sqlSource) flushCopy() []BatchItem {
 
 	table := dialect.QuoteTable(s.db, s.copy.header.Table)
 	var sql strings.Builder
-	sql.WriteString("INSERT INTO " + table)
+	sql.WriteString("INSERT INTO ")
+	sql.WriteString(table)
 	if len(columns) > 0 {
 		quoted := make([]string, 0, len(columns))
 		for _, c := range columns {
 			quoted = append(quoted, dialect.QuoteColumn(s.db, c))
 		}
-		sql.WriteString(" (" + strings.Join(quoted, ", ") + ")")
+		sql.WriteString(" (")
+		sql.WriteString(strings.Join(quoted, ", "))
+		sql.WriteString(")")
 	}
 	tuples := make([]string, 0, len(literals))
 	for _, r := range literals {
 		tuples = append(tuples, "("+strings.Join(r, ", ")+")")
 	}
-	sql.WriteString(" VALUES\n  " + strings.Join(tuples, ",\n  "))
+	sql.WriteString(" VALUES\n  ")
+	sql.WriteString(strings.Join(tuples, ",\n  "))
 
 	s.index++
 	s.stats.CopyRows += uint64(len(rows))

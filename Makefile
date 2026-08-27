@@ -15,6 +15,11 @@ SHELL := /bin/bash
 VERSION ?= $(shell node -p "require('./package.json').version" 2>/dev/null || echo 0.0.0-dev)
 GO ?= go
 LDFLAGS := -X main.version=$(VERSION)
+
+# cmd/dodb is the only package that imports Wails, and Wails on Linux needs GTK4
+# and WebKitGTK headers through pkg-config. Tests never need the window toolkit,
+# so they run against everything else and stay buildable on a bare Linux box.
+GO_TEST_PKGS = $(shell $(GO) list ./... | grep -v '/cmd/dodb$$')
 DEVSERVER_ADDR ?= 127.0.0.1:5822
 
 .DEFAULT_GOAL := help
@@ -77,7 +82,7 @@ binary: ui
 
 ## test: run the Go tests that need no database
 test:
-	$(GO) test ./...
+	$(GO) test $(GO_TEST_PKGS)
 
 ## test-parity: run the tests that diff against the Rust build's output
 ##              Needs the fixture databases: make fixtures-up
@@ -124,7 +129,9 @@ fmt:
 
 ## vet: go vet
 vet:
-	$(GO) vet ./...
+	$(GO) vet $(GO_TEST_PKGS)
+	@# Only type-checks where the toolkit headers exist, i.e. macOS and Windows.
+	@[ "$$(uname)" = "Linux" ] || $(GO) vet ./cmd/dodb
 
 ## clean: remove build output
 clean:

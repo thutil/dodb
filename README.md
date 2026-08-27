@@ -236,7 +236,7 @@ Download the `.msi` or `.exe` installer from [GitHub Releases](https://github.co
 
 - **macOS**: macOS 11.0+ (Apple Silicon `aarch64` or Intel `x86_64`)
 - **Windows**: Windows 10/11 (64-bit)
-- Go 1.24+ (`brew install go`) — must be a **native** build for your CPU, since CGO is required
+- Go 1.25+ (`brew install go`) — must be a **native** build for your CPU, since CGO is required
 - Node.js 18+ and `pnpm`: `npm install -g pnpm`
 - Xcode command line tools (`xcode-select --install`)
 

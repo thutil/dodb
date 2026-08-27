@@ -4,8 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 5821",
-    "build": "next build",
-    "start": "next start",
+    "build": "next build && node scripts/write-embed-placeholder.mjs",
     "lint": "eslint .",
     "fonts": "node scripts/fetch-fonts.mjs"
   },
