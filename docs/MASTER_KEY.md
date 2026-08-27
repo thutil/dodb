@@ -68,7 +68,7 @@ session นั้น (`runtime_passwords` ใน `db_core.rs`)
 | `DODB_DATA_DIR=/path` | ย้ายทั้ง `profiles.json` และ `.master_key` ไปที่อื่น (ใช้ตอน dev) |
 | `DODB_ENCRYPTION_KEY=...` | ใส่ secret เอง ไม่แตะทั้งไฟล์และ Keychain (ค่านี้ถูก stretch ด้วย PBKDF2 100k รอบก่อน เพราะอาจเป็น passphrase ที่ entropy ต่ำ) |
 
-ตอน dev แนะนำ `DODB_KEY_BACKEND=file DODB_DATA_DIR=/tmp/dodb-dev pnpm tauri dev` เพื่อไม่ให้ปนกับ
+ตอน dev แนะนำ `DODB_KEY_BACKEND=file DODB_DATA_DIR=/tmp/dodb-dev make dev` เพื่อไม่ให้ปนกับ
 ข้อมูลจริง
 
 ## คำสั่งตรวจและซ่อมด้วยมือ
@@ -88,12 +88,12 @@ cp ~/.dodb/.master_key ~/backup-dodb-master-key.txt
 ```
 
 ถ้าไฟล์คีย์หายไปแล้วไม่มีสำรอง: แอปจะสุ่มคีย์ใหม่ ค่า `enc:` เดิมใน `profiles.json` จะถอดไม่ออก
-โค้ดจะ log warning และเคลียร์ช่องรหัสผ่านให้ (`profiles.rs`) แล้วแอปจะถามรหัสผ่านใหม่ตอนเชื่อมต่อ —
+โค้ดจะ log warning และเคลียร์ช่องรหัสผ่านให้ (`profilestore.go`) แล้วแอปจะถามรหัสผ่านใหม่ตอนเชื่อมต่อ —
 ข้อมูลอื่นของ connection ไม่หาย
 
 ## การกู้คีย์อัตโนมัติ (เผื่อเจอในอนาคต)
 
-`crypto.rs` → `decide_file_action()` ทำงานตามนี้ตอนหาคีย์:
+`internal/crypto/crypto.go` → `decideFileAction()` ทำงานตามนี้ตอนหาคีย์:
 
 | สถานะ | การกระทำ |
 |---|---|
@@ -106,8 +106,8 @@ cp ~/.dodb/.master_key ~/backup-dodb-master-key.txt
 
 1. เซ็นแอปด้วย certificate ที่คงที่ (Developer ID หรือ self-signed — ดู [`SIGNING.md`](SIGNING.md))
 2. ทดสอบก่อนว่า prompt หายจริง: เปิดแอปที่เซ็นแล้ว 2 รอบ และ build ใหม่อีกรอบแล้วเปิด ต้องไม่ถามเลย
-3. ถ้าผ่าน ค่อยแก้ `default_backend()` ใน `src-tauri/src/crypto.rs` ให้ macOS คืนค่า
-   `Backend::Keychain` — โค้ดฝั่ง Keychain (`keychain_secret()` / `adopt_or_generate()`) ยังอยู่ครบ
+3. ถ้าผ่าน ค่อยแก้ `defaultBackend()` ใน `internal/crypto/crypto.go` ให้ macOS คืนค่า
+   `BackendKeychain` — โค้ดฝั่ง Keychain (`keychainSecret()` / `adoptOrGenerate()`) ยังอยู่ครบ
    และย้ายไฟล์เข้า Keychain ให้เองพร้อมอ่านกลับมาเทียบก่อนลบไฟล์
 4. ทางที่ดีกว่าคือเช็คลายเซ็นตอน runtime แล้วเลือก backend เอง (build ที่เซ็น = Keychain,
    build ad-hoc = ไฟล์) ซึ่งต้องเขียน FFI เรียก `SecCodeCopySigningInformation` เพราะ

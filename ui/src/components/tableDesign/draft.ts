@@ -8,7 +8,7 @@ import {
 } from "../../utils/ddlBuilder";
 
 /**
- * Shapes returned by the `get_table_constraints` Tauri command.
+ * Shapes returned by the `get_table_constraints` backend command.
  */
 export interface IndexInfo {
   name: string;
@@ -25,7 +25,7 @@ export interface ForeignKeyInfo {
   onUpdate: string;
 }
 
-/** Result of the `execute_ddl` Tauri command. */
+/** Result of the `execute_ddl` backend command. */
 export interface DdlResult {
   success: boolean;
   executed: number;

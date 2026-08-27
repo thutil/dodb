@@ -13,13 +13,10 @@ import type {
  * Transport for the Go backend.
  *
  * Every call goes to POST /invoke/<command_name>, served by the Wails asset
- * server in the packaged app and by cmd/dodb-devserver in the browser. The
- * command names and argument objects are byte-identical to the ones the Tauri
- * build used, so this file is the only place that changed -- no component knows
- * the transport moved.
+ * server in the packaged app and by cmd/dodb-devserver in the browser.
  *
  * A failed command returns a non-2xx with {"error": "..."} and is re-thrown as
- * an Error, which is how Tauri's invoke() rejected too.
+ * an Error.
  */
 /**
  * Base URL for the backend.
@@ -62,7 +59,7 @@ async function invoke<T = unknown>(
   return (text ? JSON.parse(text) : null) as T;
 }
 
-/** Progress channel for a streaming command. Replaces Tauri's `Channel`. */
+/** Progress channel for a streaming command. */
 export class ProgressChannel<T> {
   onmessage: (value: T) => void = () => {};
   /** Set by runImport so cancellation can close the stream. */
@@ -168,7 +165,7 @@ export const apiClient = {
   selectFile: async (): Promise<string | null> => {
     return await invoke("select_file");
   },
-  /** App version, replacing @tauri-apps/api/app's getVersion(). */
+  /** App version string. */
   appVersion: async (): Promise<string> => {
     return await invoke("app_version");
   },
@@ -200,7 +197,7 @@ export const apiClient = {
     return await invoke("preview_import_file", { path, format, csv });
   },
   /**
-   * Streams progress over Server-Sent Events rather than a Tauri Channel.
+   * Streams progress over Server-Sent Events.
    *
    * The Go side pushes one `progress` event per batch and a final `report`
    * event, so the loop still lives in the backend and the frontend never polls.

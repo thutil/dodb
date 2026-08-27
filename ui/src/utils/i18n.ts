@@ -142,6 +142,18 @@ export const translations = {
     themeLight: "Light Mode",
     themeLightSub: "Clean high-contrast theme for bright environments",
     
+    // Settings: Query History
+    historySettingsTitle: "Query Execution History",
+    historySettingsDesc: "Configure retention limit and storage duration for executed SQL queries.",
+    historyMaxItems: "Max History Entries",
+    historyRetentionDays: "Retention Duration",
+    historyDays7: "7 Days",
+    historyDays14: "14 Days",
+    historyDays30: "30 Days",
+    historyDaysForever: "Unlimited",
+    historyClearAll: "Clear All History",
+    historyClearSuccess: "SQL History cleared successfully",
+
     // Settings: Display
     uiScaleTitle: "UI Scaling",
     uiScaleDesc: "Adjust the zoom level and element sizing of the application interface.",
@@ -330,6 +342,18 @@ export const translations = {
     themeLight: "ธีมสว่าง (Light Mode)",
     themeLightSub: "โทนสีสว่าง อ่านง่ายชัดเจน",
     
+    // Settings: Query History
+    historySettingsTitle: "ประวัติการรันคำสั่ง SQL",
+    historySettingsDesc: "กำหนดจำนวนคำสั่งสูงสุดและระยะเวลาเก็บประวัติคำสั่ง SQL ที่รันแล้ว",
+    historyMaxItems: "จำนวนประวัติสูงสุด",
+    historyRetentionDays: "ระยะเวลาเก็บข้อมูล",
+    historyDays7: "7 วัน",
+    historyDays14: "14 วัน",
+    historyDays30: "30 วัน",
+    historyDaysForever: "ไม่จำกัดวัน",
+    historyClearAll: "ล้างประวัติทั้งหมด",
+    historyClearSuccess: "ล้างประวัติคำสั่ง SQL เรียบร้อยแล้ว",
+
     // Settings: Display
     uiScaleTitle: "ขนาดการแสดงผล (UI Scale)",
     uiScaleDesc: "ย่อหรือขยายขนาดองค์ประกอบและตัวอักษรของโปรแกรม",

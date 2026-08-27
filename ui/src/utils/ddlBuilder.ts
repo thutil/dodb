@@ -4,7 +4,7 @@ import { isGeometryColumn } from "./gisUtils";
 /**
  * Dialect-aware DDL generation for Postgres, MariaDB/MySQL and SQLite.
  *
- * Pure module: no React, no Tauri. Everything the table designer needs to turn
+ * Pure module: no React, no backend dependency. Everything the table designer needs to turn
  * a draft into SQL lives here, so the preview can be regenerated on every
  * keystroke without a round-trip to the backend.
  */

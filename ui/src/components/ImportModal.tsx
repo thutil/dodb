@@ -294,7 +294,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     }
   };
 
-  // Tauri's webview reports a real path on drop, so the backend can stream it.
+  // The native desktop webview reports a real path on drop, so the backend can stream it.
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setDragging(false);

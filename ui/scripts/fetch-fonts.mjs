@@ -1,7 +1,7 @@
 /**
  * Regenerates the self-hosted webfonts in public/fonts and src/styles/fonts.css.
  *
- * The app must run fully offline (Tauri desktop build), so fonts are never
+ * The app must run fully offline (native desktop build), so fonts are never
  * loaded from fonts.googleapis.com at runtime. Run this only when the font
  * families / weights below change:
  *

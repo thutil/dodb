@@ -14,9 +14,11 @@ import {
   Maximize2,
   ZoomIn,
   Compass,
-  Play,
   Terminal,
   Keyboard,
+  History,
+  Trash2,
+  Clock,
 } from "lucide-react";
 import { Language, t } from "../utils/i18n";
 
@@ -44,6 +46,50 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   version = process.env.NEXT_PUBLIC_APP_VERSION || "0.0.0-dev",
 }) => {
   const [activeTab, setActiveTab] = useState<"general" | "display" | "shortcuts">("general");
+
+  const [historyLimit, setHistoryLimit] = useState<number>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("dodb_sql_history_limit");
+        if (saved) return Number(saved) || 100;
+      } catch { }
+    }
+    return 100;
+  });
+
+  const [historyRetentionDays, setHistoryRetentionDays] = useState<number>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("dodb_sql_history_retention_days");
+        if (saved !== null) return Number(saved);
+      } catch { }
+    }
+    return 14;
+  });
+
+  const [historyCleared, setHistoryCleared] = useState(false);
+
+  const handleUpdateHistoryLimit = (limit: number) => {
+    setHistoryLimit(limit);
+    try {
+      localStorage.setItem("dodb_sql_history_limit", String(limit));
+    } catch { }
+  };
+
+  const handleUpdateRetentionDays = (days: number) => {
+    setHistoryRetentionDays(days);
+    try {
+      localStorage.setItem("dodb_sql_history_retention_days", String(days));
+    } catch { }
+  };
+
+  const handleClearAllHistory = () => {
+    try {
+      localStorage.removeItem("dodb_sql_history_v1");
+      setHistoryCleared(true);
+      setTimeout(() => setHistoryCleared(false), 2500);
+    } catch { }
+  };
 
   // Keyboard escape listener to close
   useEffect(() => {
@@ -228,6 +274,74 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       <div className="option-sub-label">{t("themeLightSub", language)}</div>
                     </div>
                     {theme === "light" && <Check size={15} className="active-check-icon" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Query Execution History Settings */}
+              <div className="setting-section">
+                <div className="section-head">
+                  <div className="section-head-title">
+                    <History size={14} className="head-icon" />
+                    <span>{t("historySettingsTitle", language)}</span>
+                  </div>
+                  <p className="section-head-desc">{t("historySettingsDesc", language)}</p>
+                </div>
+
+                <div className="history-settings-grid">
+                  {/* Max Items Limit */}
+                  <div className="history-setting-box">
+                    <div className="setting-box-label">
+                      <span className="label-title">{t("historyMaxItems", language)}</span>
+                    </div>
+                    <div className="pill-selector">
+                      {[50, 100, 200, 500].map((num) => (
+                        <button
+                          key={num}
+                          type="button"
+                          className={`pill-choice font-mono ${historyLimit === num ? "active" : ""}`}
+                          onClick={() => handleUpdateHistoryLimit(num)}
+                        >
+                          {num}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Retention Duration */}
+                  <div className="history-setting-box">
+                    <div className="setting-box-label">
+                      <span className="label-title">{t("historyRetentionDays", language)}</span>
+                    </div>
+                    <div className="pill-selector">
+                      {[
+                        { days: 7, label: t("historyDays7", language) },
+                        { days: 14, label: t("historyDays14", language) },
+                        { days: 30, label: t("historyDays30", language) },
+                        { days: 0, label: t("historyDaysForever", language) },
+                      ].map((item) => (
+                        <button
+                          key={item.days}
+                          type="button"
+                          className={`pill-choice ${historyRetentionDays === item.days ? "active" : ""}`}
+                          onClick={() => handleUpdateRetentionDays(item.days)}
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Clear All History Button */}
+                <div className="history-clear-row">
+                  <button
+                    type="button"
+                    className={`btn-clear-history-action ${historyCleared ? "cleared" : ""}`}
+                    onClick={handleClearAllHistory}
+                  >
+                    <Trash2 size={12} />
+                    <span>{historyCleared ? t("historyClearSuccess", language) : t("historyClearAll", language)}</span>
                   </button>
                 </div>
               </div>
@@ -607,14 +721,98 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           color: var(--text-main);
         }
 
-        .option-sub-label {
-          font-size: 10px;
-          color: var(--text-muted);
-        }
-
         .active-check-icon {
           color: var(--accent-blue);
           flex-shrink: 0;
+        }
+
+        /* History Settings Grid & Controls */
+        .history-settings-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 10px;
+        }
+
+        .history-setting-box {
+          background: var(--bg-secondary, var(--bg-tertiary));
+          border: 1px solid var(--border-light);
+          border-radius: var(--radius-md, 8px);
+          padding: 10px 12px;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+
+        .setting-box-label .label-title {
+          font-size: 11px;
+          font-weight: 600;
+          color: var(--text-main);
+        }
+
+        .pill-selector {
+          display: flex;
+          gap: 4px;
+          flex-wrap: wrap;
+        }
+
+        .pill-choice {
+          flex: 1;
+          min-width: 44px;
+          padding: 4px 6px;
+          font-size: 10.5px;
+          border-radius: 4px;
+          border: 1px solid var(--border-light);
+          background: var(--bg-card);
+          color: var(--text-muted);
+          cursor: pointer;
+          transition: all 0.12s ease;
+          text-align: center;
+          white-space: nowrap;
+        }
+
+        .pill-choice:hover {
+          background: var(--bg-hover);
+          color: var(--text-main);
+          border-color: var(--border-medium);
+        }
+
+        .pill-choice.active {
+          background: var(--accent-blue);
+          color: #ffffff;
+          border-color: var(--accent-blue);
+          font-weight: 600;
+        }
+
+        .history-clear-row {
+          display: flex;
+          justify-content: flex-end;
+          padding-top: 2px;
+        }
+
+        .btn-clear-history-action {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 5px 12px;
+          font-size: 11px;
+          border-radius: var(--radius-xs, 4px);
+          border: 1px solid rgba(239, 68, 68, 0.35);
+          background: rgba(239, 68, 68, 0.08);
+          color: #f87171;
+          cursor: pointer;
+          transition: all 0.15s ease;
+        }
+
+        .btn-clear-history-action:hover {
+          background: rgba(239, 68, 68, 0.18);
+          border-color: #ef4444;
+          color: #ef4444;
+        }
+
+        .btn-clear-history-action.cleared {
+          background: rgba(16, 185, 129, 0.15);
+          border-color: #10b981;
+          color: #10b981;
         }
 
         /* Scale Control */

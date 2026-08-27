@@ -36,7 +36,7 @@ export const AboutModal: React.FC<AboutModalProps> = ({
   if (!isOpen) return null;
 
   const handleCopyInfo = () => {
-    const info = `DODB Database Manager\nVersion: v${version}\nPlatform: macOS (Native Desktop)\nEngines: PostgreSQL, MySQL, MariaDB, SQLite\nStack: Tauri v2 + Next.js + SQLx`;
+    const info = `DODB Database Manager\nVersion: v${version}\nPlatform: macOS (Native Desktop)\nEngines: PostgreSQL, MySQL, MariaDB, SQLite\nStack: Wails v2 + Next.js + Go`;
     navigator.clipboard.writeText(info);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -147,7 +147,7 @@ export const AboutModal: React.FC<AboutModalProps> = ({
                 <Cpu size={13} className="feat-icon" />
                 <div>
                   <div className="feat-title">Native Core</div>
-                  <div className="feat-desc">Rust SQLx connection pool & memory safety</div>
+                  <div className="feat-desc">Go database connection pool & high performance</div>
                 </div>
               </div>
             </div>
@@ -155,7 +155,7 @@ export const AboutModal: React.FC<AboutModalProps> = ({
 
           {/* Stack & System Meta */}
           <div className="system-meta-bar font-mono">
-            <span>Tauri 2.0 • Rust Core • Next.js</span>
+            <span>Wails 2.0 • Go Core • Next.js</span>
             <button
               type="button"
               className="copy-info-btn"
