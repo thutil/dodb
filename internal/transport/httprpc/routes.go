@@ -33,7 +33,7 @@ func (h *Handler) buildRoutes() map[string]func(json.RawMessage) (any, error) {
 			if err != nil {
 				return nil, err
 			}
-			return ok(s.SaveProfile(a.Profile))
+			return s.SaveProfile(a.Profile)
 		},
 		"save_all_profiles": func(raw json.RawMessage) (any, error) {
 			a, err := decode[struct {

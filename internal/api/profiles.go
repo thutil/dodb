@@ -15,13 +15,16 @@ func (s *Service) GetProfiles() ([]model.ConnectionProfile, error) {
 }
 
 // SaveProfile upserts one profile.
-func (s *Service) SaveProfile(profile model.ConnectionProfile) error {
-	if strings.TrimSpace(profile.ID) == "" {
-		return fmt.Errorf("a profile needs an id")
+func (s *Service) SaveProfile(profile model.ConnectionProfile) (model.ConnectionProfile, error) {
+	if strings.TrimSpace(profile.ID) == "" || strings.HasPrefix(profile.ID, dbcore.SessionIDPrefix) {
+		profile.ID = "p-" + newID()
+	}
+	if !profile.Type.Valid() {
+		return model.ConnectionProfile{}, fmt.Errorf("unknown connection type %q", profile.Type)
 	}
 	existing, err := profilestore.Load()
 	if err != nil {
-		return err
+		return model.ConnectionProfile{}, err
 	}
 	replaced := false
 	for i := range existing {
@@ -34,7 +37,10 @@ func (s *Service) SaveProfile(profile model.ConnectionProfile) error {
 	if !replaced {
 		existing = append(existing, profile)
 	}
-	return profilestore.Save(existing)
+	if err := profilestore.Save(existing); err != nil {
+		return model.ConnectionProfile{}, err
+	}
+	return profile, nil
 }
 
 // SaveAllProfiles overwrites the whole set, which is how the UI persists

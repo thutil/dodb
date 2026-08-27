@@ -71,7 +71,7 @@ export const apiClient = {
     return await invoke("get_profiles");
   },
   saveProfile: async (profile: any) => {
-    return await invoke("save_profile", { profile });
+    return await invoke<ConnectionProfile>("save_profile", { profile });
   },
   saveAllProfiles: async (profiles: any[]) => {
     return await invoke("save_all_profiles", { profiles });
