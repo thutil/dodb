@@ -207,12 +207,25 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
   const [submitting, setSubmitting] = useState(false);
 
   // SQL Execution History Configuration & Limits
-  // - Keeps max 100 entries
-  // - Auto-prunes entries older than 14 days
-  // - Caps individual query length to prevent localStorage bloat
-  const MAX_HISTORY_ITEMS = 100;
-  const MAX_HISTORY_AGE_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
   const MAX_SQL_TEXT_LENGTH = 3000;
+
+  const getHistoryConfig = () => {
+    let limit = 100;
+    let retentionMs = 14 * 24 * 60 * 60 * 1000; // default 14 days
+    if (typeof window !== "undefined") {
+      try {
+        const savedLimit = Number(localStorage.getItem("dodb_sql_history_limit"));
+        if (savedLimit > 0) limit = savedLimit;
+        const savedDays = Number(localStorage.getItem("dodb_sql_history_retention_days"));
+        if (savedDays === 0) {
+          retentionMs = Infinity; // Unlimited
+        } else if (savedDays > 0) {
+          retentionMs = savedDays * 24 * 60 * 60 * 1000;
+        }
+      } catch { }
+    }
+    return { limit, retentionMs };
+  };
 
   const [sqlHistory, setSqlHistory] = useState<SqlHistoryEntry[]>(() => {
     if (typeof window !== "undefined") {
@@ -221,8 +234,9 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
         if (saved) {
           const parsed: SqlHistoryEntry[] = JSON.parse(saved);
           const now = Date.now();
+          const { limit, retentionMs } = getHistoryConfig();
           // Filter out expired items on initial load
-          return parsed.filter((item) => now - item.timestamp < 14 * 24 * 60 * 60 * 1000).slice(0, 100);
+          return parsed.filter((item) => retentionMs === Infinity || now - item.timestamp < retentionMs).slice(0, limit);
         }
       } catch { }
     }
@@ -233,9 +247,27 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
   const [copiedHistoryId, setCopiedHistoryId] = useState<string | null>(null);
   const [historyScope, setHistoryScope] = useState<"current" | "all">("current");
 
+  // Reload history when drawer opens to catch Settings changes / Clears
+  useEffect(() => {
+    if (showHistory && typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("dodb_sql_history_v1");
+        if (saved) {
+          const parsed: SqlHistoryEntry[] = JSON.parse(saved);
+          const now = Date.now();
+          const { limit, retentionMs } = getHistoryConfig();
+          setSqlHistory(parsed.filter((item) => retentionMs === Infinity || now - item.timestamp < retentionMs).slice(0, limit));
+        } else {
+          setSqlHistory([]);
+        }
+      } catch { }
+    }
+  }, [showHistory]);
+
   const addHistoryEntries = useCallback((entries: SqlHistoryEntry[]) => {
     setSqlHistory((prev) => {
       const now = Date.now();
+      const { limit, retentionMs } = getHistoryConfig();
       // Sanitize and limit entry text length
       const sanitizedEntries = entries.map((e) => ({
         ...e,
@@ -246,7 +278,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
         ...sanitizedEntries,
         ...prev.filter(
           (p) =>
-            now - p.timestamp < MAX_HISTORY_AGE_MS &&
+            (retentionMs === Infinity || now - p.timestamp < retentionMs) &&
             !sanitizedEntries.some(
               (e) =>
                 e.sql.trim() === p.sql.trim() &&
@@ -254,7 +286,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                 Math.abs(e.timestamp - p.timestamp) < 2000
             )
         ),
-      ].slice(0, MAX_HISTORY_ITEMS);
+      ].slice(0, limit);
 
       try {
         localStorage.setItem("dodb_sql_history_v1", JSON.stringify(merged));
