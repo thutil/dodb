@@ -96,5 +96,5 @@ Nothing here is needed for day-to-day work: unsigned dev builds keep the master 
 so they never touch the login keychain. To keep dev data out of `~/.dodb` as well:
 
 ```sh
-DODB_DATA_DIR=/tmp/dodb-dev pnpm tauri dev
+DODB_DATA_DIR=/tmp/dodb-dev make dev
 ```

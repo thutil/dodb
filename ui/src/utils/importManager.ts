@@ -2,7 +2,7 @@ import { ProgressChannel } from "./apiClient";
 import { apiClient } from "./apiClient";
 
 // ==========================================
-// Wire types — mirror src-tauri/src/import.rs
+// Wire types — mirror internal/importer/types.go
 // ==========================================
 
 export type ImportFormat = "sql" | "csv" | "json";
@@ -166,8 +166,8 @@ type ProgressListener = (progress: ImportProgress) => void;
  * Owns the one running import, the way `dumpManager` owns the one running
  * export, so progress survives closing the wizard or switching views.
  *
- * Unlike the export side the loop itself lives in Rust: `start` opens a Tauri
- * progress stream, forwards every tick to the subscribers, and awaits a single
+ * The loop lives in the Go backend: `start` opens a progress stream,
+ * forwards every tick to the subscribers, and awaits a single
  * `run_import` call. There is no pause/resume because the backend has no way
  * to hold a transaction open indefinitely.
  */
@@ -380,7 +380,7 @@ export const TYPE_LABELS: Record<InferredType, string> = {
 /**
  * Suggests a target column name for a source column.
  *
- * Mirrors `sanitize_ident` in src-tauri/src/import.rs — non-ASCII (Thai
+ * Mirrors `SanitizeIdent` in internal/importer/sanitizer.go — non-ASCII (Thai
  * included) is kept, ASCII punctuation collapses to `_`.
  */
 export function suggestColumnName(raw: string): string {
