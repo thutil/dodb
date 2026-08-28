@@ -9,16 +9,11 @@ import {
   Moon,
   Check,
   RotateCcw,
-  Sliders,
   Sparkles,
-  Maximize2,
   ZoomIn,
-  Compass,
-  Terminal,
   Keyboard,
   History,
   Trash2,
-  Clock,
 } from "lucide-react";
 import { Language, t } from "../utils/i18n";
 
@@ -43,7 +38,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onChangeUiScale,
   theme,
   onToggleTheme,
-  version = process.env.NEXT_PUBLIC_APP_VERSION || "0.0.0-dev",
+  version = process.env.NEXT_PUBLIC_APP_VERSION || "0.3.6",
 }) => {
   const [activeTab, setActiveTab] = useState<"general" | "display" | "shortcuts">("general");
 
@@ -150,45 +145,47 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         <div className="modal-header">
           <div className="title-area">
             <div className="title-icon-box">
-              <Settings size={17} />
+              <Settings size={15} />
             </div>
             <div className="title-text-group">
               <span className="modal-title">{t("settingsTitle", language)}</span>
-              <span className="modal-subtitle">dodb Studio</span>
+              <span className="modal-subtitle">dodb Studio Preferences</span>
             </div>
           </div>
           <button className="icon-close-btn" onClick={onClose} title={t("close", language)}>
-            <X size={16} />
+            <X size={15} />
           </button>
         </div>
 
-        {/* Tab Navigation */}
-        <div className="modal-tabs">
-          <button
-            className={`tab-btn ${activeTab === "general" ? "active" : ""}`}
-            onClick={() => setActiveTab("general")}
-          >
-            <Globe size={14} />
-            <span>{t("tabGeneral", language)}</span>
-          </button>
-          <button
-            className={`tab-btn ${activeTab === "display" ? "active" : ""}`}
-            onClick={() => setActiveTab("display")}
-          >
-            <Monitor size={14} />
-            <span>{t("tabDisplay", language)}</span>
-          </button>
-          <button
-            className={`tab-btn ${activeTab === "shortcuts" ? "active" : ""}`}
-            onClick={() => setActiveTab("shortcuts")}
-          >
-            <Keyboard size={14} />
-            <span>{t("tabShortcuts", language)}</span>
-          </button>
+        {/* Tab Navigation Segmented Bar */}
+        <div className="modal-tabs-bar">
+          <div className="tabs-segmented">
+            <button
+              className={`tab-btn ${activeTab === "general" ? "active" : ""}`}
+              onClick={() => setActiveTab("general")}
+            >
+              <Globe size={13} />
+              <span>{t("tabGeneral", language)}</span>
+            </button>
+            <button
+              className={`tab-btn ${activeTab === "display" ? "active" : ""}`}
+              onClick={() => setActiveTab("display")}
+            >
+              <Monitor size={13} />
+              <span>{t("tabDisplay", language)}</span>
+            </button>
+            <button
+              className={`tab-btn ${activeTab === "shortcuts" ? "active" : ""}`}
+              onClick={() => setActiveTab("shortcuts")}
+            >
+              <Keyboard size={13} />
+              <span>{t("tabShortcuts", language)}</span>
+            </button>
+          </div>
         </div>
 
-        {/* Modal Body with constant fixed height & clean scroll */}
-        <div className="modal-content-area">
+        {/* Modal Body Area */}
+        <div className="modal-content-area custom-scrollbar">
           {/* TAB 1: GENERAL */}
           {activeTab === "general" && (
             <div className="tab-content">
@@ -196,7 +193,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div className="setting-section">
                 <div className="section-head">
                   <div className="section-head-title">
-                    <Globe size={14} className="head-icon" />
+                    <Globe size={13} className="head-icon" />
                     <span>{t("languageSectionTitle", language)}</span>
                   </div>
                   <p className="section-head-desc">{t("languageSectionDesc", language)}</p>
@@ -208,12 +205,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     className={`option-card ${language === "en" ? "active" : ""}`}
                     onClick={() => onChangeLanguage("en")}
                   >
-                    <div className="lang-code-badge">EN</div>
+                    <div className="lang-code-badge en">EN</div>
                     <div className="option-info">
                       <div className="option-main-label">{t("langEnglish", language)}</div>
                       <div className="option-sub-label">{t("langEnglishSub", language)}</div>
                     </div>
-                    {language === "en" && <Check size={15} className="active-check-icon" />}
+                    <div className="selection-indicator">
+                      {language === "en" ? <Check size={13} className="check-icon" /> : null}
+                    </div>
                   </button>
 
                   <button
@@ -226,7 +225,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       <div className="option-main-label">{t("langThai", language)}</div>
                       <div className="option-sub-label">{t("langThaiSub", language)}</div>
                     </div>
-                    {language === "th" && <Check size={15} className="active-check-icon" />}
+                    <div className="selection-indicator">
+                      {language === "th" ? <Check size={13} className="check-icon" /> : null}
+                    </div>
                   </button>
                 </div>
               </div>
@@ -235,7 +236,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div className="setting-section">
                 <div className="section-head">
                   <div className="section-head-title">
-                    <Sparkles size={14} className="head-icon" />
+                    <Sparkles size={13} className="head-icon" />
                     <span>{t("themeSectionTitle", language)}</span>
                   </div>
                   <p className="section-head-desc">{t("themeSectionDesc", language)}</p>
@@ -250,13 +251,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     }}
                   >
                     <div className="theme-preview dark">
-                      <Moon size={15} />
+                      <Moon size={14} />
                     </div>
                     <div className="option-info">
                       <div className="option-main-label">{t("themeDark", language)}</div>
                       <div className="option-sub-label">{t("themeDarkSub", language)}</div>
                     </div>
-                    {theme === "dark" && <Check size={15} className="active-check-icon" />}
+                    <div className="selection-indicator">
+                      {theme === "dark" ? <Check size={13} className="check-icon" /> : null}
+                    </div>
                   </button>
 
                   <button
@@ -267,13 +270,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     }}
                   >
                     <div className="theme-preview light">
-                      <Sun size={15} />
+                      <Sun size={14} />
                     </div>
                     <div className="option-info">
                       <div className="option-main-label">{t("themeLight", language)}</div>
                       <div className="option-sub-label">{t("themeLightSub", language)}</div>
                     </div>
-                    {theme === "light" && <Check size={15} className="active-check-icon" />}
+                    <div className="selection-indicator">
+                      {theme === "light" ? <Check size={13} className="check-icon" /> : null}
+                    </div>
                   </button>
                 </div>
               </div>
@@ -282,7 +287,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div className="setting-section">
                 <div className="section-head">
                   <div className="section-head-title">
-                    <History size={14} className="head-icon" />
+                    <History size={13} className="head-icon" />
                     <span>{t("historySettingsTitle", language)}</span>
                   </div>
                   <p className="section-head-desc">{t("historySettingsDesc", language)}</p>
@@ -294,12 +299,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <div className="setting-box-label">
                       <span className="label-title">{t("historyMaxItems", language)}</span>
                     </div>
-                    <div className="pill-selector">
+                    <div className="segmented-selector">
                       {[50, 100, 200, 500].map((num) => (
                         <button
                           key={num}
                           type="button"
-                          className={`pill-choice font-mono ${historyLimit === num ? "active" : ""}`}
+                          className={`segmented-choice font-mono ${historyLimit === num ? "active" : ""}`}
                           onClick={() => handleUpdateHistoryLimit(num)}
                         >
                           {num}
@@ -313,7 +318,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <div className="setting-box-label">
                       <span className="label-title">{t("historyRetentionDays", language)}</span>
                     </div>
-                    <div className="pill-selector">
+                    <div className="segmented-selector">
                       {[
                         { days: 7, label: t("historyDays7", language) },
                         { days: 14, label: t("historyDays14", language) },
@@ -323,7 +328,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         <button
                           key={item.days}
                           type="button"
-                          className={`pill-choice ${historyRetentionDays === item.days ? "active" : ""}`}
+                          className={`segmented-choice ${historyRetentionDays === item.days ? "active" : ""}`}
                           onClick={() => handleUpdateRetentionDays(item.days)}
                         >
                           {item.label}
@@ -355,7 +360,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div className="setting-section">
                 <div className="section-head">
                   <div className="section-head-title">
-                    <ZoomIn size={14} className="head-icon" />
+                    <ZoomIn size={13} className="head-icon" />
                     <span>{t("uiScaleTitle", language)}</span>
                   </div>
                   <p className="section-head-desc">{t("uiScaleDesc", language)}</p>
@@ -363,7 +368,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
                 <div className="scale-control-panel">
                   <div className="scale-slider-row">
-                    <span className="scale-min">85%</span>
+                    <span className="scale-min font-mono">85%</span>
                     <input
                       type="range"
                       min="85"
@@ -373,8 +378,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       onChange={(e) => onChangeUiScale(Number(e.target.value))}
                       className="scale-slider"
                     />
-                    <span className="scale-max">125%</span>
-                    <div className="scale-current-badge">{uiScale}%</div>
+                    <span className="scale-max font-mono">125%</span>
+                    <div className="scale-current-badge font-mono">{uiScale}%</div>
                   </div>
 
                   <div className="scale-presets-bar">
@@ -395,7 +400,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         onClick={() => onChangeUiScale(100)}
                         title={t("uiScaleReset", language)}
                       >
-                        <RotateCcw size={12} />
+                        <RotateCcw size={11} />
                         <span>{t("reset", language)}</span>
                       </button>
                     )}
@@ -411,7 +416,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div className="setting-section">
                 <div className="section-head">
                   <div className="section-head-title">
-                    <Command size={14} className="head-icon" />
+                    <Command size={13} className="head-icon" />
                     <span>{t("shortcutsTitle", language)}</span>
                   </div>
                   <p className="section-head-desc">{t("shortcutsDesc", language)}</p>
@@ -429,7 +434,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               {item.key.split(" / ").map((k, kidx) => (
                                 <React.Fragment key={kidx}>
                                   {kidx > 0 && <span className="key-separator">/</span>}
-                                  <kbd className="key-badge">{k}</kbd>
+                                  <kbd className="key-badge font-mono">{k}</kbd>
                                 </React.Fragment>
                               ))}
                             </div>
@@ -446,8 +451,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         {/* Footer */}
         <div className="modal-footer">
-          <div className="footer-meta">dodb Studio • v{version}</div>
-          <button type="button" className="btn btn-secondary close-btn" onClick={onClose}>
+          <div className="footer-meta font-mono">dodb Studio • v{version}</div>
+          <button type="button" className="btn btn-secondary btn-sm close-modal-btn" onClick={onClose}>
             {t("close", language)}
           </button>
         </div>
@@ -458,43 +463,32 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           position: fixed;
           inset: 0;
           background: rgba(0, 0, 0, 0.65);
-          backdrop-filter: blur(8px);
-          -webkit-backdrop-filter: blur(8px);
+          backdrop-filter: blur(6px);
+          -webkit-backdrop-filter: blur(6px);
           display: flex;
           align-items: center;
           justify-content: center;
           z-index: 2000;
           padding: 16px;
+          animation: fadeIn 0.15s ease-out;
         }
 
         .settings-modal-card {
-          width: 590px;
-          height: 530px;
+          width: 600px;
           max-width: 95vw;
           max-height: 86vh;
           background: var(--bg-card);
-          border: 1px solid var(--border-medium);
+          border: 1px solid var(--border-light);
           border-radius: var(--radius-lg, 12px);
-          box-shadow: var(--shadow-popup, 0 20px 40px rgba(0,0,0,0.5));
+          box-shadow: 0 20px 48px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.05) inset;
           display: flex;
           flex-direction: column;
           overflow: hidden;
-          animation: modalAppear 0.18s cubic-bezier(0.16, 1, 0.3, 1);
-        }
-
-        @keyframes modalAppear {
-          from {
-            opacity: 0;
-            transform: scale(0.96) translateY(6px);
-          }
-          to {
-            opacity: 1;
-            transform: scale(1) translateY(0);
-          }
+          animation: slideUp 0.18s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
         .modal-header {
-          padding: 12px 18px;
+          padding: 12px 16px;
           background: var(--bg-header);
           border-bottom: 1px solid var(--border-light);
           display: flex;
@@ -513,9 +507,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           display: flex;
           align-items: center;
           justify-content: center;
-          width: 30px;
-          height: 30px;
-          border-radius: var(--radius-md, 8px);
+          width: 28px;
+          height: 28px;
+          border-radius: var(--radius-sm, 6px);
           background: rgba(59, 130, 246, 0.12);
           color: var(--accent-blue);
         }
@@ -542,73 +536,97 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           color: var(--text-muted);
           cursor: pointer;
           padding: 6px;
-          border-radius: var(--radius-sm, 6px);
+          border-radius: var(--radius-xs, 4px);
           display: flex;
           align-items: center;
           justify-content: center;
-          transition: all 0.15s ease;
+          transition: all 0.12s ease;
         }
         .icon-close-btn:hover {
           background: var(--bg-hover);
           color: var(--text-main);
         }
 
-        /* Tabs */
-        .modal-tabs {
-          display: flex;
-          padding: 6px 14px 0 14px;
-          background: var(--bg-sidebar);
+        /* Segmented Tabs Bar */
+        .modal-tabs-bar {
+          padding: 8px 16px;
+          background: var(--bg-secondary);
           border-bottom: 1px solid var(--border-light);
-          gap: 4px;
           flex-shrink: 0;
         }
 
-        .tab-btn {
+        .tabs-segmented {
           display: flex;
-          align-items: center;
-          gap: 6px;
-          padding: 8px 14px;
-          font-size: 11.5px;
-          font-weight: 600;
-          color: var(--text-sub);
-          background: transparent;
-          border: none;
-          border-bottom: 2px solid transparent;
-          cursor: pointer;
-          transition: all 0.15s ease;
-          border-radius: 4px 4px 0 0;
-        }
-        .tab-btn:hover {
-          color: var(--text-main);
-          background: var(--bg-hover);
-        }
-        .tab-btn.active {
-          color: var(--accent-blue);
-          border-bottom-color: var(--accent-blue);
-          background: var(--bg-card);
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-light);
+          padding: 2.5px;
+          border-radius: var(--radius-sm, 6px);
+          gap: 3px;
         }
 
-        /* Content Area: Stays flex 1 and scrolls cleanly */
+        .tab-btn {
+          flex: 1;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          padding: 5px 12px;
+          font-size: 11px;
+          font-weight: 500;
+          color: var(--text-muted);
+          background: transparent;
+          border: none;
+          border-radius: var(--radius-xs, 4px);
+          cursor: pointer;
+          transition: all 0.12s ease;
+        }
+
+        .tab-btn:hover {
+          color: var(--text-main);
+        }
+
+        .tab-btn.active {
+          background: var(--bg-card);
+          color: var(--accent-blue);
+          font-weight: 600;
+          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+        }
+
+        /* Content Area */
         .modal-content-area {
-          padding: 16px 18px;
+          padding: 16px;
           overflow-y: auto;
           flex: 1;
           min-height: 0;
           display: flex;
           flex-direction: column;
-          gap: 18px;
+          gap: 16px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: var(--border-medium);
+          border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: var(--text-muted);
         }
 
         .tab-content {
           display: flex;
           flex-direction: column;
-          gap: 18px;
+          gap: 16px;
         }
 
         .setting-section {
           display: flex;
           flex-direction: column;
-          gap: 10px;
+          gap: 8px;
         }
 
         .section-head {
@@ -621,8 +639,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           display: flex;
           align-items: center;
           gap: 6px;
-          font-size: 12px;
-          font-weight: 700;
+          font-size: 11.5px;
+          font-weight: 600;
           color: var(--text-main);
         }
 
@@ -631,235 +649,251 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         }
 
         .section-head-desc {
-          font-size: 11px;
+          font-size: 10px;
           color: var(--text-muted);
-          line-height: 1.4;
+          line-height: 1.35;
         }
 
         /* Options Grid */
         .options-grid {
           display: grid;
           grid-template-columns: 1fr 1fr;
-          gap: 10px;
+          gap: 8px;
         }
 
         .option-card {
           display: flex;
           align-items: center;
           gap: 10px;
-          padding: 10px 12px;
-          border-radius: var(--radius-md, 8px);
+          padding: 8px 12px;
+          border-radius: var(--radius-sm, 6px);
           border: 1px solid var(--border-light);
-          background: var(--bg-secondary, var(--bg-tertiary));
+          background: var(--bg-tertiary);
           color: var(--text-main);
           cursor: pointer;
           text-align: left;
-          transition: all 0.15s ease;
-          position: relative;
+          transition: all 0.12s ease;
         }
+
         .option-card:hover {
           border-color: var(--border-medium);
           background: var(--bg-hover);
         }
+
         .option-card.active {
           border-color: var(--accent-blue);
           background: rgba(59, 130, 246, 0.08);
         }
 
         .lang-code-badge {
-          width: 32px;
-          height: 32px;
-          border-radius: 6px;
+          width: 28px;
+          height: 28px;
+          border-radius: 5px;
           display: flex;
           align-items: center;
           justify-content: center;
-          font-size: 11px;
-          font-weight: 800;
+          font-size: 10.5px;
+          font-weight: 700;
           font-family: var(--font-mono);
+          flex-shrink: 0;
+        }
+
+        .lang-code-badge.en {
           background: rgba(59, 130, 246, 0.12);
           color: var(--accent-blue);
           border: 1px solid rgba(59, 130, 246, 0.25);
-          flex-shrink: 0;
         }
+
         .lang-code-badge.th {
           background: rgba(16, 185, 129, 0.12);
           color: var(--accent-green);
-          border-color: rgba(16, 185, 129, 0.25);
+          border: 1px solid rgba(16, 185, 129, 0.25);
         }
 
         .theme-preview {
-          width: 30px;
-          height: 30px;
-          border-radius: 6px;
+          width: 28px;
+          height: 28px;
+          border-radius: 5px;
           display: flex;
           align-items: center;
           justify-content: center;
           flex-shrink: 0;
         }
+
         .theme-preview.dark {
-          background: #18181b;
-          color: #f4f4f5;
+          background: #14171f;
+          color: #93c5fd;
           border: 1px solid rgba(255, 255, 255, 0.1);
         }
+
         .theme-preview.light {
           background: #ffffff;
-          color: #18181b;
-          border: 1px solid rgba(0, 0, 0, 0.15);
+          color: #d97706;
+          border: 1px solid rgba(0, 0, 0, 0.12);
         }
 
         .option-info {
           display: flex;
           flex-direction: column;
-          gap: 2px;
+          gap: 1px;
           flex: 1;
           min-width: 0;
         }
 
         .option-main-label {
-          font-size: 11.5px;
+          font-size: 11px;
           font-weight: 600;
           color: var(--text-main);
         }
 
-        .active-check-icon {
+        .option-sub-label {
+          font-size: 9.5px;
+          color: var(--text-muted);
+        }
+
+        .selection-indicator {
+          width: 14px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .check-icon {
           color: var(--accent-blue);
-          flex-shrink: 0;
         }
 
         /* History Settings Grid & Controls */
         .history-settings-grid {
           display: grid;
           grid-template-columns: 1fr 1fr;
-          gap: 10px;
-        }
-
-        .history-setting-box {
-          background: var(--bg-secondary, var(--bg-tertiary));
-          border: 1px solid var(--border-light);
-          border-radius: var(--radius-md, 8px);
-          padding: 10px 12px;
-          display: flex;
-          flex-direction: column;
           gap: 8px;
         }
 
-        .setting-box-label .label-title {
-          font-size: 11px;
-          font-weight: 600;
-          color: var(--text-main);
-        }
-
-        .pill-selector {
-          display: flex;
-          gap: 4px;
-          flex-wrap: wrap;
-        }
-
-        .pill-choice {
-          flex: 1;
-          min-width: 44px;
-          padding: 4px 6px;
-          font-size: 10.5px;
-          border-radius: 4px;
+        .history-setting-box {
+          background: var(--bg-tertiary);
           border: 1px solid var(--border-light);
-          background: var(--bg-card);
-          color: var(--text-muted);
-          cursor: pointer;
-          transition: all 0.12s ease;
-          text-align: center;
-          white-space: nowrap;
+          border-radius: var(--radius-sm, 6px);
+          padding: 8px 10px;
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
         }
 
-        .pill-choice:hover {
-          background: var(--bg-hover);
-          color: var(--text-main);
-          border-color: var(--border-medium);
-        }
-
-        .pill-choice.active {
-          background: var(--accent-blue);
-          color: #ffffff;
-          border-color: var(--accent-blue);
+        .setting-box-label .label-title {
+          font-size: 10px;
           font-weight: 600;
+          color: var(--text-sub);
+          text-transform: uppercase;
+          letter-spacing: 0.4px;
+        }
+
+        .segmented-selector {
+          display: flex;
+          background: var(--bg-secondary);
+          border: 1px solid var(--border-light);
+          padding: 2px;
+          border-radius: var(--radius-xs, 4px);
+          gap: 2px;
+        }
+
+        .segmented-choice {
+          flex: 1;
+          background: transparent;
+          border: none;
+          color: var(--text-muted);
+          font-size: 10px;
+          font-weight: 500;
+          padding: 4px 6px;
+          border-radius: 3px;
+          cursor: pointer;
+          text-align: center;
+          transition: all 0.12s ease;
+        }
+
+        .segmented-choice:hover {
+          color: var(--text-main);
+        }
+
+        .segmented-choice.active {
+          background: var(--bg-card);
+          color: var(--accent-blue);
+          font-weight: 600;
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
         }
 
         .history-clear-row {
           display: flex;
           justify-content: flex-end;
-          padding-top: 2px;
+          margin-top: 2px;
         }
 
         .btn-clear-history-action {
-          display: inline-flex;
+          display: flex;
           align-items: center;
-          gap: 6px;
-          padding: 5px 12px;
-          font-size: 11px;
+          gap: 5px;
+          background: transparent;
+          border: 1px solid var(--border-light);
+          color: var(--text-muted);
+          font-size: 10px;
+          font-weight: 500;
+          padding: 4px 8px;
           border-radius: var(--radius-xs, 4px);
-          border: 1px solid rgba(239, 68, 68, 0.35);
-          background: rgba(239, 68, 68, 0.08);
-          color: #f87171;
           cursor: pointer;
-          transition: all 0.15s ease;
+          transition: all 0.12s ease;
         }
 
         .btn-clear-history-action:hover {
-          background: rgba(239, 68, 68, 0.18);
-          border-color: #ef4444;
-          color: #ef4444;
+          color: var(--accent-red);
+          border-color: rgba(239, 68, 68, 0.4);
+          background: rgba(239, 68, 68, 0.08);
         }
 
         .btn-clear-history-action.cleared {
-          background: rgba(16, 185, 129, 0.15);
-          border-color: #10b981;
-          color: #10b981;
+          color: var(--accent-green);
+          border-color: rgba(16, 185, 129, 0.4);
+          background: rgba(16, 185, 129, 0.08);
         }
 
-        /* Scale Control */
+        /* Scale Control Panel */
         .scale-control-panel {
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-light);
+          border-radius: var(--radius-sm, 6px);
+          padding: 12px 14px;
           display: flex;
           flex-direction: column;
           gap: 12px;
-          padding: 12px 14px;
-          background: var(--bg-tertiary);
-          border: 1px solid var(--border-light);
-          border-radius: var(--radius-md, 8px);
         }
 
         .scale-slider-row {
           display: flex;
           align-items: center;
-          gap: 12px;
+          gap: 10px;
         }
 
         .scale-min,
         .scale-max {
-          font-size: 10.5px;
-          font-weight: 600;
+          font-size: 10px;
           color: var(--text-muted);
-          font-family: var(--font-mono);
-          width: 32px;
+          min-width: 28px;
         }
 
         .scale-slider {
           flex: 1;
-          height: 6px;
-          border-radius: 3px;
-          background: var(--border-medium);
           accent-color: var(--accent-blue);
           cursor: pointer;
         }
 
         .scale-current-badge {
-          min-width: 44px;
-          text-align: center;
-          padding: 3px 8px;
-          background: var(--accent-blue);
-          color: #ffffff;
-          font-size: 11px;
+          background: rgba(59, 130, 246, 0.12);
+          color: var(--accent-blue);
+          border: 1px solid rgba(59, 130, 246, 0.25);
+          padding: 2px 6px;
+          border-radius: 4px;
+          font-size: 10px;
           font-weight: 700;
-          font-family: var(--font-mono);
-          border-radius: var(--radius-xs, 4px);
+          min-width: 38px;
+          text-align: center;
         }
 
         .scale-presets-bar {
@@ -870,156 +904,42 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         }
 
         .preset-chip {
-          padding: 4px 9px;
-          font-size: 10.5px;
-          font-weight: 500;
-          border-radius: var(--radius-sm, 6px);
-          background: var(--bg-card);
-          color: var(--text-sub);
+          background: var(--bg-secondary);
           border: 1px solid var(--border-light);
+          color: var(--text-sub);
+          font-size: 10.5px;
+          padding: 4px 10px;
+          border-radius: var(--radius-xs, 4px);
           cursor: pointer;
           transition: all 0.12s ease;
         }
+
         .preset-chip:hover {
           color: var(--text-main);
-          border-color: var(--border-medium);
+          background: var(--bg-hover);
         }
+
         .preset-chip.active {
-          background: var(--accent-blue);
-          color: #ffffff;
+          background: rgba(59, 130, 246, 0.12);
+          color: var(--accent-blue);
           border-color: var(--accent-blue);
           font-weight: 600;
         }
 
         .reset-scale-btn {
-          display: inline-flex;
+          margin-left: auto;
+          display: flex;
           align-items: center;
           gap: 4px;
-          padding: 4px 9px;
-          font-size: 10.5px;
-          color: var(--text-muted);
           background: transparent;
-          border: 1px dashed var(--border-medium);
-          border-radius: var(--radius-sm, 6px);
+          border: none;
+          color: var(--text-muted);
+          font-size: 10px;
           cursor: pointer;
-          margin-left: auto;
-          transition: all 0.12s ease;
         }
+
         .reset-scale-btn:hover {
           color: var(--text-main);
-          border-color: var(--text-muted);
-        }
-
-        /* Window Presets */
-        .window-presets-grid {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 8px;
-        }
-
-        .win-preset-card {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          padding: 8px 10px;
-          border-radius: var(--radius-sm, 6px);
-          border: 1px solid var(--border-light);
-          background: var(--bg-tertiary);
-          color: var(--text-sub);
-          cursor: pointer;
-          transition: all 0.12s ease;
-          text-align: left;
-        }
-        .win-preset-card:hover {
-          background: var(--bg-hover);
-          color: var(--text-main);
-        }
-        .win-preset-card.active {
-          border-color: var(--accent-blue);
-          background: rgba(59, 130, 246, 0.1);
-          color: var(--text-main);
-        }
-
-        .win-preset-icon {
-          color: var(--accent-blue);
-        }
-
-        .win-preset-info {
-          display: flex;
-          flex-direction: column;
-        }
-
-        .win-preset-title {
-          font-size: 11px;
-          font-weight: 600;
-        }
-
-        .win-preset-dim {
-          font-size: 10px;
-          font-family: var(--font-mono);
-          color: var(--text-muted);
-        }
-
-        /* Custom Dimensions */
-        .custom-dim-box {
-          display: flex;
-          flex-direction: column;
-          gap: 6px;
-          margin-top: 2px;
-        }
-
-        .custom-dim-label {
-          font-size: 10px;
-          font-weight: 700;
-          text-transform: uppercase;
-          color: var(--text-muted);
-          letter-spacing: 0.5px;
-        }
-
-        .custom-inputs-row {
-          display: flex;
-          align-items: flex-end;
-          gap: 8px;
-        }
-
-        .dim-field {
-          flex: 1;
-          display: flex;
-          flex-direction: column;
-          gap: 4px;
-        }
-        .dim-field label {
-          font-size: 10px;
-          color: var(--text-sub);
-        }
-
-        .dim-times {
-          font-size: 13px;
-          color: var(--text-muted);
-          padding-bottom: 6px;
-        }
-
-        .apply-dim-btn {
-          height: 30px;
-          white-space: nowrap;
-          font-size: 11px;
-        }
-
-        .status-banner {
-          font-size: 11px;
-          padding: 6px 10px;
-          border-radius: var(--radius-sm, 6px);
-          text-align: center;
-        }
-        .status-banner.success {
-          color: var(--accent-green);
-          background: rgba(16, 185, 129, 0.12);
-          border: 1px solid rgba(16, 185, 129, 0.25);
-        }
-        .status-banner.error {
-          color: var(--accent-red);
-          background: rgba(239, 68, 68, 0.12);
-          border: 1px solid rgba(239, 68, 68, 0.25);
         }
 
         /* Shortcuts Container */
@@ -1030,91 +950,95 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         }
 
         .shortcut-group-block {
-          display: flex;
-          flex-direction: column;
-          gap: 6px;
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-light);
+          border-radius: var(--radius-sm, 6px);
+          overflow: hidden;
         }
 
         .shortcut-group-title {
           font-size: 10px;
           font-weight: 700;
           text-transform: uppercase;
-          color: var(--text-muted);
           letter-spacing: 0.5px;
+          color: var(--text-sub);
+          background: var(--bg-header);
+          padding: 6px 12px;
+          border-bottom: 1px solid var(--border-light);
         }
 
         .shortcuts-table {
           display: flex;
           flex-direction: column;
-          border: 1px solid var(--border-light);
-          border-radius: var(--radius-md, 8px);
-          overflow: hidden;
-          background: var(--bg-tertiary);
         }
 
         .shortcut-row {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 8px 12px;
+          padding: 6px 12px;
           border-bottom: 1px solid var(--border-light);
-          gap: 12px;
+          font-size: 11px;
         }
+
         .shortcut-row:last-child {
           border-bottom: none;
         }
 
         .shortcut-desc {
-          font-size: 11px;
           color: var(--text-main);
-          flex: 1;
         }
 
         .shortcut-keys {
           display: flex;
           align-items: center;
           gap: 4px;
-          flex-shrink: 0;
         }
 
         .key-separator {
-          font-size: 10px;
           color: var(--text-muted);
+          font-size: 10px;
         }
 
         .key-badge {
-          display: inline-block;
-          padding: 2px 6px;
-          font-size: 10px;
-          font-family: var(--font-mono);
-          font-weight: 600;
-          color: var(--text-main);
-          background: var(--bg-card);
+          background: var(--bg-secondary);
           border: 1px solid var(--border-medium);
+          color: var(--text-main);
+          font-size: 10px;
+          padding: 2px 6px;
           border-radius: 4px;
-          box-shadow: 0 1px 1px rgba(0, 0, 0, 0.2);
+          box-shadow: 0 1px 0 var(--border-medium);
         }
 
         /* Footer */
         .modal-footer {
-          padding: 10px 18px;
+          padding: 10px 16px;
           background: var(--bg-header);
           border-top: 1px solid var(--border-light);
           display: flex;
-          justify-content: space-between;
           align-items: center;
+          justify-content: space-between;
           flex-shrink: 0;
         }
 
         .footer-meta {
           font-size: 10px;
           color: var(--text-muted);
-          font-family: var(--font-mono);
         }
 
-        .close-btn {
-          height: 28px;
+        .close-modal-btn {
           font-size: 11px;
+          padding: 5px 12px;
+        }
+
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+
+        @keyframes slideUp {
+          from { opacity: 0; transform: translateY(8px) scale(0.98); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
         }
       `}</style>
     </div>

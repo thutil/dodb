@@ -548,22 +548,22 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
     <div className="diagram-pane">
       <div className="diagram-header-bar">
         <div className="bar-left">
-          <GitFork size={16} className="head-icon" />
-          <h2 className="head-title">Database ER Diagram</h2>
+          <GitFork size={15} className="head-icon" />
+          <h2 className="head-title">ER Diagram</h2>
           <span className="db-pill font-mono">{activeDatabase}</span>
           <span className="count-tag font-mono">
-            {tables.length} table{tables.length === 1 ? "" : "s"}, {relations.length} FK{relations.length === 1 ? "" : "s"}
+            {tables.length} table{tables.length === 1 ? "" : "s"} &bull; {relations.length} FK{relations.length === 1 ? "" : "s"}
           </span>
           <div
             className="read-only-badge font-mono"
             data-tooltip={
               language === "th"
                 ? "ไดอะแกรมสำหรับดูโครงสร้างภาพรวมเท่านั้น ไม่มีการแก้ไขฐานข้อมูลโดยตรง"
-                : "Read-only overview diagram (visual inspection only, no direct modifications)"
+                : "Read-only overview diagram (visual inspection only)"
             }
           >
-            <Eye size={11} className="read-only-icon" />
-            <span>{language === "th" ? "ดูโครงสร้างเท่านั้น (Read Only)" : "Read Only View"}</span>
+            <Eye size={10} className="read-only-icon" />
+            <span>Read Only</span>
           </div>
         </div>
 
@@ -574,7 +574,7 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
               type="button"
               className={`mode-btn ${viewMode === "compact" ? "active" : ""}`}
               onClick={() => setViewMode("compact")}
-              title="Compact: Truncate long column lists (Recommended for 20+ tables)"
+              title="Compact View"
             >
               <Layers size={11} />
               <span>Compact</span>
@@ -583,19 +583,19 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
               type="button"
               className={`mode-btn ${viewMode === "keys_only" ? "active" : ""}`}
               onClick={() => setViewMode("keys_only")}
-              title="Keys Only: Show PK & FK columns only (High-performance for 50+ tables)"
+              title="Keys Only View"
             >
               <Key size={11} />
-              <span>Keys Only</span>
+              <span>Keys</span>
             </button>
             <button
               type="button"
               className={`mode-btn ${viewMode === "all" ? "active" : ""}`}
               onClick={() => setViewMode("all")}
-              title="Full: Show all columns"
+              title="Full Columns View"
             >
               <Eye size={11} />
-              <span>All Columns</span>
+              <span>All</span>
             </button>
           </div>
 
@@ -608,24 +608,24 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
               title="Toggle to show only tables with foreign key relations"
             >
               <Filter size={11} />
-              <span>{filterConnectedOnly ? "Linked Only" : "All Tables"}</span>
+              <span>{filterConnectedOnly ? "Linked" : "All Tables"}</span>
             </button>
           )}
 
           <div className="search-wrap">
             <span className="search-icon-wrap">
-              <Search size={12} />
+              <Search size={11} />
             </span>
             <input
               type="text"
               className="input search-field font-mono"
-              placeholder="Filter tables & columns..."
+              placeholder="Search..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
             {searchQuery && (
               <button className="search-clear-btn" onClick={() => setSearchQuery("")} title="Clear search">
-                <X size={11} />
+                <X size={10} />
               </button>
             )}
           </div>
@@ -635,32 +635,35 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
             onClick={() => arrangeLayout(tables, relations, viewMode)}
             title="Auto-organize table layout"
           >
-            <LayoutGrid size={12} />
+            <LayoutGrid size={11} />
             <span>Layout</span>
           </button>
 
           <button
-            className="btn btn-secondary btn-sm"
+            className="btn btn-secondary btn-sm btn-icon-only"
             onClick={() => fitView({ padding: 0.15, duration: 350 })}
             title="Zoom to Fit Canvas"
           >
             <Maximize2 size={12} />
-            <span>Fit</span>
           </button>
 
           <button
             className="btn btn-secondary btn-sm export-print-btn"
             onClick={() => setIsExportModalOpen(true)}
             disabled={tables.length === 0}
-            title="Export PNG, JPG, or Print PDF"
+            title="Export PNG, JPG, or Print PDF Report"
           >
-            <Printer size={12} />
-            <span>Export / Print</span>
+            <Printer size={11} />
+            <span>Export</span>
           </button>
 
-          <button className="btn btn-primary btn-sm" onClick={fetchSchemaDiagram} disabled={loading} title="Reload schema">
+          <button
+            className="btn btn-primary btn-sm btn-icon-only"
+            onClick={fetchSchemaDiagram}
+            disabled={loading}
+            title="Reload schema"
+          >
             <RefreshCw size={12} className={loading ? "spin" : ""} />
-            <span>{loading ? "..." : "Refresh"}</span>
           </button>
         </div>
       </div>
@@ -868,28 +871,31 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
         }
 
         .diagram-header-bar {
-          padding: 8px 14px;
+          padding: 6px 12px;
           background: var(--bg-header);
           border-bottom: 1px solid var(--border-light);
           display: flex;
           justify-content: space-between;
           align-items: center;
           flex-shrink: 0;
-          gap: 12px;
+          gap: 8px;
+          min-height: 40px;
         }
 
         .bar-left {
           display: flex;
           align-items: center;
-          gap: 8px;
+          gap: 6px;
+          flex-shrink: 0;
+          white-space: nowrap;
         }
         .head-icon { color: var(--accent-blue); }
-        .head-title { font-size: 14px; font-weight: 700; }
+        .head-title { font-size: 13px; font-weight: 700; }
         .db-pill {
           font-size: 10px;
           background: rgba(59, 130, 246, 0.12);
           border: 1px solid rgba(59, 130, 246, 0.25);
-          padding: 2px 7px;
+          padding: 1.5px 6px;
           border-radius: 4px;
           color: var(--accent-blue);
           font-weight: 600;
@@ -898,39 +904,45 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
         .read-only-badge {
           display: inline-flex;
           align-items: center;
-          gap: 4px;
-          padding: 2px 7px;
+          gap: 3px;
+          padding: 1.5px 6px;
           border-radius: 4px;
           background: rgba(100, 116, 139, 0.12);
           border: 1px solid rgba(100, 116, 139, 0.25);
           color: var(--text-muted);
-          font-size: 10px;
+          font-size: 9.5px;
           font-weight: 500;
           user-select: none;
+          white-space: nowrap;
         }
         .read-only-icon {
           color: var(--accent-blue);
         }
 
-        .bar-right { display: flex; align-items: center; gap: 8px; }
+        .bar-right {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          flex-shrink: 0;
+        }
 
         .view-mode-selector {
           display: flex;
           background: var(--bg-tertiary);
           border: 1px solid var(--border-light);
           border-radius: var(--radius-sm);
-          padding: 2px;
-          gap: 2px;
+          padding: 1.5px;
+          gap: 1.5px;
         }
         .mode-btn {
           display: flex;
           align-items: center;
-          gap: 4px;
-          padding: 3px 8px;
+          gap: 3px;
+          padding: 2.5px 6px;
           border: none;
           background: transparent;
           color: var(--text-muted);
-          font-size: 10.5px;
+          font-size: 10px;
           border-radius: 3px;
           cursor: pointer;
           transition: all 0.12s ease;
@@ -954,7 +966,7 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
         .search-wrap { position: relative; display: flex; align-items: center; }
         .search-icon-wrap {
           position: absolute;
-          left: 8px;
+          left: 7px;
           color: var(--text-muted);
           pointer-events: none;
           display: flex;
@@ -962,10 +974,10 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
           justify-content: center;
           z-index: 2;
         }
-        .search-field { padding-left: 26px; padding-right: 22px; width: 170px; font-size: 11px; height: 28px; }
+        .search-field { padding-left: 22px; padding-right: 18px; width: 110px; font-size: 10.5px; height: 26px; }
         .search-clear-btn {
           position: absolute;
-          right: 6px;
+          right: 5px;
           background: transparent;
           border: none;
           color: var(--text-muted);
@@ -978,9 +990,19 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
         .search-clear-btn:hover { color: var(--text-main); }
 
         .btn-sm {
-          padding: 4px 9px;
-          font-size: 11px;
-          height: 28px;
+          padding: 3px 8px;
+          font-size: 10.5px;
+          height: 26px;
+        }
+
+        .btn-icon-only {
+          padding: 0;
+          width: 26px;
+          height: 26px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 26px;
         }
 
         .diagram-error-banner {
@@ -1005,14 +1027,18 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
         }
 
         .relations-summary-bar {
-          padding: 5px 12px;
+          padding: 4px 10px;
           background: var(--bg-tertiary);
           border-bottom: 1px solid var(--border-light);
           display: flex;
           align-items: center;
-          gap: 10px;
+          gap: 8px;
           overflow-x: auto;
           flex-shrink: 0;
+          scrollbar-width: none;
+        }
+        .relations-summary-bar::-webkit-scrollbar {
+          display: none;
         }
         .summary-label {
           display: flex;
