@@ -44,7 +44,7 @@ build_arch() {
     CGO_ENABLED=1 GOOS=darwin GOARCH="$goarch" \
         CGO_CFLAGS="-mmacosx-version-min=11.0" \
         CGO_LDFLAGS="-mmacosx-version-min=11.0" \
-        go build -trimpath -ldflags "$LDFLAGS" -o "$out" ./cmd/dodb
+        go build -trimpath -tags production -ldflags "$LDFLAGS" -o "$out" ./cmd/dodb
 }
 
 build_arch arm64 "$DIST/dodb-arm64"

@@ -77,7 +77,7 @@ build:
 ## binary: just the Go binary for this host, into dist/dodb
 binary: ui
 	@mkdir -p dist
-	CGO_ENABLED=1 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o dist/dodb ./cmd/dodb
+	CGO_ENABLED=1 $(GO) build -trimpath -tags production -ldflags "$(LDFLAGS)" -o dist/dodb ./cmd/dodb
 	@echo "dist/dodb  ($$(du -h dist/dodb | cut -f1))"
 
 ## test: run the Go tests that need no database

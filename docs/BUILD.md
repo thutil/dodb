@@ -185,7 +185,7 @@ pnpm build:ui
 
 CGO_ENABLED=1 GOOS=windows GOARCH=amd64 \
   CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ \
-  go build -trimpath -ldflags "-H windowsgui -X main.version=0.3.0" \
+  go build -trimpath -tags production -ldflags "-H windowsgui -X main.version=0.3.0" \
   -o dist/dodb.exe ./cmd/dodb
 
 file dist/dodb.exe    # PE32+ executable (GUI) x86-64, for MS Windows

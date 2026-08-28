@@ -215,6 +215,7 @@ jobs:
 
           mkdir -p dist
           go build -trimpath \
+            -tags production \
             -ldflags "-H windowsgui -X main.version=${{ steps.version.outputs.version }}" \
             -o "dist/dodb.exe" ./cmd/dodb
           ls -la dist/
