@@ -27,17 +27,141 @@ export interface GisSummary {
   pointCount?: number;
 }
 
+export interface CoordinatePair {
+  latColumn: string;
+  lngColumn: string;
+  prefix: string;
+  label: string;
+}
+
+export interface GisFeatureRecord {
+  id: string | number;
+  geometry: GeoJsonGeometry;
+  properties?: Record<string, unknown>;
+  label?: string;
+  isCurrent?: boolean;
+}
+
 /**
- * Check whether a database column is a GIS / Geometry / Spatial column
+ * Validate latitude and longitude numbers
+ */
+export function isValidCoordinate(lat: number, lng: number): boolean {
+  if (typeof lat !== "number" || typeof lng !== "number") return false;
+  if (isNaN(lat) || isNaN(lng)) return false;
+  return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+}
+
+const LAT_PATTERNS = [
+  /^(.*?)(?:_|\b)(?:latitude|latitube|lat_deg|latval|lat|y)$/i,
+  /^(.*?)(?:Latitude|Latitube|LatDeg|LatVal|Lat|Y)$/,
+];
+
+const LNG_PATTERNS = [
+  /^(.*?)(?:_|\b)(?:longitude|longitube|lon_deg|lng_deg|lngval|lonval|long|lng|lon|x)$/i,
+  /^(.*?)(?:Longitude|Longitube|LonDeg|LngDeg|LngVal|LonVal|Long|Lng|Lon|X)$/,
+];
+
+function extractLatPrefix(colName: string): string | null {
+  const clean = colName.trim();
+  for (const pat of LAT_PATTERNS) {
+    const m = clean.match(pat);
+    if (m) {
+      const suffix = clean.slice(m[1].length).toLowerCase();
+      if (/^(?:_|\b)?(?:latitude|latitube|lat_deg|latval|lat|y)$/i.test(suffix)) {
+        return m[1].replace(/[_.\s-]+$/, "").toLowerCase();
+      }
+    }
+  }
+  return null;
+}
+
+function extractLngPrefix(colName: string): string | null {
+  const clean = colName.trim();
+  for (const pat of LNG_PATTERNS) {
+    const m = clean.match(pat);
+    if (m) {
+      const suffix = clean.slice(m[1].length).toLowerCase();
+      if (/^(?:_|\b)?(?:longitude|longitube|lon_deg|lng_deg|lngval|lonval|long|lng|lon|x)$/i.test(suffix)) {
+        return m[1].replace(/[_.\s-]+$/, "").toLowerCase();
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Smart detection of coordinate pairs (e.g. lat + lng, latitude + longitude, pickup_lat + pickup_lng)
+ */
+export function detectCoordinatePairs(columns: Array<{ name: string; type?: string }>): CoordinatePair[] {
+  if (!columns || columns.length < 2) return [];
+
+  const latCols: Array<{ name: string; prefix: string }> = [];
+  const lngCols: Array<{ name: string; prefix: string }> = [];
+
+  columns.forEach((col) => {
+    const latPrefix = extractLatPrefix(col.name);
+    if (latPrefix !== null) {
+      latCols.push({ name: col.name, prefix: latPrefix });
+    }
+    const lngPrefix = extractLngPrefix(col.name);
+    if (lngPrefix !== null) {
+      lngCols.push({ name: col.name, prefix: lngPrefix });
+    }
+  });
+
+  const pairs: CoordinatePair[] = [];
+  const usedLng = new Set<string>();
+
+  // 1. Exact prefix match (e.g. pickup_lat + pickup_lng)
+  latCols.forEach((lat) => {
+    const matchingLng = lngCols.find((lng) => !usedLng.has(lng.name) && lng.prefix === lat.prefix);
+    if (matchingLng) {
+      usedLng.add(matchingLng.name);
+      const prefixLabel = lat.prefix ? `${lat.prefix.replace(/_/g, " ")} ` : "";
+      pairs.push({
+        latColumn: lat.name,
+        lngColumn: matchingLng.name,
+        prefix: lat.prefix,
+        label: `${prefixLabel}(${lat.name}, ${matchingLng.name})`.trim(),
+      });
+    }
+  });
+
+  // 2. If there's 1 unmatched lat and 1 unmatched lng in the entire table, pair them
+  const remainingLat = latCols.filter((l) => !pairs.some((p) => p.latColumn === l.name));
+  const remainingLng = lngCols.filter((l) => !usedLng.has(l.name));
+  if (remainingLat.length === 1 && remainingLng.length === 1) {
+    pairs.push({
+      latColumn: remainingLat[0].name,
+      lngColumn: remainingLng[0].name,
+      prefix: "",
+      label: `(${remainingLat[0].name}, ${remainingLng[0].name})`,
+    });
+  }
+
+  return pairs;
+}
+
+/**
+ * Check whether a database column is a GIS / Geometry / Spatial column or coordinate column
  */
 export function isGeometryColumn(colType?: string, colName?: string): boolean {
   const t = (colType || "").toLowerCase();
   const n = (colName || "").toLowerCase();
 
   const isTypeMatch = /(geometry|geography|geom|point|linestring|polygon|multipoint|multilinestring|multipolygon|geometrycollection|spatial)/.test(t);
-  const isNameMatch = /(^geom$|^geometry$|^shape$|^the_geom$|^location$|^coordinates$|^lat_lng$|^wkt$|^geojson$|.*geom.*|.*spatial.*|.*polygon.*|.*coord.*)/.test(n);
+  const isNameMatch = /(^geom$|^geometry$|^shape$|^the_geom$|^location$|^coordinates$|^coord$|^lat_lng$|^latlng$|^wkt$|^geojson$|.*geom.*|.*spatial.*|.*polygon.*|.*coord.*)/.test(n);
 
   return isTypeMatch || isNameMatch;
+}
+
+/**
+ * Check whether a column name indicates coordinate/location data
+ */
+export function isCoordinateColumn(colName?: string, colType?: string): boolean {
+  if (isGeometryColumn(colType, colName)) return true;
+  const n = (colName || "").toLowerCase();
+  return /(?:^|[_.-\s])(lat|latitude|latitube|lng|lon|long|longitude|longitube|coord|coords|coordinates|location|position|gps|geom|geometry|point)(?:$|[_.-\s])/i.test(n);
 }
 
 /**
@@ -112,6 +236,26 @@ function parseCoordsPair(str: string): number[] {
   return parts.slice(0, 2); // [lng, lat]
 }
 
+function extractParenGroups(text: string): string[] {
+  const groups: string[] = [];
+  let depth = 0;
+  let start = -1;
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (char === "(") {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (char === ")") {
+      depth--;
+      if (depth === 0 && start !== -1) {
+        groups.push(text.slice(start + 1, i).trim());
+        start = -1;
+      }
+    }
+  }
+  return groups;
+}
+
 function parseWktBody(type: string, body: string, srid?: number): GeoJsonGeometry | null {
   try {
     switch (type) {
@@ -121,56 +265,61 @@ function parseWktBody(type: string, body: string, srid?: number): GeoJsonGeometr
         return { type: "Point", coordinates: coords, srid };
       }
       case "LINESTRING": {
-        const points = body.split(",").map((p) => parseCoordsPair(p));
+        const points = body.split(",").map((p) => parseCoordsPair(p)).filter((c) => c.length >= 2);
         return { type: "LineString", coordinates: points, srid };
       }
       case "POLYGON": {
-        // Matches rings like: ((x y, x y), (x y, x y))
+        // Matches rings like: ((x y, x y), (x y, x y)) or (x y, x y)
         const rings: number[][][] = [];
-        const ringMatches = body.match(/\([^\(\)]+\)/g);
-        if (ringMatches) {
-          for (const rm of ringMatches) {
-            const rawRing = rm.replace(/[\(\)]/g, "").trim();
-            const ringPts = rawRing.split(",").map((p) => parseCoordsPair(p));
-            rings.push(ringPts);
+        const ringGroups = extractParenGroups(body);
+        if (ringGroups.length > 0) {
+          for (const rg of ringGroups) {
+            const pts = rg.split(",").map((p) => parseCoordsPair(p)).filter((c) => c.length >= 2);
+            if (pts.length > 0) rings.push(pts);
           }
         } else {
-          const rawRing = body.replace(/[\(\)]/g, "").trim();
-          rings.push(rawRing.split(",").map((p) => parseCoordsPair(p)));
+          const pts = body.replace(/[\(\)]/g, "").split(",").map((p) => parseCoordsPair(p)).filter((c) => c.length >= 2);
+          if (pts.length > 0) rings.push(pts);
         }
         return { type: "Polygon", coordinates: rings, srid };
       }
       case "MULTIPOINT": {
         const clean = body.replace(/[\(\)]/g, " ");
-        const points = clean.split(",").map((p) => parseCoordsPair(p));
+        const points = clean.split(",").map((p) => parseCoordsPair(p)).filter((c) => c.length >= 2);
         return { type: "MultiPoint", coordinates: points, srid };
       }
       case "MULTILINESTRING": {
         const lines: number[][][] = [];
-        const lineMatches = body.match(/\([^\(\)]+\)/g);
-        if (lineMatches) {
-          for (const lm of lineMatches) {
-            const raw = lm.replace(/[\(\)]/g, "").trim();
-            lines.push(raw.split(",").map((p) => parseCoordsPair(p)));
+        const lineGroups = extractParenGroups(body);
+        if (lineGroups.length > 0) {
+          for (const lg of lineGroups) {
+            const pts = lg.split(",").map((p) => parseCoordsPair(p)).filter((c) => c.length >= 2);
+            if (pts.length > 0) lines.push(pts);
           }
+        } else {
+          const pts = body.replace(/[\(\)]/g, "").split(",").map((p) => parseCoordsPair(p)).filter((c) => c.length >= 2);
+          if (pts.length > 0) lines.push(pts);
         }
         return { type: "MultiLineString", coordinates: lines, srid };
       }
       case "MULTIPOLYGON": {
-        // MultiPolygon: (((x y, ...)), ((x y, ...)))
+        // MultiPolygon body: ((ring1), (ring2)), ((ring1))
         const polys: number[][][][] = [];
-        const polyMatches = body.match(/\(\([^\)]+\)\)/g);
-        if (polyMatches) {
-          for (const pm of polyMatches) {
+        const polyGroups = extractParenGroups(body);
+        if (polyGroups.length > 0) {
+          for (const pg of polyGroups) {
             const rings: number[][][] = [];
-            const ringMatches = pm.match(/\([^\(\)]+\)/g);
-            if (ringMatches) {
-              for (const rm of ringMatches) {
-                const raw = rm.replace(/[\(\)]/g, "").trim();
-                rings.push(raw.split(",").map((p) => parseCoordsPair(p)));
+            const ringGroups = extractParenGroups(pg);
+            if (ringGroups.length > 0) {
+              for (const rg of ringGroups) {
+                const pts = rg.split(",").map((p) => parseCoordsPair(p)).filter((c) => c.length >= 2);
+                if (pts.length > 0) rings.push(pts);
               }
+            } else {
+              const pts = pg.replace(/[\(\)]/g, "").split(",").map((p) => parseCoordsPair(p)).filter((c) => c.length >= 2);
+              if (pts.length > 0) rings.push(pts);
             }
-            polys.push(rings);
+            if (rings.length > 0) polys.push(rings);
           }
         }
         return { type: "MultiPolygon", coordinates: polys, srid };
@@ -538,4 +687,112 @@ export function getGisCenter(geom: GeoJsonGeometry): [number, number] {
     (bounds[0][0] + bounds[1][0]) / 2,
     (bounds[0][1] + bounds[1][1]) / 2,
   ];
+}
+
+/**
+ * Extract point coordinates from a single cell or row coordinate pairs
+ */
+export function extractPointFromRow(
+  row: Record<string, unknown>,
+  columns: Array<{ name: string; type?: string }>,
+  coordinatePairs: CoordinatePair[] = []
+): Array<{ label: string; coordinates: [number, number]; colName: string }> {
+  if (!row) return [];
+  const points: Array<{ label: string; coordinates: [number, number]; colName: string }> = [];
+
+  // 1. Check Coordinate Pairs
+  for (const pair of coordinatePairs) {
+    const rawLat = row[pair.latColumn];
+    const rawLng = row[pair.lngColumn];
+    if (rawLat != null && rawLng != null) {
+      const latVal = typeof rawLat === "number" ? rawLat : parseFloat(String(rawLat));
+      const lngVal = typeof rawLng === "number" ? rawLng : parseFloat(String(rawLng));
+      if (isValidCoordinate(latVal, lngVal)) {
+        points.push({
+          label: pair.label || `${pair.latColumn}, ${pair.lngColumn}`,
+          coordinates: [lngVal, latVal],
+          colName: pair.latColumn,
+        });
+      }
+    }
+  }
+
+  // 2. Check Geometry / String / JSON Columns
+  for (const col of columns) {
+    // If column is already part of a paired coordinate, skip
+    if (coordinatePairs.some((p) => p.latColumn === col.name || p.lngColumn === col.name)) {
+      continue;
+    }
+    const val = row[col.name];
+    if (val == null || val === "") continue;
+
+    // Check GIS data (WKT, WKB, GeoJSON)
+    const geom = parseGisToGeoJson(val);
+    if (geom && geom.type === "Point" && Array.isArray(geom.coordinates) && geom.coordinates.length >= 2) {
+      const lng = Number(geom.coordinates[0]);
+      const lat = Number(geom.coordinates[1]);
+      if (isValidCoordinate(lat, lng)) {
+        points.push({
+          label: col.name,
+          coordinates: [lng, lat],
+          colName: col.name,
+        });
+      }
+    }
+  }
+
+  return points;
+}
+
+/**
+ * Extract all spatial features (Geometry shapes + Coordinate points) from entire dataset for Map View
+ */
+export function getAllSpatialFeaturesFromRows(
+  rows: Record<string, unknown>[],
+  columns: Array<{ name: string; type?: string }>
+): GisFeatureRecord[] {
+  if (!rows || rows.length === 0 || !columns || columns.length === 0) return [];
+
+  const pairs = detectCoordinatePairs(columns);
+  const features: GisFeatureRecord[] = [];
+
+  rows.forEach((row, rowIdx) => {
+    // 1. Check Geometry columns (Polygons, LineStrings, Points, etc.)
+    columns.forEach((col) => {
+      const val = row[col.name];
+      if (val != null && val !== "") {
+        if (isGeometryColumn(col.type, col.name) || isGisData(val)) {
+          const geom = parseGisToGeoJson(val);
+          if (geom) {
+            features.push({
+              id: `geom-${rowIdx}-${col.name}`,
+              geometry: geom,
+              properties: { ...row },
+              label: `Row #${rowIdx + 1} (${col.name})`,
+            });
+          }
+        }
+      }
+    });
+
+    // 2. Check coordinate pairs and single coordinate points
+    const points = extractPointFromRow(row, columns, pairs);
+    points.forEach((pt, ptIdx) => {
+      // Avoid duplicate if already added by geometry column above
+      const isAlreadyAdded = features.some((f) => f.id === `geom-${rowIdx}-${pt.colName}`);
+      if (!isAlreadyAdded) {
+        features.push({
+          id: `pt-${rowIdx}-${pt.colName || ptIdx}`,
+          geometry: {
+            type: "Point",
+            coordinates: pt.coordinates,
+          },
+          properties: { ...row },
+          label: `Row #${rowIdx + 1}: ${pt.label}`,
+        });
+      }
+    });
+  });
+
+  return features;
 }

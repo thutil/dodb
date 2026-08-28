@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState, useId } from "react";
-import * as maplibregl from "maplibre-gl";
+import React, { useEffect, useRef, useState, useId, useCallback } from "react";
+import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
   MapPin,
@@ -182,175 +182,10 @@ export const GisMapViewer: React.FC<GisMapViewerProps> = ({
     return null;
   }, [features]);
 
-  // Build MapLibre raster style JSON
-  const getStyleForBasemap = (styleKey: BasemapStyle): maplibregl.StyleSpecification => {
-    const bm = BASEMAP_TILES[styleKey];
-    return {
-      version: 8,
-      sources: {
-        "raster-tiles": {
-          type: "raster",
-          tiles: bm.tiles,
-          tileSize: 256,
-          attribution: bm.attribution,
-          maxzoom: bm.maxzoom,
-        },
-      },
-      layers: [
-        {
-          id: "simple-tiles",
-          type: "raster",
-          source: "raster-tiles",
-          minzoom: 0,
-          maxzoom: bm.maxzoom,
-        },
-      ],
-    };
-  };
-
-  // Initialize MapLibre
-  useEffect(() => {
-    if (!mapContainerRef.current) return;
-
-    // Determine initial center and zoom (comfortable scale without over-zooming/pixelation)
-    let center: [number, number] = [100.5018, 13.7563]; // Default Bangkok
-    let zoom = 10;
-
-    if (features.length > 0) {
-      const firstBounds = getGisBounds(features[0].geometry);
-      if (firstBounds) {
-        center = getGisCenter(features[0].geometry);
-        zoom = features[0].geometry.type === "Point" ? 11 : 9;
-      }
-    }
-
-    const map = new maplibregl.Map({
-      container: mapContainerRef.current,
-      style: getStyleForBasemap(basemap),
-      center,
-      zoom,
-      attributionControl: false,
-    });
-
-    mapInstanceRef.current = map;
-
-    map.on("mousemove", (e) => {
-      setCursorCoords({
-        lng: Number(e.lngLat.lng.toFixed(6)),
-        lat: Number(e.lngLat.lat.toFixed(6)),
-      });
-    });
-
-    if (pickerMode) {
-      map.on("click", (e) => {
-        const lng = Number(e.lngLat.lng.toFixed(6));
-        const lat = Number(e.lngLat.lat.toFixed(6));
-        const wkt = `POINT (${lng} ${lat})`;
-
-        setPickedCoords({ lng, lat });
-
-        if (pickerMarkerRef.current) {
-          pickerMarkerRef.current.setLngLat([lng, lat]);
-        } else {
-          const el = document.createElement("div");
-          el.className = "gis-picker-pin";
-          el.innerHTML = `
-            <div style="background:#ef4444;width:18px;height:18px;border-radius:50%;border:2px solid white;box-shadow:0 0 10px rgba(239,68,68,0.8);display:flex;align-items:center;justify-content:center;">
-              <div style="width:6px;height:6px;background:white;border-radius:50%;"></div>
-            </div>
-          `;
-          pickerMarkerRef.current = new maplibregl.Marker({ element: el })
-            .setLngLat([lng, lat])
-            .addTo(map);
-        }
-
-        onPickCoordinates?.({ lng, lat, wkt });
-      });
-    }
-
-    map.on("load", () => {
-      renderGeoJsonLayers(map, featuresRef.current, true);
-    });
-
-    return () => {
-      markersRef.current.forEach((m) => m.remove());
-      markersRef.current = [];
-      pickerMarkerRef.current?.remove();
-      map.remove();
-      mapInstanceRef.current = null;
-    };
-  }, [pickerMode]);
-
-  // Update basemap style seamlessly without losing polygon vector layers or resetting view
-  const handleSwitchBasemap = (newStyle: BasemapStyle) => {
-    setBasemap(newStyle);
-    if (typeof window !== "undefined") {
-      try {
-        localStorage.setItem(BASEMAP_STORAGE_KEY, newStyle);
-      } catch { }
-    }
-
-    const map = mapInstanceRef.current;
-    if (!map) return;
-
-    const bm = BASEMAP_TILES[newStyle];
-    if (!bm) return;
-
-    try {
-      // 1. Remove existing raster basemap layer & source
-      if (map.getLayer("simple-tiles")) {
-        map.removeLayer("simple-tiles");
-      }
-      if (map.getSource("raster-tiles")) {
-        map.removeSource("raster-tiles");
-      }
-
-      // 2. Add new raster source
-      map.addSource("raster-tiles", {
-        type: "raster",
-        tiles: bm.tiles,
-        tileSize: 256,
-        attribution: bm.attribution,
-        maxzoom: bm.maxzoom,
-      });
-
-      // 3. Find first vector layer to insert raster behind it
-      const beforeLayerId = map.getLayer("gis-polygons-fill")
-        ? "gis-polygons-fill"
-        : map.getLayer("gis-lines")
-          ? "gis-lines"
-          : undefined;
-
-      map.addLayer(
-        {
-          id: "simple-tiles",
-          type: "raster",
-          source: "raster-tiles",
-          minzoom: 0,
-          maxzoom: bm.maxzoom,
-        },
-        beforeLayerId
-      );
-
-      // 4. Ensure vector layers are still present, re-render if missing
-      if (!map.getSource("gis-features")) {
-        renderGeoJsonLayers(map, featuresRef.current, false);
-      }
-    } catch (err) {
-      console.warn("Dynamic basemap swap fallback to setStyle:", err);
-      // Fallback via setStyle with styledata listener
-      const reAddLayers = () => {
-        if (mapInstanceRef.current && mapInstanceRef.current.isStyleLoaded()) {
-          renderGeoJsonLayers(mapInstanceRef.current, featuresRef.current, false);
-        }
-      };
-      map.once("styledata", reAddLayers);
-      map.setStyle(getStyleForBasemap(newStyle));
-    }
-  };
-
   // Render vector shapes and point markers
-  const renderGeoJsonLayers = (map: maplibregl.Map, featList: GisFeatureRecord[], autoFit: boolean = true) => {
+  const renderGeoJsonLayers = useCallback((map: maplibregl.Map, featList: GisFeatureRecord[], autoFit: boolean = true) => {
+    if (!map || !map.isStyleLoaded()) return;
+
     // Clear existing markers
     markersRef.current.forEach((m) => m.remove());
     markersRef.current = [];
@@ -446,10 +281,10 @@ export const GisMapViewer: React.FC<GisMapViewerProps> = ({
         id: "gis-polygons-fill",
         type: "fill",
         source: "gis-features",
-        filter: ["==", "$type", "Polygon"],
+        filter: ["==", ["geometry-type"], "Polygon"],
         paint: {
           "fill-color": "#3b82f6",
-          "fill-opacity": 0.25,
+          "fill-opacity": 0.35,
         },
       });
 
@@ -458,9 +293,9 @@ export const GisMapViewer: React.FC<GisMapViewerProps> = ({
         id: "gis-polygons-line",
         type: "line",
         source: "gis-features",
-        filter: ["==", "$type", "Polygon"],
+        filter: ["==", ["geometry-type"], "Polygon"],
         paint: {
-          "line-color": "#60a5fa",
+          "line-color": "#2563eb",
           "line-width": 2.5,
         },
       });
@@ -470,11 +305,26 @@ export const GisMapViewer: React.FC<GisMapViewerProps> = ({
         id: "gis-lines",
         type: "line",
         source: "gis-features",
-        filter: ["==", "$type", "LineString"],
+        filter: ["==", ["geometry-type"], "LineString"],
         paint: {
           "line-color": "#f59e0b",
           "line-width": 3,
         },
+      });
+
+      map.on("click", "gis-polygons-fill", (e) => {
+        const featProps = e.features?.[0]?.properties;
+        if (featProps) {
+          const matchFeat = featList.find((f) => String(f.id) === String(featProps.id));
+          if (matchFeat) setActiveFeature(matchFeat);
+        }
+      });
+
+      map.on("mouseenter", "gis-polygons-fill", () => {
+        map.getCanvas().style.cursor = "pointer";
+      });
+      map.on("mouseleave", "gis-polygons-fill", () => {
+        map.getCanvas().style.cursor = "";
       });
     }
 
@@ -485,6 +335,188 @@ export const GisMapViewer: React.FC<GisMapViewerProps> = ({
         maxZoom: 12.5,
         duration: 600,
       });
+    }
+  }, []);
+
+  // Build MapLibre raster style JSON
+  const getStyleForBasemap = useCallback((styleKey: BasemapStyle): maplibregl.StyleSpecification => {
+    const bm = BASEMAP_TILES[styleKey];
+    return {
+      version: 8,
+      sources: {
+        "raster-tiles": {
+          type: "raster",
+          tiles: bm.tiles,
+          tileSize: 256,
+          attribution: bm.attribution,
+          maxzoom: bm.maxzoom,
+        },
+      },
+      layers: [
+        {
+          id: "simple-tiles",
+          type: "raster",
+          source: "raster-tiles",
+          minzoom: 0,
+          maxzoom: bm.maxzoom,
+        },
+      ],
+    };
+  }, []);
+
+  // Initialize MapLibre
+  useEffect(() => {
+    if (!mapContainerRef.current) return;
+
+    // Determine initial center and zoom (comfortable scale without over-zooming/pixelation)
+    let center: [number, number] = [100.5018, 13.7563]; // Default Bangkok
+    let zoom = 10;
+
+    if (features.length > 0) {
+      const firstBounds = getGisBounds(features[0].geometry);
+      if (firstBounds) {
+        center = getGisCenter(features[0].geometry);
+        zoom = features[0].geometry.type === "Point" ? 11 : 9;
+      }
+    }
+
+    const map = new maplibregl.Map({
+      container: mapContainerRef.current,
+      style: getStyleForBasemap(basemap),
+      center,
+      zoom,
+      attributionControl: false,
+    });
+
+    mapInstanceRef.current = map;
+
+    map.on("mousemove", (e) => {
+      setCursorCoords({
+        lng: Number(e.lngLat.lng.toFixed(6)),
+        lat: Number(e.lngLat.lat.toFixed(6)),
+      });
+    });
+
+    if (pickerMode) {
+      map.on("click", (e) => {
+        const lng = Number(e.lngLat.lng.toFixed(6));
+        const lat = Number(e.lngLat.lat.toFixed(6));
+        const wkt = `POINT (${lng} ${lat})`;
+
+        setPickedCoords({ lng, lat });
+
+        if (pickerMarkerRef.current) {
+          pickerMarkerRef.current.setLngLat([lng, lat]);
+        } else {
+          const el = document.createElement("div");
+          el.className = "gis-picker-pin";
+          el.innerHTML = `
+            <div style="background:#ef4444;width:18px;height:18px;border-radius:50%;border:2px solid white;box-shadow:0 0 10px rgba(239,68,68,0.8);display:flex;align-items:center;justify-content:center;">
+              <div style="width:6px;height:6px;background:white;border-radius:50%;"></div>
+            </div>
+          `;
+          pickerMarkerRef.current = new maplibregl.Marker({ element: el })
+            .setLngLat([lng, lat])
+            .addTo(map);
+        }
+
+        onPickCoordinates?.({ lng, lat, wkt });
+      });
+    }
+
+    map.on("load", () => {
+      renderGeoJsonLayers(map, featuresRef.current, true);
+    });
+
+    return () => {
+      markersRef.current.forEach((m) => m.remove());
+      markersRef.current = [];
+      pickerMarkerRef.current?.remove();
+      map.remove();
+      mapInstanceRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pickerMode, basemap, getStyleForBasemap, onPickCoordinates, renderGeoJsonLayers]);
+
+  // Synchronize GeoJSON layers whenever features input changes
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (map) {
+      if (map.isStyleLoaded()) {
+        renderGeoJsonLayers(map, features, true);
+      } else {
+        map.once("load", () => {
+          renderGeoJsonLayers(map, features, true);
+        });
+      }
+    }
+  }, [features, renderGeoJsonLayers]);
+
+  // Update basemap style seamlessly without losing polygon vector layers or resetting view
+  const handleSwitchBasemap = (newStyle: BasemapStyle) => {
+    setBasemap(newStyle);
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem(BASEMAP_STORAGE_KEY, newStyle);
+      } catch { }
+    }
+
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    const bm = BASEMAP_TILES[newStyle];
+    if (!bm) return;
+
+    try {
+      // 1. Remove existing raster basemap layer & source
+      if (map.getLayer("simple-tiles")) {
+        map.removeLayer("simple-tiles");
+      }
+      if (map.getSource("raster-tiles")) {
+        map.removeSource("raster-tiles");
+      }
+
+      // 2. Add new raster source
+      map.addSource("raster-tiles", {
+        type: "raster",
+        tiles: bm.tiles,
+        tileSize: 256,
+        attribution: bm.attribution,
+        maxzoom: bm.maxzoom,
+      });
+
+      // 3. Find first vector layer to insert raster behind it
+      const beforeLayerId = map.getLayer("gis-polygons-fill")
+        ? "gis-polygons-fill"
+        : map.getLayer("gis-lines")
+          ? "gis-lines"
+          : undefined;
+
+      map.addLayer(
+        {
+          id: "simple-tiles",
+          type: "raster",
+          source: "raster-tiles",
+          minzoom: 0,
+          maxzoom: bm.maxzoom,
+        },
+        beforeLayerId
+      );
+
+      // 4. Ensure vector layers are still present, re-render if missing
+      if (!map.getSource("gis-features")) {
+        renderGeoJsonLayers(map, featuresRef.current, false);
+      }
+    } catch (err) {
+      console.warn("Dynamic basemap swap fallback to setStyle:", err);
+      // Fallback via setStyle with styledata listener
+      const reAddLayers = () => {
+        if (mapInstanceRef.current && mapInstanceRef.current.isStyleLoaded()) {
+          renderGeoJsonLayers(mapInstanceRef.current, featuresRef.current, false);
+        }
+      };
+      map.once("styledata", reAddLayers);
+      map.setStyle(getStyleForBasemap(newStyle));
     }
   };
 

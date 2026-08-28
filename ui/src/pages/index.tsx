@@ -11,8 +11,47 @@ import { ConfirmDdlModal, ConfirmDdlRequest } from "../components/ConfirmDdlModa
 import { DataGrid, PendingChanges, CommitResult } from "../components/DataGrid";
 import { SqlConsole } from "../components/SqlConsole";
 import { setSharedSql } from "../utils/queryWorkspaceStore";
+import dynamic from "next/dynamic";
 import { AdminPanel } from "../components/AdminPanel";
-import { SchemaDiagram } from "../components/SchemaDiagram";
+const SchemaDiagram = dynamic(
+  () => import("../components/SchemaDiagram").then((mod) => mod.SchemaDiagram),
+  {
+    ssr: false,
+    loading: () => (
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          height: "100%",
+          gap: 12,
+          color: "var(--text-muted)",
+          fontSize: 13,
+        }}
+      >
+        <div
+          style={{
+            width: 24,
+            height: 24,
+            border: "2px solid var(--border-light)",
+            borderTopColor: "var(--accent-blue)",
+            borderRadius: "50%",
+            animation: "spin 0.8s linear infinite",
+          }}
+        />
+        <span>Loading ER Diagram...</span>
+        <style jsx>{`
+          @keyframes spin {
+            to {
+              transform: rotate(360deg);
+            }
+          }
+        `}</style>
+      </div>
+    ),
+  }
+);
 import { VisualQueryBuilder } from "../components/VisualQueryBuilder";
 import { CommandPalette } from "../components/CommandPalette";
 import { ImportModal } from "../components/ImportModal";
@@ -1225,6 +1264,14 @@ export default function Home() {
               tables={tables}
               activeTable={activeTable}
               onSelectTable={(tbl) => {
+                if (activeView === "sql") {
+                  const dialect: DBType = activeProfile?.type === "mariadb" ? "mariadb" : activeProfile?.type === "sqlite" ? "sqlite" : "postgres";
+                  const quoted = quoteTableIdent(tbl, dialect);
+                  const selectSql = `SELECT * FROM ${quoted} LIMIT 50;`;
+                  setActiveTable(tbl);
+                  setSharedSql(selectSql);
+                  return;
+                }
                 if (tbl !== activeTable) {
                   fetchSeqRef.current += 1;
                   setRows([]);
@@ -1365,8 +1412,10 @@ export default function Home() {
                 <SchemaDiagram
                   activeProfile={activeProfile}
                   activeDatabase={activeDatabase}
+                  activeTable={activeTable}
                   apiBase={API_BASE}
                   theme={theme}
+                  language={language}
                 />
               ) : (
                 <AdminPanel

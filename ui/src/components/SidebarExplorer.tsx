@@ -1,6 +1,24 @@
 import React, { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { Database, Table2, RefreshCw, Search, HardDrive, X, Layers, Terminal, Copy, Check, Plus, Pencil, Trash2, Eraser, Upload } from "lucide-react";
+import {
+  Database,
+  Table2,
+  RefreshCw,
+  Search,
+  HardDrive,
+  X,
+  Layers,
+  Terminal,
+  Copy,
+  Check,
+  Plus,
+  Pencil,
+  Trash2,
+  Eraser,
+  Upload,
+  PanelLeftClose,
+  PanelLeftOpen,
+} from "lucide-react";
 import { DBType } from "../types";
 import { quoteTableIdent } from "../utils/ddlBuilder";
 import { Language, t } from "../utils/i18n";
@@ -59,15 +77,31 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
   language = "en",
 }) => {
   const [mounted, setMounted] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedTables, setSelectedTables] = useState<Set<string>>(new Set());
   const [lastSelectedTable, setLastSelectedTable] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<MenuTarget | null>(null);
   const [copiedItem, setCopiedItem] = useState(false);
+  const [hoveredTable, setHoveredTable] = useState<{ name: string; rect: DOMRect; isTruncated: boolean } | null>(null);
 
   useEffect(() => {
     setMounted(true);
+    try {
+      const saved = localStorage.getItem("dodb_sidebar_collapsed");
+      if (saved === "true") setIsCollapsed(true);
+    } catch {}
   }, []);
+
+  const toggleCollapse = () => {
+    setIsCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("dodb_sidebar_collapsed", String(next));
+      } catch {}
+      return next;
+    });
+  };
 
   // Prune selectedTables whenever the tables list changes (e.g., after drop or database switch)
   useEffect(() => {
@@ -230,6 +264,166 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
     }
   };
 
+  if (isCollapsed) {
+    return (
+      <aside className="sidebar collapsed">
+        <div className="collapsed-toolbar">
+          <button
+            type="button"
+            className="collapsed-toggle-btn"
+            onClick={toggleCollapse}
+            data-tooltip={language === "th" ? "ขยายแถบข้าง (Expand Sidebar)" : "Expand Sidebar"}
+            data-tooltip-pos="right"
+          >
+            <PanelLeftOpen size={15} />
+          </button>
+
+          <div className="collapsed-divider" />
+
+          <button
+            type="button"
+            className="collapsed-action-btn"
+            onClick={onRefresh}
+            disabled={isConnecting}
+            data-tooltip={language === "th" ? `รีเฟรชฐานข้อมูล (${activeDatabase || "None"})` : `Refresh (${activeDatabase || "None"})`}
+            data-tooltip-pos="right"
+          >
+            <RefreshCw size={13} className={loading || isConnecting ? "spin" : ""} />
+          </button>
+
+          <div
+            className="collapsed-action-item"
+            data-tooltip={language === "th" ? `ฐานข้อมูล: ${activeDatabase || "None"}` : `Database: ${activeDatabase || "None"}`}
+            data-tooltip-pos="right"
+            onClick={toggleCollapse}
+            style={{ cursor: "pointer" }}
+          >
+            <HardDrive size={13} className="collapsed-icon active-db" />
+          </div>
+
+          <div
+            className="collapsed-action-item"
+            data-tooltip={language === "th" ? `ตาราง (${tables.length}) - คลิกเพื่อขยาย` : `Tables (${tables.length}) - Click to expand`}
+            data-tooltip-pos="right"
+            onClick={toggleCollapse}
+            style={{ cursor: "pointer" }}
+          >
+            <Table2 size={13} className="collapsed-icon" />
+            <span className="collapsed-badge font-mono">{tables.length}</span>
+          </div>
+
+          {onCreateTable && (
+            <button
+              type="button"
+              className="collapsed-action-btn"
+              onClick={onCreateTable}
+              disabled={mounted ? !activeDatabase : true}
+              data-tooltip={language === "th" ? "สร้างตารางใหม่ (Create Table)" : "Create Table"}
+              data-tooltip-pos="right"
+            >
+              <Plus size={13} />
+            </button>
+          )}
+        </div>
+
+        <style jsx>{`
+          .sidebar.collapsed {
+            width: 42px;
+            min-width: 42px;
+            max-width: 42px;
+            padding: 8px 4px;
+            background: var(--bg-sidebar);
+            border-right: 1px solid var(--border-light);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            flex-shrink: 0;
+            overflow: hidden;
+            transition: width 0.18s ease;
+          }
+          .collapsed-toolbar {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+          }
+          .collapsed-toggle-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 30px;
+            height: 30px;
+            border-radius: 4px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-medium);
+            color: var(--accent-blue);
+            cursor: pointer;
+            transition: all 0.15s ease;
+          }
+          .collapsed-toggle-btn:hover {
+            background: var(--accent-blue);
+            color: #ffffff;
+          }
+          .collapsed-divider {
+            width: 24px;
+            height: 1px;
+            background: var(--border-light);
+            margin: 2px 0;
+          }
+          .collapsed-action-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 30px;
+            height: 30px;
+            border-radius: 4px;
+            background: transparent;
+            border: 1px solid transparent;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: all 0.15s ease;
+          }
+          .collapsed-action-btn:hover {
+            background: var(--bg-hover);
+            color: var(--text-main);
+            border-color: var(--border-light);
+          }
+          .collapsed-action-item {
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 30px;
+            height: 30px;
+            border-radius: 4px;
+            color: var(--text-muted);
+            transition: all 0.15s ease;
+          }
+          .collapsed-action-item:hover {
+            background: var(--bg-hover);
+            color: var(--text-main);
+          }
+          .collapsed-icon.active-db {
+            color: var(--accent-blue);
+          }
+          .collapsed-badge {
+            position: absolute;
+            bottom: 2px;
+            right: 2px;
+            background: var(--accent-blue);
+            color: #ffffff;
+            font-size: 7.5px;
+            font-weight: 700;
+            padding: 0 3px;
+            border-radius: 4px;
+            line-height: 1.1;
+          }
+        `}</style>
+      </aside>
+    );
+  }
+
   return (
     <aside className="sidebar">
       {/* Database selection group */}
@@ -239,15 +433,24 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
             <HardDrive size={12} />
             <span>{t("sidebarDatabase", language)}</span>
           </div>
-          <button
-            className="icon-action-btn"
-            onClick={onRefresh}
-            disabled={isConnecting}
-            title={t("shortcutRefresh", language)}
-            suppressHydrationWarning
-          >
-            <RefreshCw size={11} className={loading || isConnecting ? "spin" : ""} />
-          </button>
+          <div className="group-header-right">
+            <button
+              className="icon-action-btn"
+              onClick={onRefresh}
+              disabled={isConnecting}
+              data-tooltip={t("shortcutRefresh", language)}
+              suppressHydrationWarning
+            >
+              <RefreshCw size={11} className={loading || isConnecting ? "spin" : ""} />
+            </button>
+            <button
+              className="icon-action-btn"
+              onClick={toggleCollapse}
+              data-tooltip={language === "th" ? "ย่อแถบข้าง (Collapse Sidebar)" : "Collapse Sidebar"}
+            >
+              <PanelLeftClose size={12} />
+            </button>
+          </div>
         </div>
         <div className="select-container">
           <select
@@ -389,7 +592,7 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
             {searchTerm ? t("sidebarNoTables", language) : t("noTableFound", language)}
           </div>
         ) : (
-          <div className="table-tree">
+          <div className="table-tree" onScroll={() => setHoveredTable(null)}>
             {filteredTables.map((table) => {
               const isSelected = selectedTables.has(table);
               const isActive = activeTable === table && selectedTables.size <= 1;
@@ -398,8 +601,19 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
                   key={table}
                   className={`tree-item ${isActive ? "active" : ""} ${isSelected ? "selected" : ""}`}
                   onClick={(e) => handleTableClick(e, table)}
-                  onContextMenu={(e) => openMenu(e, { kind: "table", table })}
-                  title={`${table} (⌘/Ctrl+Click to multi-select, Right-click for options)`}
+                  onContextMenu={(e) => {
+                    setHoveredTable(null);
+                    openMenu(e, { kind: "table", table });
+                  }}
+                  onMouseEnter={(e) => {
+                    const target = e.currentTarget;
+                    const labelEl = target.querySelector(".tree-label") as HTMLElement | null;
+                    const isTruncated = labelEl ? labelEl.scrollWidth > labelEl.clientWidth + 1 : table.length > 20;
+                    const rect = target.getBoundingClientRect();
+                    setHoveredTable({ name: table, rect, isTruncated });
+                  }}
+                  onMouseLeave={() => setHoveredTable(null)}
+                  title={table}
                 >
                   <Table2 size={14} className={`tree-icon ${isActive || isSelected ? "active-icon" : ""}`} />
                   <span className="tree-label">{table}</span>
@@ -649,6 +863,27 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
               )}
             </>
           )}
+        </div>,
+        document.body
+      )}
+
+      {/* Hover Full Table Name Tooltip for Truncated Table Names */}
+      {hoveredTable && hoveredTable.isTruncated && mounted && !contextMenu && typeof document !== "undefined" && createPortal(
+        <div
+          className="sidebar-table-tooltip"
+          style={{
+            position: "fixed",
+            top: Math.max(10, Math.min(window.innerHeight - 40, hoveredTable.rect.top + hoveredTable.rect.height / 2)),
+            left: hoveredTable.rect.right + 8,
+            transform: "translateY(-50%)",
+            zIndex: 99999,
+            pointerEvents: "none",
+          }}
+        >
+          <div className="tooltip-inner font-mono">
+            <Table2 size={12} className="tooltip-icon" />
+            <span className="tooltip-text">{hoveredTable.name}</span>
+          </div>
         </div>,
         document.body
       )}
@@ -918,6 +1153,43 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
           font-size: 11.5px;
           font-weight: 500;
           letter-spacing: -0.2px;
+        }
+
+        :global(.sidebar-table-tooltip) {
+          position: fixed;
+          z-index: 99999;
+          pointer-events: none;
+          animation: tableTooltipFadeIn 0.12s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        @keyframes tableTooltipFadeIn {
+          from {
+            opacity: 0;
+            transform: translateY(-50%) translateX(-4px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(-50%) translateX(0);
+          }
+        }
+        :global(.sidebar-table-tooltip .tooltip-inner) {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          background: var(--bg-card);
+          border: 1px solid var(--border-medium);
+          color: var(--text-main);
+          padding: 5px 10px;
+          border-radius: 6px;
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+          max-width: 480px;
+          word-break: break-all;
+          white-space: normal;
+          font-size: 11.5px;
+          font-weight: 600;
+        }
+        :global(.sidebar-table-tooltip .tooltip-icon) {
+          color: var(--accent-blue);
+          flex-shrink: 0;
         }
 
         .sidebar-message {

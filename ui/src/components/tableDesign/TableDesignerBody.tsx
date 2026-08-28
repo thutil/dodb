@@ -76,7 +76,9 @@ export const TableDesignerBody: React.FC<TableDesignerBodyProps> = ({
         {activeTab === "foreignKeys" && (
           <ForeignKeysEditor
             foreignKeys={draft.foreignKeys}
+            tableName={draft.name || "current_table"}
             availableColumns={columnNames}
+            columnDrafts={draft.columns}
             availableTables={availableTables}
             onFetchColumns={onFetchColumns}
             onChange={(foreignKeys: ForeignKeyDraft[]) => onChange({ ...draft, foreignKeys })}
@@ -90,6 +92,8 @@ export const TableDesignerBody: React.FC<TableDesignerBodyProps> = ({
           flex-direction: column;
           min-height: 0;
           flex: 1;
+          max-width: 100%;
+          overflow: hidden;
         }
         .designer-tabs {
           display: flex;
@@ -98,6 +102,8 @@ export const TableDesignerBody: React.FC<TableDesignerBodyProps> = ({
           border-bottom: 1px solid var(--border-light);
           background: var(--bg-card);
           flex-shrink: 0;
+          overflow-x: auto;
+          max-width: 100%;
         }
         .designer-tab {
           display: inline-flex;
@@ -113,6 +119,7 @@ export const TableDesignerBody: React.FC<TableDesignerBodyProps> = ({
           padding: 8px 10px;
           cursor: pointer;
           transition: color 0.12s ease, border-color 0.12s ease;
+          white-space: nowrap;
         }
         .designer-tab:hover {
           color: var(--text-main);
@@ -133,10 +140,14 @@ export const TableDesignerBody: React.FC<TableDesignerBodyProps> = ({
         .designer-panel {
           padding: 12px 16px;
           overflow-y: auto;
+          overflow-x: hidden;
           flex: 1;
           min-height: 0;
+          max-width: 100%;
+          box-sizing: border-box;
         }
       `}</style>
     </div>
   );
 };
+

@@ -42,11 +42,16 @@ import { ColumnInfo, TableRowData, ConnectionProfile, ColumnFilter, FilterOperat
 import { quoteIdent, quoteTableIdent } from "../utils/ddlBuilder";
 import {
   isGeometryColumn,
+  isCoordinateColumn,
   isGisData,
   formatGisSummary,
   parseGisToGeoJson,
   geoJsonToWkt,
   GeoJsonGeometry,
+  detectCoordinatePairs,
+  extractPointFromRow,
+  getAllSpatialFeaturesFromRows,
+  isValidCoordinate,
 } from "../utils/gisUtils";
 import { GisMapViewer, GisFeatureRecord } from "./GisMapViewer";
 import { Language, t } from "../utils/i18n";
@@ -230,32 +235,20 @@ export const DataGrid: React.FC<DataGridProps> = ({
     return t.includes("date") || t.includes("time") || t.includes("timestamp");
   };
 
-  // Check if table contains spatial/geometry columns
-  const hasGisColumns = React.useMemo(() => {
-    return columns.some((c) => isGeometryColumn(c.type, c.name));
+  // Detect coordinate column pairs (e.g. lat + lng, latitude + longitude, pickup_lat + pickup_lng)
+  const coordinatePairs = React.useMemo(() => {
+    return detectCoordinatePairs(columns);
   }, [columns]);
+
+  // Check if table contains spatial/geometry columns or coordinate pairs
+  const hasGisColumns = React.useMemo(() => {
+    return columns.some((c) => isGeometryColumn(c.type, c.name)) || coordinatePairs.length > 0;
+  }, [columns, coordinatePairs]);
 
   // Build GIS feature records for current page rows
   const gisFeatures: GisFeatureRecord[] = React.useMemo(() => {
-    const geomCols = columns.filter((c) => isGeometryColumn(c.type, c.name));
-    if (geomCols.length === 0) return [];
-    const feats: GisFeatureRecord[] = [];
-    rows.forEach((row, idx) => {
-      for (const gc of geomCols) {
-        const val = row[gc.name];
-        const geom = parseGisToGeoJson(val);
-        if (geom) {
-          feats.push({
-            id: `${idx}_${gc.name}`,
-            geometry: geom,
-            properties: row as Record<string, unknown>,
-            label: `${tableName} #${page * pageSize + idx + 1} (${gc.name})`,
-          });
-        }
-      }
-    });
-    return feats;
-  }, [columns, rows, tableName, page, pageSize]);
+    return getAllSpatialFeaturesFromRows(rows, columns);
+  }, [columns, rows]);
 
   const handleRowClick = (e: React.MouseEvent, idx: number) => {
     if (e.metaKey || e.ctrlKey) {
@@ -1573,12 +1566,27 @@ export const DataGrid: React.FC<DataGridProps> = ({
                         const isGeomCol = isGeometryColumn(col.type, col.name) || (!isNull && isGisData(val));
                         const gisSummary = isGeomCol && !isNull ? formatGisSummary(val) : null;
 
+                        // Check if this column is part of a coordinate pair
+                        const matchingPair = coordinatePairs.find((p) => p.latColumn === col.name || p.lngColumn === col.name);
+                        let pairCoords: { lat: number; lng: number } | null = null;
+                        if (matchingPair && !isNull) {
+                          const rawLat = row[matchingPair.latColumn];
+                          const rawLng = row[matchingPair.lngColumn];
+                          if (rawLat != null && rawLng != null) {
+                            const latNum = typeof rawLat === "number" ? rawLat : parseFloat(String(rawLat));
+                            const lngNum = typeof rawLng === "number" ? rawLng : parseFloat(String(rawLng));
+                            if (isValidCoordinate(latNum, lngNum)) {
+                              pairCoords = { lat: latNum, lng: lngNum };
+                            }
+                          }
+                        }
+
                         return (
                           <td
                             key={col.name}
                             className={`cell-data ${isNull ? "cell-null" : ""} ${isEdited ? "cell-modified" : ""} ${isEditing ? "cell-editing" : ""}`}
                             onDoubleClick={() => startEditing(pkKey, false, undefined, col.name, val)}
-                            title={gisSummary ? "Click badge to view on GIS map; double-click to edit" : "Double-click to edit cell"}
+                            title={gisSummary ? "Click badge to view on GIS map; double-click to edit" : pairCoords ? `Coordinate: ${pairCoords.lat}, ${pairCoords.lng} (Click pin to view on map)` : "Double-click to edit cell"}
                           >
                             {isEditing && (
                               <div className="inline-edit-wrap">
@@ -1615,6 +1623,25 @@ export const DataGrid: React.FC<DataGridProps> = ({
                                   <Globe size={10} />
                                   <span>{gisSummary.label}</span>
                                 </span>
+                              ) : pairCoords ? (
+                                <div className="coord-cell-content">
+                                  <span>{typeof val === "object" ? JSON.stringify(val) : String(val)}</span>
+                                  <button
+                                    type="button"
+                                    className="coord-pin-btn"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setGisModalData({
+                                        title: `${tableName} — ${matchingPair!.label}`,
+                                        subtitle: `Record #${page * pageSize + idx + 1} (${pairCoords!.lat}, ${pairCoords!.lng})`,
+                                        value: { type: "Point", coordinates: [pairCoords!.lng, pairCoords!.lat] },
+                                      });
+                                    }}
+                                    title={language === "th" ? `ดูพิกัด (${pairCoords.lat}, ${pairCoords.lng}) บนแผนที่ GIS` : `View coordinates (${pairCoords.lat}, ${pairCoords.lng}) on GIS map`}
+                                  >
+                                    <MapPin size={10} />
+                                  </button>
+                                </div>
                               ) : typeof val === "object" ? (
                                 JSON.stringify(val)
                               ) : (
@@ -2176,25 +2203,37 @@ export const DataGrid: React.FC<DataGridProps> = ({
                 <Edit3 size={13} />
                 <span>{t("gridEditRecord", language)}</span>
               </button>
-              {columns.some((c) => isGeometryColumn(c.type, c.name) && isGisData(contextMenu.row[c.name])) && (
-                <button
-                  className="context-menu-item"
-                  onClick={() => {
-                    const gCol = columns.find((c) => isGeometryColumn(c.type, c.name) && isGisData(contextMenu.row[c.name]));
-                    if (gCol) {
-                      setGisModalData({
-                        title: `${tableName} — ${gCol.name}`,
-                        subtitle: `Record #${page * pageSize + contextMenu.rowIdx + 1}`,
-                        value: contextMenu.row[gCol.name],
-                      });
-                    }
-                    setContextMenu(null);
-                  }}
-                >
-                  <Globe size={13} style={{ color: "var(--accent-blue)" }} />
-                  <span>{t("gridViewOnMap", language)}</span>
-                </button>
-              )}
+              {(() => {
+                const rowPoints = extractPointFromRow(contextMenu.row, columns, coordinatePairs);
+                const gCol = columns.find((c) => isGeometryColumn(c.type, c.name) && isGisData(contextMenu.row[c.name]));
+                if (!gCol && rowPoints.length === 0) return null;
+
+                return (
+                  <button
+                    className="context-menu-item"
+                    onClick={() => {
+                      if (gCol) {
+                        setGisModalData({
+                          title: `${tableName} — ${gCol.name}`,
+                          subtitle: `Record #${page * pageSize + contextMenu.rowIdx + 1}`,
+                          value: contextMenu.row[gCol.name],
+                        });
+                      } else if (rowPoints.length > 0) {
+                        const pt = rowPoints[0];
+                        setGisModalData({
+                          title: `${tableName} — ${pt.label}`,
+                          subtitle: `Record #${page * pageSize + contextMenu.rowIdx + 1} (${pt.coordinates[1]}, ${pt.coordinates[0]})`,
+                          value: { type: "Point", coordinates: pt.coordinates },
+                        });
+                      }
+                      setContextMenu(null);
+                    }}
+                  >
+                    <Globe size={13} style={{ color: "var(--accent-blue)" }} />
+                    <span>{t("gridViewOnMap", language)}</span>
+                  </button>
+                );
+              })()}
               <button
                 className="context-menu-item"
                 onClick={() => {

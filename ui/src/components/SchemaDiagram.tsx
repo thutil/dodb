@@ -18,18 +18,22 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
-  GitFork, Network, Table2, Key, ArrowRight, Search, RefreshCw,
-  Database, Globe, LayoutGrid, Maximize2, Sparkles, X, Eye, Layers, Filter
+  GitFork, Table2, Key, ArrowRight, Search, RefreshCw,
+  Database, Globe, LayoutGrid, Maximize2, Sparkles, X, Eye, Layers, Filter,
+  ChevronDown, ChevronUp, PanelLeftClose, PanelLeftOpen
 } from "lucide-react";
 import { ConnectionProfile } from "../types";
 import { apiClient } from "../utils/apiClient";
-import { isGeometryColumn } from "../utils/gisUtils";
+import { isGeometryColumn, isCoordinateColumn } from "../utils/gisUtils";
+import { Language, t } from "../utils/i18n";
 
 interface SchemaDiagramProps {
   activeProfile: ConnectionProfile | null;
   activeDatabase: string;
+  activeTable?: string | null;
   apiBase?: string;
   theme?: "dark" | "light";
+  language?: Language;
 }
 
 interface TableColumn {
@@ -66,116 +70,156 @@ const TableNodeComponent: React.FC<NodeProps<Node<TableNodeData>>> = ({ data, se
   const table = data.table;
   const fkMap = data.fkMap || {};
   const searchQuery = (data.searchQuery || "").toLowerCase();
-  const highlighted = Boolean(data.highlighted);
-  const viewMode: ViewMode = data.viewMode || "all";
+  const viewMode = data.viewMode || "compact";
   const [expanded, setExpanded] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(false);
 
-  const isTableMatch = searchQuery && table.name.toLowerCase().includes(searchQuery);
+  // Filter columns by search query if any
+  const matchedColumns = useMemo(() => {
+    if (!searchQuery) return table.columns;
+    return table.columns.filter(
+      (c) => c.name.toLowerCase().includes(searchQuery) || c.type.toLowerCase().includes(searchQuery)
+    );
+  }, [table.columns, searchQuery]);
 
-  const displayedColumns = useMemo(() => {
-    const cols = table.columns || [];
+  // Keys-only or compact truncation
+  const visibleColumns = useMemo(() => {
+    if (isCollapsed) return [];
+    if (expanded) return matchedColumns;
     if (viewMode === "keys_only") {
-      return cols.filter((c) => c.primaryKey || Boolean(fkMap[c.name]));
+      return matchedColumns.filter((c) => c.primaryKey || fkMap[c.name]);
     }
-    if (viewMode === "compact" && !expanded && cols.length > 6) {
-      return cols.slice(0, 6);
+    if (viewMode === "compact" && matchedColumns.length > 8) {
+      return matchedColumns.slice(0, 8);
     }
-    return cols;
-  }, [table.columns, viewMode, expanded, fkMap]);
+    return matchedColumns;
+  }, [matchedColumns, viewMode, expanded, fkMap, isCollapsed]);
 
-  const hiddenCount = (table.columns?.length || 0) - displayedColumns.length;
+  const hiddenCount = matchedColumns.length - visibleColumns.length;
 
   return (
-    <div className={`react-flow-table-card ${selected ? "is-selected" : ""} ${highlighted ? "is-highlighted" : ""} ${isTableMatch ? "is-match" : ""}`}>
-      {/* 4 Multi-directional handles for clean relation wiring */}
-      <Handle type="target" position={Position.Left} id="target-left" className="flow-handle" />
-      <Handle type="source" position={Position.Right} id="source-right" className="flow-handle" />
-      <Handle type="target" position={Position.Top} id="target-top" className="flow-handle" />
-      <Handle type="source" position={Position.Bottom} id="source-bottom" className="flow-handle" />
+    <div
+      className={`react-flow-table-card ${data.highlighted ? "is-highlighted" : ""} ${
+        selected ? "is-selected" : ""
+      } ${isCollapsed ? "is-collapsed" : ""}`}
+    >
+      {/* 4 Multi-directional handles for when table is collapsed */}
+      {isCollapsed && (
+        <>
+          <Handle type="target" position={Position.Left} id={`${table.name}:header-tgt`} className="flow-handle handle-left" />
+          <Handle type="source" position={Position.Right} id={`${table.name}:header-src`} className="flow-handle handle-right" />
+        </>
+      )}
 
-      <div className="card-header">
+      {/* Header with Table Name & Collapse Toggle Button */}
+      <div className="card-header" onClick={() => setIsCollapsed((prev) => !prev)}>
         <div className="card-title-group">
           <Table2 size={13} className="card-tbl-icon" />
-          <h3 className="card-tbl-name font-mono" title={table.name}>{table.name}</h3>
+          <span className="card-tbl-name font-mono" title={table.name}>
+            {table.name}
+          </span>
         </div>
-        <span className="card-col-count font-mono">{table.columns?.length || 0} cols</span>
+        <div className="card-header-actions">
+          <span className="card-col-count font-mono">{table.columns.length}</span>
+          <button
+            type="button"
+            className="card-collapse-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsCollapsed((prev) => !prev);
+            }}
+            title={isCollapsed ? "Expand table columns" : "Collapse table columns"}
+          >
+            {isCollapsed ? <ChevronDown size={12} /> : <ChevronUp size={12} />}
+          </button>
+        </div>
       </div>
 
-      <div className="card-body">
-        {displayedColumns.length > 0 ? (
-          displayedColumns.map((c) => {
-            const fkRelation = fkMap[c.name];
-            const isGeom = isGeometryColumn(c.type, c.name);
-            const isColMatch = searchQuery && c.name.toLowerCase().includes(searchQuery);
+      {/* Columns list */}
+      {!isCollapsed && (
+        <div className="card-body">
+          {visibleColumns.map((col) => {
+            const isFk = !!fkMap[col.name];
+            const isPk = col.primaryKey;
+            const isGeom = isGeometryColumn(col.type);
+            const isCoord = isCoordinateColumn(col.name);
 
             return (
               <div
-                key={c.name}
-                className={`col-row ${c.primaryKey ? "pk-row" : ""} ${fkRelation ? "fk-row" : ""} ${isColMatch ? "col-match" : ""}`}
+                key={col.name}
+                className={`col-row ${isPk ? "pk-row" : ""} ${isFk ? "fk-row" : ""}`}
               >
+                {/* Target handle for foreign keys targeting this table/column */}
+                <Handle
+                  type="target"
+                  position={Position.Left}
+                  id={`${table.name}:${col.name}`}
+                  className="flow-handle handle-left"
+                />
+
                 <div className="col-name-group">
-                  {c.primaryKey ? (
-                    <span title="Primary Key (PK)">
-                      <Key size={11} className="pk-icon" />
-                    </span>
-                  ) : fkRelation ? (
-                    <span title={`Foreign Key: ${c.name} -> ${fkRelation.toTable}.${fkRelation.toColumn}`}>
-                      <GitFork size={11} className="fk-icon" />
-                    </span>
-                  ) : isGeom ? (
-                    <span title="GIS Geometry Column">
-                      <Globe size={11} className="pk-icon" style={{ color: "var(--accent-blue)" }} />
-                    </span>
-                  ) : (
-                    <span className="bullet-dot" />
-                  )}
-                  <span className="col-name font-mono" title={c.name}>{c.name}</span>
+                  {isPk && <Key size={10} className="pk-icon" />}
+                  {isFk && !isPk && <GitFork size={10} className="fk-icon" />}
+                  {isGeom && <Globe size={10} className="gis-icon" />}
+                  <span className={`col-name font-mono ${isPk ? "bold" : ""}`}>{col.name}</span>
                 </div>
-                <span className="col-type font-mono">{c.type}</span>
+
+                <div className="col-right">
+                  <span className="col-type font-mono">{col.type}</span>
+                  {isCoord && <span className="gis-pill font-mono">GIS</span>}
+                </div>
+
+                {/* Source handle for relations starting from this column */}
+                <Handle
+                  type="source"
+                  position={Position.Right}
+                  id={`${table.name}:${col.name}`}
+                  className="flow-handle handle-right"
+                />
               </div>
             );
-          })
-        ) : (
-          <div className="no-cols font-mono">
-            {viewMode === "keys_only" ? "No PK / FK columns" : "No columns found"}
-          </div>
-        )}
+          })}
 
-        {viewMode === "compact" && hiddenCount > 0 && (
-          <button
-            type="button"
-            className="expand-cols-btn font-mono"
-            onClick={(e) => {
-              e.stopPropagation();
-              setExpanded(true);
-            }}
-          >
-            +{hiddenCount} more columns
-          </button>
-        )}
-        {viewMode === "compact" && expanded && (table.columns?.length || 0) > 6 && (
-          <button
-            type="button"
-            className="expand-cols-btn font-mono"
-            onClick={(e) => {
-              e.stopPropagation();
-              setExpanded(false);
-            }}
-          >
-            Collapse columns
-          </button>
-        )}
-      </div>
+          {hiddenCount > 0 && !expanded && (
+            <button
+              type="button"
+              className="expand-cols-btn font-mono"
+              onClick={(e) => {
+                e.stopPropagation();
+                setExpanded(true);
+              }}
+            >
+              + {hiddenCount} more column{hiddenCount === 1 ? "" : "s"}
+            </button>
+          )}
+
+          {expanded && matchedColumns.length > 8 && (
+            <button
+              type="button"
+              className="expand-cols-btn font-mono"
+              onClick={(e) => {
+                e.stopPropagation();
+                setExpanded(false);
+              }}
+            >
+              Collapse columns
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 };
 
 const TableNode = React.memo(TableNodeComponent);
+const nodeTypes = { tableNode: TableNode };
 
 const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
   activeProfile,
   activeDatabase,
+  activeTable,
   theme = "dark",
+  language = "en",
 }) => {
   const [tables, setTables] = useState<TableData[]>([]);
   const [relations, setRelations] = useState<Relation[]>([]);
@@ -185,12 +229,12 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
   const [selectedRelationIdx, setSelectedRelationIdx] = useState<number | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("compact");
   const [filterConnectedOnly, setFilterConnectedOnly] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [sidebarSearch, setSidebarSearch] = useState("");
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<TableNodeData>>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const { fitView } = useReactFlow();
-
-  const nodeTypes = useMemo(() => ({ tableNode: TableNode }), []);
 
   // Compute Layout: Organizes nodes into a clean grid based on topology
   const arrangeLayout = useCallback((tablesList: TableData[], relationsList: Relation[], currentMode: ViewMode) => {
@@ -234,16 +278,18 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
       id: `e-${rel.fromTable}-${rel.toTable}-${idx}`,
       source: rel.fromTable,
       target: rel.toTable,
+      sourceHandle: `${rel.fromTable}:${rel.fromColumn}`,
+      targetHandle: `${rel.toTable}:${rel.toColumn}`,
       type: "smoothstep",
-      animated: !isLargeSchema || selectedRelationIdx === idx,
+      animated: !isLargeSchema,
       style: {
-        stroke: selectedRelationIdx === idx ? "#60a5fa" : "#3b82f6",
-        strokeWidth: selectedRelationIdx === idx ? 3.5 : 1.8,
-        opacity: selectedRelationIdx === null || selectedRelationIdx === idx ? 0.9 : 0.25,
+        stroke: theme === "dark" ? "#3b82f6" : "#2563eb",
+        strokeWidth: 2,
+        opacity: 0.9,
       },
-      label: `${rel.fromColumn} → ${rel.toColumn}`,
+      label: `${rel.fromColumn} ➔ ${rel.toColumn}`,
       labelStyle: {
-        fill: theme === "dark" ? "#cbd5e1" : "#334155",
+        fill: theme === "dark" ? "#93c5fd" : "#1e40af",
         fontSize: 9.5,
         fontFamily: "monospace",
         fontWeight: 600,
@@ -260,7 +306,7 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
     setTimeout(() => {
       fitView({ padding: 0.15, duration: 350 });
     }, 60);
-  }, [searchQuery, selectedRelationIdx, theme, setNodes, setEdges, fitView]);
+  }, [searchQuery, theme, setNodes, setEdges, fitView]);
 
   const fetchSchemaDiagram = useCallback(async () => {
     if (!activeProfile || !activeDatabase) return;
@@ -346,54 +392,41 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
           ...e,
           animated: eIdx === idx,
           style: {
-            stroke: eIdx === idx ? "#60a5fa" : "rgba(100, 116, 139, 0.2)",
-            strokeWidth: eIdx === idx ? 3.5 : 1,
-            opacity: eIdx === idx ? 1 : 0.2,
+            stroke: eIdx === idx ? "#10b981" : "#475569",
+            strokeWidth: eIdx === idx ? 3 : 1.2,
+            opacity: eIdx === idx ? 1 : 0.35,
           },
         }))
       );
     }
   };
 
-  const connectedTableNames = useMemo(() => {
-    const set = new Set<string>();
-    relations.forEach((r) => {
-      set.add(r.fromTable);
-      set.add(r.toTable);
-    });
-    return set;
-  }, [relations]);
-
+  // Filter nodes if filterConnectedOnly is turned on
   const filteredNodes = useMemo(() => {
-    let result = nodes;
-    if (filterConnectedOnly) {
-      result = result.filter((n) => connectedTableNames.has(n.id));
-    }
-    if (!searchQuery.trim()) return result;
-    const q = searchQuery.toLowerCase();
-    return result.filter((n) => {
-      const table = (n.data?.table as TableData) || { name: "", columns: [] };
-      const tableMatch = table.name.toLowerCase().includes(q);
-      const colMatch = table.columns?.some((c) => c.name.toLowerCase().includes(q));
-      return tableMatch || colMatch;
+    if (!filterConnectedOnly) return nodes;
+    const connectedTableNames = new Set<string>();
+    relations.forEach((r) => {
+      connectedTableNames.add(r.fromTable);
+      connectedTableNames.add(r.toTable);
     });
-  }, [nodes, searchQuery, filterConnectedOnly, connectedTableNames]);
+    return nodes.filter((n) => connectedTableNames.has(n.id));
+  }, [nodes, relations, filterConnectedOnly]);
 
-  if (!activeProfile || !activeDatabase) {
+  if (!activeProfile) {
     return (
-      <div className="diagram-empty">
-        <Network size={36} className="empty-icon" />
-        <h3>Database ER Diagram & Schema Visualizer</h3>
-        <p>Connect to an active database to inspect tables, primary keys, and foreign key relationships</p>
+      <div className="diagram-pane">
+        <div className="diagram-empty">
+          <Database size={48} className="empty-icon" />
+          <h3>No Database Connection Selected</h3>
+          <p>Please select a connection and database to view the Schema ER Diagram.</p>
+        </div>
         <style jsx>{`
-          .diagram-empty {
+          .diagram-pane {
             flex: 1;
             display: flex;
-            flex-direction: column;
             align-items: center;
             justify-content: center;
-            gap: 12px;
-            color: var(--text-muted);
+            background: var(--bg-content);
             height: 100%;
           }
           .empty-icon { color: var(--accent-blue); }
@@ -413,6 +446,17 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
           <span className="count-tag font-mono">
             {tables.length} table{tables.length === 1 ? "" : "s"}, {relations.length} FK{relations.length === 1 ? "" : "s"}
           </span>
+          <div
+            className="read-only-badge font-mono"
+            data-tooltip={
+              language === "th"
+                ? "ไดอะแกรมสำหรับดูโครงสร้างภาพรวมเท่านั้น ไม่มีการแก้ไขฐานข้อมูลโดยตรง"
+                : "Read-only overview diagram (visual inspection only, no direct modifications)"
+            }
+          >
+            <Eye size={11} className="read-only-icon" />
+            <span>{language === "th" ? "ดูโครงสร้างเท่านั้น (Read Only)" : "Read Only View"}</span>
+          </div>
         </div>
 
         <div className="bar-right">
@@ -540,52 +584,119 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
         </div>
       )}
 
-      {/* React Flow Canvas */}
-      <div className="flow-wrapper">
-        {loading && (
-          <div className="diagram-loading-overlay">
-            <RefreshCw size={28} className="spin loading-icon" />
-            <span className="loading-text">Discovering Schema & Relations...</span>
+      {/* Main Diagram Body Layout: Left Collapsible Tables Sidebar + Right Canvas */}
+      <div className="diagram-main-layout">
+        {/* Left Side: Collapsible Tables Sidebar */}
+        <div className={`schema-tables-sidebar ${isSidebarCollapsed ? "collapsed" : ""}`}>
+          <div className="sidebar-header">
+            {!isSidebarCollapsed && (
+              <div className="sidebar-title">
+                <Table2 size={12} className="sidebar-icon" />
+                <span>Tables ({tables.length})</span>
+              </div>
+            )}
+            <button
+              type="button"
+              className="sidebar-toggle-btn"
+              onClick={() => setIsSidebarCollapsed((prev) => !prev)}
+              data-tooltip={isSidebarCollapsed ? "Expand Tables Panel" : "Collapse Tables Panel"}
+            >
+              {isSidebarCollapsed ? <PanelLeftOpen size={13} /> : <PanelLeftClose size={13} />}
+            </button>
           </div>
-        )}
 
-        {!loading && tables.length === 0 && !error ? (
-          <div className="no-tables-view">
-            <Database size={32} className="no-tables-icon" />
-            <p>No tables found in database &quot;{activeDatabase}&quot;</p>
-          </div>
-        ) : (
-          <ReactFlow
-            key={`${activeProfile.id}-${activeDatabase}-${tables.length}-${viewMode}`}
-            nodes={filteredNodes}
-            edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            nodeTypes={nodeTypes}
-            onlyRenderVisibleElements={true}
-            minZoom={0.05}
-            maxZoom={2}
-            fitView
-            colorMode={theme}
-          >
-            <Background
-              variant={BackgroundVariant.Dots}
-              gap={16}
-              size={1}
-              color={theme === "dark" ? "rgba(255, 255, 255, 0.12)" : "rgba(0, 0, 0, 0.15)"}
-            />
-            <Controls />
-            <MiniMap
-              nodeStrokeWidth={3}
-              zoomable
-              pannable
-              style={{
-                backgroundColor: theme === "dark" ? "#14171f" : "#f8fafc",
-                borderColor: theme === "dark" ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.1)",
-              }}
-            />
-          </ReactFlow>
-        )}
+          {!isSidebarCollapsed ? (
+            <>
+              <div className="sidebar-search-box">
+                <Search size={11} className="search-icon" />
+                <input
+                  type="text"
+                  className="input font-mono sidebar-search-input"
+                  placeholder="Filter tables..."
+                  value={sidebarSearch}
+                  onChange={(e) => setSidebarSearch(e.target.value)}
+                />
+              </div>
+
+              <div className="sidebar-tables-list">
+                {tables
+                  .filter((t) => t.name.toLowerCase().includes(sidebarSearch.toLowerCase()))
+                  .map((t) => (
+                    <button
+                      key={t.name}
+                      type="button"
+                      className={`sidebar-table-item font-mono ${nodes.find((n) => n.id === t.name)?.data?.highlighted ? "active" : ""}`}
+                      onClick={() => {
+                        fitView({ nodes: [{ id: t.name }], padding: 0.5, duration: 400 });
+                        setNodes((nds) =>
+                          nds.map((n) => ({
+                            ...n,
+                            data: { ...n.data, highlighted: n.id === t.name },
+                          }))
+                        );
+                      }}
+                    >
+                      <Table2 size={11} className="tbl-item-icon" />
+                      <span className="tbl-item-name" title={t.name}>{t.name}</span>
+                      <span className="tbl-item-count font-mono">{t.columns.length}</span>
+                    </button>
+                  ))}
+              </div>
+            </>
+          ) : (
+            <div className="collapsed-sidebar-items">
+              <span className="collapsed-count font-mono" title={`${tables.length} tables`}>{tables.length}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Right Side: React Flow Canvas */}
+        <div className="flow-wrapper">
+          {loading && (
+            <div className="diagram-loading-overlay">
+              <RefreshCw size={28} className="spin loading-icon" />
+              <span className="loading-text">Discovering Schema & Relations...</span>
+            </div>
+          )}
+
+          {!loading && tables.length === 0 && !error ? (
+            <div className="no-tables-view">
+              <Database size={32} className="no-tables-icon" />
+              <p>No tables found in database &quot;{activeDatabase}&quot;</p>
+            </div>
+          ) : (
+            <ReactFlow
+              key={`${activeProfile.id}-${activeDatabase}-${tables.length}-${viewMode}`}
+              nodes={filteredNodes}
+              edges={edges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              nodeTypes={nodeTypes}
+              onlyRenderVisibleElements={true}
+              minZoom={0.05}
+              maxZoom={2}
+              fitView
+              colorMode={theme}
+            >
+              <Background
+                variant={BackgroundVariant.Dots}
+                gap={16}
+                size={1}
+                color={theme === "dark" ? "rgba(255, 255, 255, 0.12)" : "rgba(0, 0, 0, 0.15)"}
+              />
+              <Controls />
+              <MiniMap
+                nodeStrokeWidth={3}
+                zoomable
+                pannable
+                style={{
+                  backgroundColor: theme === "dark" ? "#14171f" : "#f8fafc",
+                  borderColor: theme === "dark" ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.1)",
+                }}
+              />
+            </ReactFlow>
+          )}
+        </div>
       </div>
 
       <style jsx>{`
@@ -628,6 +739,22 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
           font-weight: 600;
         }
         .count-tag { font-size: 10px; color: var(--text-muted); }
+        .read-only-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          padding: 2px 7px;
+          border-radius: 4px;
+          background: rgba(100, 116, 139, 0.12);
+          border: 1px solid rgba(100, 116, 139, 0.25);
+          color: var(--text-muted);
+          font-size: 10px;
+          font-weight: 500;
+          user-select: none;
+        }
+        .read-only-icon {
+          color: var(--accent-blue);
+        }
 
         .bar-right { display: flex; align-items: center; gap: 8px; }
 
@@ -767,6 +894,169 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
         .spin { animation: spin 1s linear infinite; }
         @keyframes spin { 100% { transform: rotate(360deg); } }
 
+        .diagram-main-layout {
+          display: flex;
+          flex: 1;
+          width: 100%;
+          height: 100%;
+          min-height: 0;
+          overflow: hidden;
+        }
+
+        /* Collapsible Tables Sidebar in Schema Diagram */
+        .schema-tables-sidebar {
+          width: 210px;
+          min-width: 210px;
+          max-width: 210px;
+          background: var(--bg-sidebar);
+          border-right: 1px solid var(--border-light);
+          display: flex;
+          flex-direction: column;
+          flex-shrink: 0;
+          overflow: hidden;
+          transition: width 0.16s ease, min-width 0.16s ease, max-width 0.16s ease;
+          z-index: 10;
+        }
+        .schema-tables-sidebar.collapsed {
+          width: 38px;
+          min-width: 38px;
+          max-width: 38px;
+          align-items: center;
+          padding: 6px 0;
+        }
+
+        .sidebar-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 8px 10px;
+          border-bottom: 1px solid var(--border-light);
+          gap: 6px;
+        }
+        .schema-tables-sidebar.collapsed .sidebar-header {
+          padding: 4px 0;
+          border-bottom: none;
+          justify-content: center;
+          width: 100%;
+        }
+
+        .sidebar-title {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 11px;
+          font-weight: 700;
+          color: var(--text-main);
+        }
+        .sidebar-icon {
+          color: var(--accent-blue);
+          flex-shrink: 0;
+        }
+
+        .sidebar-toggle-btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 24px;
+          height: 24px;
+          border-radius: 4px;
+          background: var(--bg-card);
+          border: 1px solid var(--border-medium);
+          color: var(--accent-blue);
+          cursor: pointer;
+          transition: all 0.12s ease;
+        }
+        .sidebar-toggle-btn:hover {
+          background: var(--accent-blue);
+          color: #ffffff;
+        }
+
+        .sidebar-search-box {
+          position: relative;
+          padding: 6px 8px;
+          border-bottom: 1px solid var(--border-light);
+        }
+        .sidebar-search-box :global(.search-icon) {
+          position: absolute;
+          left: 14px;
+          top: 13px;
+          color: var(--text-muted);
+          pointer-events: none;
+        }
+        .sidebar-search-input {
+          width: 100%;
+          font-size: 10.5px;
+          padding: 3px 6px 3px 22px;
+          height: 24px;
+        }
+
+        .sidebar-tables-list {
+          flex: 1;
+          overflow-y: auto;
+          padding: 4px;
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+        .sidebar-table-item {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 4px 6px;
+          border-radius: 4px;
+          background: transparent;
+          border: 1px solid transparent;
+          color: var(--text-sub);
+          font-size: 10.5px;
+          cursor: pointer;
+          text-align: left;
+          gap: 6px;
+          transition: all 0.1s ease;
+        }
+        .sidebar-table-item:hover {
+          background: var(--bg-hover);
+          color: var(--text-main);
+        }
+        .sidebar-table-item.active {
+          background: rgba(59, 130, 246, 0.15);
+          border-color: var(--accent-blue);
+          color: var(--accent-blue);
+          font-weight: 600;
+        }
+        .tbl-item-icon {
+          color: var(--accent-blue);
+          flex-shrink: 0;
+        }
+        .tbl-item-name {
+          flex: 1;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .tbl-item-count {
+          font-size: 8.5px;
+          color: var(--text-muted);
+          background: rgba(255, 255, 255, 0.08);
+          padding: 0 4px;
+          border-radius: 3px;
+        }
+
+        .collapsed-sidebar-items {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 8px;
+          margin-top: 6px;
+        }
+        .collapsed-count {
+          font-size: 9px;
+          background: var(--accent-blue);
+          color: #ffffff;
+          padding: 1px 4px;
+          border-radius: 6px;
+          font-weight: 700;
+        }
+
         .flow-wrapper {
           position: relative;
           flex: 1;
@@ -824,6 +1114,10 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
           overflow: hidden;
           transition: border-color 0.15s ease, box-shadow 0.15s ease;
         }
+        :global(.react-flow-table-card.is-collapsed) {
+          width: 220px;
+          border-color: var(--border-medium);
+        }
         :global(.react-flow-table-card.is-selected),
         :global(.react-flow-table-card.is-highlighted) {
           border-color: var(--accent-blue);
@@ -835,19 +1129,49 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
         }
 
         :global(.react-flow-table-card .card-header) {
-          padding: 8px 10px;
+          padding: 6px 8px;
           background: var(--bg-tertiary);
           border-bottom: 1px solid var(--border-light);
           display: flex;
           align-items: center;
           justify-content: space-between;
           gap: 6px;
+          cursor: pointer;
+          user-select: none;
+        }
+        :global(.react-flow-table-card.is-collapsed .card-header) {
+          border-bottom: none;
+          background: var(--bg-card);
         }
         :global(.react-flow-table-card .card-title-group) {
           display: flex;
           align-items: center;
           gap: 6px;
           overflow: hidden;
+          flex: 1;
+        }
+        :global(.react-flow-table-card .card-header-actions) {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          flex-shrink: 0;
+        }
+        :global(.react-flow-table-card .card-collapse-btn) {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 18px;
+          height: 18px;
+          border-radius: 3px;
+          background: transparent;
+          border: none;
+          color: var(--text-muted);
+          cursor: pointer;
+          transition: all 0.1s ease;
+        }
+        :global(.react-flow-table-card .card-collapse-btn:hover) {
+          background: var(--bg-hover);
+          color: var(--accent-blue);
         }
         :global(.react-flow-table-card .card-tbl-icon) { color: var(--accent-blue); flex-shrink: 0; }
         :global(.react-flow-table-card .card-tbl-name) {

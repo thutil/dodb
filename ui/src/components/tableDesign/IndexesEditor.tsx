@@ -34,10 +34,9 @@ export const IndexesEditor: React.FC<IndexesEditorProps> = ({ indexes, available
               className="input font-mono idx-name"
               value={idx.name}
               placeholder="index_name"
-              title="Index name"
               onChange={(e) => patch(idx.id, { name: e.target.value })}
             />
-            <label className="unique-toggle" title="Unique constraint: enforce distinct values">
+            <label className="unique-toggle" data-tooltip="Enforce distinct values (UNIQUE)">
               <input
                 type="checkbox"
                 checked={idx.unique}
@@ -48,7 +47,7 @@ export const IndexesEditor: React.FC<IndexesEditorProps> = ({ indexes, available
             <button
               type="button"
               className="mini-btn danger"
-              title="Remove this index"
+              data-tooltip="Remove this index"
               onClick={() => onChange(indexes.filter((i) => i.id !== idx.id))}
             >
               <Trash2 size={13} />
@@ -66,10 +65,10 @@ export const IndexesEditor: React.FC<IndexesEditorProps> = ({ indexes, available
                   type="button"
                   className={`col-chip font-mono ${on ? "on" : ""}`}
                   onClick={() => toggleColumn(idx, col)}
-                  title={on ? `Included in index at position ${order} (click to remove)` : `Click to include "${col}" in index`}
+                  data-tooltip={on ? `Position ${order} in index (Click to remove)` : `Click to add "${col}" to index`}
                 >
                   {on && <span className="chip-order">{order}</span>}
-                  {col}
+                  <span className="chip-name">{col}</span>
                 </button>
               );
             })}
@@ -81,7 +80,7 @@ export const IndexesEditor: React.FC<IndexesEditorProps> = ({ indexes, available
         type="button"
         className="btn btn-secondary add-btn"
         onClick={() => onChange([...indexes, newIndex()])}
-        title="Add a new index definition"
+        data-tooltip="Add a new index definition"
       >
         <Plus size={13} />
         <span>Add Index</span>
@@ -128,34 +127,53 @@ export const IndexesEditor: React.FC<IndexesEditorProps> = ({ indexes, available
         .col-picker {
           display: flex;
           flex-wrap: wrap;
-          gap: 4px;
+          gap: 6px;
+          align-items: center;
+          margin-top: 2px;
         }
         .col-chip {
           display: inline-flex;
           align-items: center;
-          gap: 4px;
-          font-size: 10.5px;
-          padding: 2px 7px;
-          border-radius: 10px;
-          border: 1px solid var(--border-light);
+          gap: 5px;
+          font-size: 11px;
+          padding: 3px 9px;
+          border-radius: 6px;
+          border: 1px solid var(--border-medium);
           background: var(--bg-card);
           color: var(--text-sub);
           cursor: pointer;
-          transition: all 0.12s ease;
+          transition: all 0.15s ease;
+          line-height: 1.3;
+          user-select: none;
         }
         .col-chip:hover {
-          border-color: var(--border-medium);
-          color: var(--text-main);
+          border-color: var(--accent-blue);
+          color: var(--accent-blue);
+          background: var(--bg-hover);
         }
         .col-chip.on {
-          background: var(--accent-blue);
+          background: rgba(59, 130, 246, 0.15);
           border-color: var(--accent-blue);
-          color: #fff;
+          color: var(--accent-blue);
+          font-weight: 600;
         }
         .chip-order {
-          font-size: 8.5px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 15px;
+          height: 15px;
+          border-radius: 50%;
+          background: var(--accent-blue);
+          color: #ffffff;
+          font-size: 9px;
           font-weight: 700;
-          opacity: 0.85;
+          line-height: 1;
+          flex-shrink: 0;
+        }
+        .chip-name {
+          font-family: var(--font-mono);
+          letter-spacing: -0.01em;
         }
         .mini-btn {
           display: inline-flex;

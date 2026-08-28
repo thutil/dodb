@@ -279,9 +279,10 @@ export const EditTableModal: React.FC<EditTableModalProps> = ({
           to { opacity: 1; }
         }
         .modal-card {
-          width: 880px;
-          max-width: 95vw;
-          max-height: 88vh;
+          width: 940px;
+          max-width: 96vw;
+          height: 700px;
+          max-height: 92vh;
           background: var(--bg-card);
           border: 1px solid var(--border-medium);
           border-radius: var(--radius-md);

@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.3] - 2026-08-28
+
+### Added
+- **Multi-Table Foreign Key Management**: Added interactive sub-tabs in the Foreign Keys designer with single-click `+` constraint creation, column pairing controls, and real-time React Flow visual relationship linking.
+- **Custom Monaco Editor Themes**: Added built-in dark themes (`Monokai` by default, `Dracula`, `One Dark`, `dodb-dark`, and `VS Dark`) with toolbar switcher and `localStorage` persistence.
+- **SQL Console Quick-Select**: Clicking a table in the database sidebar while on the SQL Console automatically populates a dialect-quoted `SELECT * FROM <table> LIMIT 50;` query directly into Monaco.
+- **Collapsible Canvases & Sidebars**:
+  - **Schema Diagram**: Added column collapse toggle on individual table cards and collapsible left tables drawer to maximize the canvas workspace.
+  - **Visual Query Builder**: Added collapsible tables sidebar for distraction-free visual query construction.
+- **Enhanced GIS Map Viewer & MultiPolygon Support**:
+  - Full decoding support for PostGIS EWKB Hex binary strings (SRID 4326).
+  - WKT parser upgrade with nested parenthesis depth-tracking for complex MultiPolygons and polygon holes.
+  - Dynamic vector layer synchronization with auto-fit bounds on feature updates.
+  - Interactive polygon click popup and hover states.
+
+### Changed
+- **MapLibre GL Stability**: Pinned `maplibre-gl` to stable `v5.24.0` with optimized pure expression layer filters.
+
+### Fixed
+- **GIS MultiPolygon Rendering**: Resolved an issue where MultiPolygon shapes in WKT and EWKB formats failed to parse or render on the map canvas.
+- **React Flow Warning #002**: Fixed dynamic node types object recreation by memoizing `nodeTypes` outside component lifecycle in Schema Diagram and Foreign Key Editor.
+
+---
+
 ## [0.3.1] - 2026-08-27
 
 ### Added

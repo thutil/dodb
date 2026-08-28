@@ -157,7 +157,7 @@ export const Header: React.FC<HeaderProps> = ({
               onChangeView("explorer");
             }
           }}
-          title="dodb Database Manager - Click to view About & Version"
+          title={t("headerBrandTooltip", language)}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/icon.png" alt="dodb mascot" className="brand-mascot-img" />
@@ -165,7 +165,7 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {activeProfile && (
-          <div className="header-breadcrumb" ref={breadcrumbRef} title="Active Context Path (Click to switch or navigate)">
+          <div className="header-breadcrumb" ref={breadcrumbRef} title={t("headerBreadcrumbTooltip", language)}>
             <span className="bc-divider">/</span>
 
             {/* Segment 1: Host / Connection Profile */}
@@ -178,7 +178,7 @@ export const Header: React.FC<HeaderProps> = ({
                   setDbSearch("");
                   setTableSearch("");
                 }}
-                title={`Connected Profile: ${activeProfile.name} (${activeProfile.host || "Local"}) - Click to switch profile or manage connections`}
+                title={t("headerProfileTooltip", language, { name: activeProfile.name, host: activeProfile.host || "Local" })}
               >
                 <Server size={11} className="bc-segment-icon" />
                 <span className="bc-label">{activeProfile.name}</span>
@@ -266,7 +266,7 @@ export const Header: React.FC<HeaderProps> = ({
                   setDbSearch("");
                   setTableSearch("");
                 }}
-                title={isConnecting ? t("connecting", language) : `Database: ${activeDatabase || "default"} - Click to switch database`}
+                title={isConnecting ? t("connecting", language) : t("headerDatabaseTooltip", language, { database: activeDatabase || "default" })}
               >
                 {isConnecting ? (
                   <RefreshCw size={11} className="bc-segment-icon spin" />
@@ -365,7 +365,7 @@ export const Header: React.FC<HeaderProps> = ({
                       setDbSearch("");
                       setTableSearch("");
                     }}
-                    title={`Table: ${activeTable} - Click for table actions or quick switch`}
+                    title={t("headerTableTooltip", language, { table: activeTable })}
                   >
                     <TableIcon size={11} className="bc-segment-icon" />
                     <span className="bc-label">{activeTable}</span>
@@ -486,7 +486,7 @@ export const Header: React.FC<HeaderProps> = ({
         <button
           className="header-quick-search"
           onClick={onOpenCommandPalette}
-          title="Global Quick Search & Command Palette (⌘K / Ctrl+K)"
+          title={t("headerSearchTooltip", language)}
         >
           <span className="search-text">
             {activeTable ? t("quickSearchInTable", language, { table: activeTable }) : t("quickSearchPlaceholder", language)}
@@ -497,7 +497,7 @@ export const Header: React.FC<HeaderProps> = ({
         {activeProfile && (
           <div
             className={`header-health-pill ${latencyMs == null ? "is-connecting" : latencyMs > 200 ? "is-slow" : latencyMs > 80 ? "is-medium" : "is-good"}`}
-            title={`Server Status: ${latencyMs != null ? `Online (${latencyMs}ms latency)` : "Connecting..."}`}
+            title={t("headerServerStatusTooltip", language, { status: latencyMs != null ? t("headerServerOnline", language, { latency: latencyMs }) : t("headerServerConnecting", language) })}
           >
             <span className="health-dot" />
             <span className="health-ping">{latencyMs != null ? `${latencyMs}ms` : "..."}</span>
@@ -511,7 +511,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             className={`tab-btn ${activeView === "explorer" ? "active" : ""}`}
             onClick={() => onChangeView("explorer")}
-            title="Data Explorer (Table & JSON View)"
+            title={t("headerExplorerTabTooltip", language)}
           >
             <Database size={12} className="tab-icon" />
             <span className="tab-label">{t("navExplorer", language)}</span>
@@ -519,7 +519,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             className={`tab-btn ${activeView === "sql" ? "active" : ""}`}
             onClick={() => onChangeView("sql")}
-            title="SQL Query Console"
+            title={t("headerSqlTabTooltip", language)}
           >
             <Terminal size={12} className="tab-icon" />
             <span className="tab-label">{t("navSql", language)}</span>
@@ -527,7 +527,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             className={`tab-btn ${activeView === "visual-query" ? "active" : ""}`}
             onClick={() => onChangeView("visual-query")}
-            title="Visual Query Builder (Drag-and-Drop JOIN & Filters)"
+            title={t("headerVisualQueryTabTooltip", language)}
           >
             <Workflow size={12} className="tab-icon" />
             <span className="tab-label">{t("navVisualQuery", language)}</span>
@@ -535,7 +535,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             className={`tab-btn ${activeView === "diagram" ? "active" : ""}`}
             onClick={() => onChangeView("diagram")}
-            title="Entity-Relationship Diagram"
+            title={t("erdTabTooltip", language)}
           >
             <GitFork size={12} className="tab-icon" />
             <span className="tab-label">{t("navErd", language)}</span>
@@ -543,7 +543,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             className={`tab-btn ${activeView === "admin" ? "active" : ""}`}
             onClick={() => onChangeView("admin")}
-            title="Database Administration"
+            title={t("headerAdminTabTooltip", language)}
           >
             <Shield size={12} className="tab-icon" />
             <span className="tab-label">{t("navAdmin", language)}</span>

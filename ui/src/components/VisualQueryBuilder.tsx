@@ -51,6 +51,8 @@ import {
   Save,
   Edit2,
   GripHorizontal,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
 import {
   ConnectionProfile,
@@ -883,6 +885,7 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
   const [loadingSchemas, setLoadingSchemas] = useState(false);
   const [tableSearch, setTableSearch] = useState("");
   const [showQuickAddModal, setShowQuickAddModal] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   // Joins list
   const [joins, setJoins] = useState<VisualJoinInfo[]>([]);
@@ -2376,80 +2379,119 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
       {/* Main Workspace Area: Sidebar + Canvas */}
       <div className="vq-workspace">
         {/* Left Sidebar: Tables List */}
-        <aside className="vq-sidebar">
+        <aside className={`vq-sidebar ${isSidebarCollapsed ? "collapsed" : ""}`}>
           <div className="sidebar-header">
-            <div className="sidebar-title">
-              <Database size={12} />
-              <span>Tables ({tables.length})</span>
-            </div>
-            <div className="search-wrap">
-              <span className="search-icon-wrap">
-                <Search size={11} />
-              </span>
-              <input
-                type="text"
-                placeholder="Filter tables..."
-                value={tableSearch}
-                onChange={(e) => setTableSearch(e.target.value)}
-                className="search-field"
-              />
-              {tableSearch && (
-                <button
-                  className="search-clear-btn"
-                  onClick={() => setTableSearch("")}
-                  title="Clear search"
-                >
-                  <X size={10} />
-                </button>
-              )}
-            </div>
-          </div>
-
-          <div className="sidebar-table-list">
-            {loadingSchemas ? (
-              <div className="sidebar-loading">
-                <RefreshCw size={13} className="spin" />
-                <span>Loading schemas...</span>
-              </div>
-            ) : filteredTablesList.length === 0 ? (
-              <div className="sidebar-empty">No tables found</div>
-            ) : (
-              filteredTablesList.map((tbl) => {
-                const isOnCanvas = canvasTableNames.includes(tbl);
-                const colCount = tableSchemas[tbl]?.length || 0;
-
-                return (
-                  <div
-                    key={tbl}
-                    className={`sidebar-table-item ${isOnCanvas ? "is-added" : ""}`}
-                    onClick={() => {
-                      if (!isOnCanvas) {
-                        addTableToCanvas(tbl);
-                      }
-                    }}
-                    title={isOnCanvas ? "Already on canvas" : "Click to add table onto canvas"}
-                  >
-                    <div className="table-item-name-group">
-                      <Table2 size={12} className="tbl-icon" />
-                      <span className="tbl-name font-mono">{tbl}</span>
-                    </div>
-                    <div className="table-item-meta">
-                      <span className="col-count font-mono">{colCount} cols</span>
-                      {isOnCanvas ? (
-                        <span className="added-badge">
-                          <CheckCircle2 size={12} />
-                        </span>
-                      ) : (
-                        <span className="add-icon">
-                          <Plus size={12} />
-                        </span>
-                      )}
-                    </div>
+            {!isSidebarCollapsed ? (
+              <>
+                <div className="sidebar-header-top">
+                  <div className="sidebar-title">
+                    <Database size={12} />
+                    <span>Tables ({tables.length})</span>
                   </div>
-                );
-              })
+                  <button
+                    type="button"
+                    className="sidebar-toggle-btn"
+                    onClick={() => setIsSidebarCollapsed(true)}
+                    data-tooltip="Collapse Tables Sidebar"
+                  >
+                    <PanelLeftClose size={12} />
+                  </button>
+                </div>
+                <div className="search-wrap">
+                  <span className="search-icon-wrap">
+                    <Search size={11} />
+                  </span>
+                  <input
+                    type="text"
+                    placeholder="Filter tables..."
+                    value={tableSearch}
+                    onChange={(e) => setTableSearch(e.target.value)}
+                    className="search-field"
+                  />
+                  {tableSearch && (
+                    <button
+                      className="search-clear-btn"
+                      onClick={() => setTableSearch("")}
+                      title="Clear search"
+                    >
+                      <X size={10} />
+                    </button>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="sidebar-collapsed-header">
+                <button
+                  type="button"
+                  className="sidebar-toggle-btn"
+                  onClick={() => setIsSidebarCollapsed(false)}
+                  data-tooltip="Expand Tables Sidebar"
+                  data-tooltip-pos="right"
+                >
+                  <PanelLeftOpen size={14} />
+                </button>
+              </div>
             )}
           </div>
+
+          {!isSidebarCollapsed ? (
+            <div className="sidebar-table-list">
+              {loadingSchemas ? (
+                <div className="sidebar-loading">
+                  <RefreshCw size={13} className="spin" />
+                  <span>Loading schemas...</span>
+                </div>
+              ) : filteredTablesList.length === 0 ? (
+                <div className="sidebar-empty">No tables found</div>
+              ) : (
+                filteredTablesList.map((tbl) => {
+                  const isOnCanvas = canvasTableNames.includes(tbl);
+                  const colCount = tableSchemas[tbl]?.length || 0;
+
+                  return (
+                    <div
+                      key={tbl}
+                      className={`sidebar-table-item ${isOnCanvas ? "is-added" : ""}`}
+                      onClick={() => {
+                        if (!isOnCanvas) {
+                          addTableToCanvas(tbl);
+                        }
+                      }}
+                      title={isOnCanvas ? "Already on canvas" : "Click to add table onto canvas"}
+                    >
+                      <div className="table-item-name-group">
+                        <Table2 size={12} className="tbl-icon" />
+                        <span className="tbl-name font-mono">{tbl}</span>
+                      </div>
+                      <div className="table-item-meta">
+                        <span className="col-count font-mono">{colCount} cols</span>
+                        {isOnCanvas ? (
+                          <span className="added-badge">
+                            <CheckCircle2 size={12} />
+                          </span>
+                        ) : (
+                          <span className="add-icon">
+                            <Plus size={12} />
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          ) : (
+            <div
+              className="collapsed-sidebar-body"
+              onClick={() => setIsSidebarCollapsed(false)}
+              data-tooltip={`Tables (${tables.length}) - Click to expand`}
+              data-tooltip-pos="right"
+              style={{ cursor: "pointer" }}
+            >
+              <Table2 size={14} className="collapsed-tbl-icon" />
+              <span className="collapsed-badge font-mono">{tables.length}</span>
+            </div>
+          )}
         </aside>
 
         {/* Center Canvas Area with Floating Action Pill */}
@@ -3452,6 +3494,78 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
           flex-direction: column;
           flex-shrink: 0;
           z-index: 10;
+          transition: width 0.16s ease, min-width 0.16s ease, max-width 0.16s ease;
+        }
+
+        .vq-sidebar.collapsed {
+          width: 38px !important;
+          min-width: 38px !important;
+          max-width: 38px !important;
+          align-items: center;
+          padding: 6px 0;
+          overflow: hidden;
+        }
+
+        .sidebar-header-top {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 6px;
+        }
+
+        .sidebar-collapsed-header {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 100%;
+        }
+
+        .sidebar-toggle-btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 22px;
+          height: 22px;
+          border-radius: 4px;
+          background: var(--bg-card);
+          border: 1px solid var(--border-medium);
+          color: var(--accent-blue);
+          cursor: pointer;
+          transition: all 0.12s ease;
+        }
+        .sidebar-toggle-btn:hover {
+          background: var(--accent-blue);
+          color: #ffffff;
+        }
+
+        .collapsed-sidebar-body {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 4px;
+          margin-top: 12px;
+          padding: 6px 0;
+          width: 100%;
+          color: var(--text-muted);
+          transition: color 0.12s ease;
+        }
+        .collapsed-sidebar-body:hover {
+          color: var(--accent-blue);
+        }
+
+        .collapsed-tbl-icon {
+          color: var(--accent-blue);
+        }
+
+        .collapsed-badge {
+          font-size: 8.5px;
+          font-weight: 700;
+          background: var(--accent-blue);
+          color: #ffffff;
+          padding: 1px 4px;
+          border-radius: 6px;
+          line-height: 1;
         }
 
         .sidebar-header {

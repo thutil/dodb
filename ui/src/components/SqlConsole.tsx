@@ -3,13 +3,23 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from "react"
 import Editor, { Monaco, OnMount } from "@monaco-editor/react";
 import {
   Play, Clock, Database, CheckCircle2, AlertCircle, FileCode, Sparkles,
-  Layers, Table2, Code2, Copy, Check, Download, WrapText, Globe,
+  Layers, Table2, Code2, Copy, Check, Download, WrapText, Globe, MapPin,
   Edit2, Edit3, Trash2, RotateCcw, Eye, Search, X, Plus, Key, Zap,
   GripHorizontal, ListFilter, History
 } from "lucide-react";
 import { QueryExecutionResult, ColumnInfo, ConnectionProfile, DBType } from "../types";
 import { PendingChanges, CommitResult } from "./DataGrid";
-import { isGeometryColumn, isGisData, formatGisSummary, parseGisToGeoJson } from "../utils/gisUtils";
+import {
+  isGeometryColumn,
+  isCoordinateColumn,
+  isGisData,
+  formatGisSummary,
+  parseGisToGeoJson,
+  detectCoordinatePairs,
+  extractPointFromRow,
+  getAllSpatialFeaturesFromRows,
+  isValidCoordinate,
+} from "../utils/gisUtils";
 import { GisMapViewer, GisFeatureRecord } from "./GisMapViewer";
 import { splitSqlStatements, getStatementAtLine, stripCommentsAndTrim, extractTableFromSql, extractColumnMappingsFromSql } from "../utils/sqlUtils";
 import { apiClient } from "../utils/apiClient";
@@ -115,6 +125,13 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
   const [sql, setSql] = useState<string>(
     () => getSharedSql() || (activeTable ? `SELECT * FROM ${activeTable} LIMIT 50;` : "SELECT 1;")
   );
+  const [monacoTheme, setMonacoTheme] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("dodb_monaco_theme");
+      if (saved) return saved;
+    }
+    return "monokai";
+  });
   const sqlRef = useRef(sql);
   useEffect(() => {
     sqlRef.current = sql;
@@ -515,40 +532,21 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
     return clean.substring(0, maxLen) + "...";
   };
 
+  const queryColumns = useMemo(() => {
+    if (!result?.rows || result.rows.length === 0) return [];
+    return Object.keys(result.rows[0]).map((name) => ({ name }));
+  }, [result]);
+
+  const queryCoordinatePairs = useMemo(() => {
+    return detectCoordinatePairs(queryColumns);
+  }, [queryColumns]);
+
   // Build GIS feature records for query result rows
   const gisFeatures: GisFeatureRecord[] = React.useMemo(() => {
     if (!result?.rows || result.rows.length === 0) return [];
-    const feats: GisFeatureRecord[] = [];
-    const cols = Object.keys(result.rows[0] || {});
-
-    // Find which columns contain GIS data
-    const gisColNames = cols.filter((col) => {
-      if (isGeometryColumn("", col)) return true;
-      return result.rows!.some((row) => isGisData(row[col]));
-    });
-
-    if (gisColNames.length === 0) return [];
-
-    result.rows.forEach((row, idx) => {
-      if (deletedRowIndices.has(idx)) return;
-      const rowEdits = editedCells[idx] || {};
-      const effectiveRow = { ...row, ...rowEdits };
-
-      for (const gc of gisColNames) {
-        const val = effectiveRow[gc];
-        const geom = parseGisToGeoJson(val);
-        if (geom) {
-          feats.push({
-            id: `${idx}_${gc}`,
-            geometry: geom,
-            properties: effectiveRow as Record<string, unknown>,
-            label: `${gc} (Row #${idx + 1})`,
-          });
-        }
-      }
-    });
-    return feats;
-  }, [result?.rows, deletedRowIndices, editedCells]);
+    const activeRows = result.rows.filter((_, idx) => !deletedRowIndices.has(idx));
+    return getAllSpatialFeaturesFromRows(activeRows, queryColumns);
+  }, [result, deletedRowIndices, queryColumns]);
 
   // If view mode is GIS but current query has no GIS data, fall back to table
   useEffect(() => {
@@ -1444,11 +1442,111 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
     editorRef.current = editor;
     monacoRef.current = monaco;
 
+    // 1. Monokai (Vibrant Classic)
+    monaco.editor.defineTheme("monokai", {
+      base: "vs-dark",
+      inherit: true,
+      rules: [
+        { token: "keyword", foreground: "f92672", fontStyle: "bold" },
+        { token: "keyword.sql", foreground: "f92672", fontStyle: "bold" },
+        { token: "string", foreground: "e6db74" },
+        { token: "string.sql", foreground: "e6db74" },
+        { token: "number", foreground: "ae81ff" },
+        { token: "number.sql", foreground: "ae81ff" },
+        { token: "comment", foreground: "75715e", fontStyle: "italic" },
+        { token: "comment.sql", foreground: "75715e", fontStyle: "italic" },
+        { token: "operator", foreground: "f92672" },
+        { token: "operator.sql", foreground: "f92672" },
+        { token: "delimiter", foreground: "f8f8f2" },
+        { token: "delimiter.sql", foreground: "f8f8f2" },
+        { token: "identifier", foreground: "66d9ef" },
+        { token: "identifier.sql", foreground: "66d9ef" },
+        { token: "type", foreground: "66d9ef", fontStyle: "italic" },
+        { token: "type.sql", foreground: "66d9ef", fontStyle: "italic" },
+        { token: "predefined", foreground: "a6e22e" },
+        { token: "predefined.sql", foreground: "a6e22e" },
+      ],
+      colors: {
+        "editor.background": "#1e1f1c",
+        "editor.foreground": "#f8f8f2",
+        "editor.lineHighlightBackground": "#2c2d27",
+        "editorCursor.foreground": "#f8f8f0",
+        "editorLineNumber.foreground": "#75715e",
+        "editorLineNumber.activeForeground": "#f8f8f2",
+        "editor.selectionBackground": "#49483e",
+        "editor.selectionHighlightBackground": "#3e3d32",
+        "editorSuggestWidget.background": "#272822",
+        "editorSuggestWidget.border": "#49483e",
+        "editorSuggestWidget.foreground": "#f8f8f2",
+        "editorSuggestWidget.selectedBackground": "#3e3d32",
+      },
+    });
+
+    // 2. Dracula
+    monaco.editor.defineTheme("dracula", {
+      base: "vs-dark",
+      inherit: true,
+      rules: [
+        { token: "keyword", foreground: "ff79c6", fontStyle: "bold" },
+        { token: "keyword.sql", foreground: "ff79c6", fontStyle: "bold" },
+        { token: "string", foreground: "f1fa8c" },
+        { token: "string.sql", foreground: "f1fa8c" },
+        { token: "number", foreground: "bd93f9" },
+        { token: "number.sql", foreground: "bd93f9" },
+        { token: "comment", foreground: "6272a4", fontStyle: "italic" },
+        { token: "comment.sql", foreground: "6272a4", fontStyle: "italic" },
+        { token: "operator", foreground: "ff79c6" },
+        { token: "operator.sql", foreground: "ff79c6" },
+        { token: "identifier", foreground: "50fa7b" },
+        { token: "type", foreground: "8be9fd", fontStyle: "italic" },
+      ],
+      colors: {
+        "editor.background": "#1e1f29",
+        "editor.foreground": "#f8f8f2",
+        "editor.lineHighlightBackground": "#282a36",
+        "editorCursor.foreground": "#f8f8f2",
+        "editorLineNumber.foreground": "#6272a4",
+        "editorLineNumber.activeForeground": "#f8f8f2",
+        "editor.selectionBackground": "#44475a",
+      },
+    });
+
+    // 3. One Dark Pro
+    monaco.editor.defineTheme("one-dark", {
+      base: "vs-dark",
+      inherit: true,
+      rules: [
+        { token: "keyword", foreground: "c678dd", fontStyle: "bold" },
+        { token: "keyword.sql", foreground: "c678dd", fontStyle: "bold" },
+        { token: "string", foreground: "98c379" },
+        { token: "string.sql", foreground: "98c379" },
+        { token: "number", foreground: "d19a66" },
+        { token: "number.sql", foreground: "d19a66" },
+        { token: "comment", foreground: "5c6370", fontStyle: "italic" },
+        { token: "comment.sql", foreground: "5c6370", fontStyle: "italic" },
+        { token: "operator", foreground: "56b6c2" },
+        { token: "operator.sql", foreground: "56b6c2" },
+        { token: "identifier", foreground: "61afef" },
+        { token: "type", foreground: "e5c07b" },
+      ],
+      colors: {
+        "editor.background": "#21252b",
+        "editor.foreground": "#abb2bf",
+        "editor.lineHighlightBackground": "#2c313a",
+        "editorCursor.foreground": "#528bff",
+        "editorLineNumber.foreground": "#4b5263",
+        "editorLineNumber.activeForeground": "#abb2bf",
+        "editor.selectionBackground": "#3e4451",
+      },
+    });
+
+    // 4. dodb-dark (Slate)
     monaco.editor.defineTheme("dodb-dark", {
       base: "vs-dark",
       inherit: true,
       rules: [
         { token: "keyword", foreground: "60a5fa", fontStyle: "bold" },
+        { token: "keyword.sql", foreground: "60a5fa", fontStyle: "bold" },
         { token: "string.sql", foreground: "34d399" },
         { token: "number", foreground: "f59e0b" },
         { token: "comment", foreground: "6b7280", fontStyle: "italic" },
@@ -1464,7 +1562,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
       },
     });
 
-    monaco.editor.setTheme(theme === "dark" ? "dodb-dark" : "light");
+    monaco.editor.setTheme(theme === "dark" ? monacoTheme : "light");
 
     // Enable inline suggestions (ghost text) & smart tab completion
     editor.updateOptions({
@@ -1544,9 +1642,9 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
   // Update theme dynamically
   useEffect(() => {
     if (monacoRef.current) {
-      monacoRef.current.editor.setTheme(theme === "dark" ? "dodb-dark" : "light");
+      monacoRef.current.editor.setTheme(theme === "dark" ? monacoTheme : "light");
     }
-  }, [theme]);
+  }, [theme, monacoTheme]);
 
   return (
     <div className="sql-console">
@@ -1609,6 +1707,29 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                 <span className="history-pill-count">{filteredHistory.length}</span>
               )}
             </button>
+
+            <div className="monaco-theme-picker" data-tooltip="Editor Syntax Theme (เปลี่ยนธีม Monaco Editor)">
+              <select
+                className="theme-select font-mono"
+                value={theme === "light" ? "light" : monacoTheme}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setMonacoTheme(val);
+                  try {
+                    localStorage.setItem("dodb_monaco_theme", val);
+                  } catch { }
+                  if (monacoRef.current) {
+                    monacoRef.current.editor.setTheme(theme === "dark" ? val : "light");
+                  }
+                }}
+              >
+                <option value="monokai">Monokai</option>
+                <option value="dracula">Dracula</option>
+                <option value="one-dark">One Dark</option>
+                <option value="dodb-dark">dodb Dark</option>
+                <option value="vs-dark">VS Dark</option>
+              </select>
+            </div>
           </div>
         </div>
 
@@ -1695,7 +1816,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
         <Editor
           height="100%"
           language="sql"
-          theme={theme === "dark" ? "dodb-dark" : "light"}
+          theme={theme === "dark" ? monacoTheme : "light"}
           value={sql}
           onChange={(val) => handleSqlChange(val || "")}
           onMount={handleEditorDidMount}
@@ -1983,7 +2104,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                 <Editor
                   height="100%"
                   language="json"
-                  theme={theme === "dark" ? "dodb-dark" : "light"}
+                  theme={theme === "dark" ? monacoTheme : "light"}
                   value={resultJsonFormat === "pretty" ? JSON.stringify(result.rows, null, 2) : JSON.stringify(result.rows)}
                   options={{
                     readOnly: true,
@@ -2049,6 +2170,21 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                               const isGeom = !isNull && (isGeometryColumn("", col) || isGisData(val));
                               const gisSummary = isGeom ? formatGisSummary(val) : null;
 
+                              // Check if column is part of a coordinate pair
+                              const matchingPair = queryCoordinatePairs.find((p) => p.latColumn === col || p.lngColumn === col);
+                              let pairCoords: { lat: number; lng: number } | null = null;
+                              if (matchingPair && !isNull) {
+                                const rawLat = effectiveRow[matchingPair.latColumn];
+                                const rawLng = effectiveRow[matchingPair.lngColumn];
+                                if (rawLat != null && rawLng != null) {
+                                  const latN = typeof rawLat === "number" ? rawLat : parseFloat(String(rawLat));
+                                  const lngN = typeof rawLng === "number" ? rawLng : parseFloat(String(rawLng));
+                                  if (isValidCoordinate(latN, lngN)) {
+                                    pairCoords = { lat: latN, lng: lngN };
+                                  }
+                                }
+                              }
+
                               return (
                                 <td
                                   key={col}
@@ -2059,7 +2195,9 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                                       ? "Row marked for deletion"
                                       : gisSummary
                                         ? "Click badge to view on GIS map; double-click to edit cell"
-                                        : "Double-click to edit cell (ดับเบิลคลิกเพื่อแก้ไข)"
+                                        : pairCoords
+                                          ? `Coordinate: ${pairCoords.lat}, ${pairCoords.lng} (Click pin to view on map)`
+                                          : "Double-click to edit cell (ดับเบิลคลิกเพื่อแก้ไข)"
                                   }
                                 >
                                   {isEditing && (
@@ -2097,6 +2235,25 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                                         <Globe size={10} />
                                         <span>{gisSummary.label}</span>
                                       </span>
+                                    ) : pairCoords ? (
+                                      <div className="coord-cell-content">
+                                        <span>{typeof val === "object" ? JSON.stringify(val) : String(val)}</span>
+                                        <button
+                                          type="button"
+                                          className="coord-pin-btn"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setGisModalData({
+                                              title: `Query Result — ${matchingPair!.label}`,
+                                              subtitle: `Row #${rIdx + 1} (${pairCoords!.lat}, ${pairCoords!.lng})`,
+                                              value: { type: "Point", coordinates: [pairCoords!.lng, pairCoords!.lat] },
+                                            });
+                                          }}
+                                          title={`View coordinates (${pairCoords.lat}, ${pairCoords.lng}) on GIS map`}
+                                        >
+                                          <MapPin size={10} />
+                                        </button>
+                                      </div>
                                     ) : typeof val === "object" ? (
                                       JSON.stringify(val)
                                     ) : (
@@ -2152,25 +2309,37 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
             <Edit3 size={13} />
             <span>Edit Record (แก้ไขข้อมูล)</span>
           </button>
-          {Object.keys(contextMenu.row).some((k) => isGisData(contextMenu.row[k])) && (
-            <button
-              className="context-menu-item"
-              onClick={() => {
-                const gCol = Object.keys(contextMenu.row).find((k) => isGisData(contextMenu.row[k]));
-                if (gCol) {
-                  setGisModalData({
-                    title: `Row #${contextMenu.rowIdx + 1} — ${gCol}`,
-                    subtitle: `Spatial Feature Inspector`,
-                    value: contextMenu.row[gCol],
-                  });
-                }
-                setContextMenu(null);
-              }}
-            >
-              <Globe size={13} style={{ color: "var(--accent-blue)" }} />
-              <span>View on Map</span>
-            </button>
-          )}
+          {(() => {
+            const rowPoints = extractPointFromRow(contextMenu.row, queryColumns, queryCoordinatePairs);
+            const gCol = Object.keys(contextMenu.row).find((k) => isGisData(contextMenu.row[k]));
+            if (!gCol && rowPoints.length === 0) return null;
+
+            return (
+              <button
+                className="context-menu-item"
+                onClick={() => {
+                  if (gCol) {
+                    setGisModalData({
+                      title: `Row #${contextMenu.rowIdx + 1} — ${gCol}`,
+                      subtitle: `Spatial Feature Inspector`,
+                      value: contextMenu.row[gCol],
+                    });
+                  } else if (rowPoints.length > 0) {
+                    const pt = rowPoints[0];
+                    setGisModalData({
+                      title: `Row #${contextMenu.rowIdx + 1} — ${pt.label}`,
+                      subtitle: `Coordinate: ${pt.coordinates[1]}, ${pt.coordinates[0]}`,
+                      value: { type: "Point", coordinates: pt.coordinates },
+                    });
+                  }
+                  setContextMenu(null);
+                }}
+              >
+                <Globe size={13} style={{ color: "var(--accent-blue)" }} />
+                <span>View on Map (ดูบนแผนที่)</span>
+              </button>
+            );
+          })()}
           <div className="context-menu-separator" />
           <button
             className="context-menu-item"
@@ -2743,6 +2912,38 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
         .chip-btn {
           font-size: 10px;
           padding: 2px 7px;
+        }
+
+        .monaco-theme-picker {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-light);
+          padding: 2px 6px;
+          border-radius: var(--radius-xs);
+          height: 24px;
+        }
+        .theme-picker-icon {
+          font-size: 11px;
+          user-select: none;
+        }
+        .theme-select {
+          background: transparent;
+          border: none;
+          color: var(--text-sub);
+          font-size: 10.5px;
+          cursor: pointer;
+          outline: none;
+          padding: 0;
+          font-weight: 500;
+        }
+        .theme-select:hover {
+          color: var(--text-main);
+        }
+        .theme-select option {
+          background: var(--bg-card);
+          color: var(--text-main);
         }
 
         .hint-pill {
