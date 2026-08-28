@@ -139,19 +139,35 @@ func (s *Service) AdminCreateDatabase(id, database, name string) error {
 		return nil
 	}
 
-	pool, err := s.DB.GetPool(ctx(), profile, database)
-	if err != nil {
-		return err
-	}
 	var stmt string
 	if profile.Type == model.Postgres {
+		maintenance := "postgres"
+		pool, err := s.DB.GetPool(ctx(), profile, maintenance)
+		if err != nil {
+			maintenance = "template1"
+			pool, err = s.DB.GetPool(ctx(), profile, maintenance)
+			if err != nil {
+				return fmt.Errorf("could not connect to Postgres maintenance database: %w", err)
+			}
+		}
 		stmt = `CREATE DATABASE "` + strings.ReplaceAll(clean, `"`, `""`) + `"`
+		if _, err := pool.Exec(ctx(), stmt); err != nil {
+			return err
+		}
 	} else {
+		pool, err := s.DB.GetPool(ctx(), profile, "information_schema")
+		if err != nil {
+			pool, err = s.DB.GetPool(ctx(), profile, "mysql")
+			if err != nil {
+				return fmt.Errorf("could not connect to MySQL server: %w", err)
+			}
+		}
 		stmt = "CREATE DATABASE `" + strings.ReplaceAll(clean, "`", "``") + "`"
+		if _, err := pool.Exec(ctx(), stmt); err != nil {
+			return err
+		}
 	}
-	if _, err := pool.Exec(ctx(), stmt); err != nil {
-		return err
-	}
+
 	// The pool cache is keyed per database name, so a later connect to this
 	// name must not reuse a pool opened before it existed.
 	s.DB.ClosePools(profile.ID)
@@ -177,17 +193,21 @@ func (s *Service) AdminDropDatabase(id, database, name string) error {
 	s.DB.ClosePools(profile.ID)
 
 	if profile.Type == model.Postgres {
-		// Connect to a different database than the one being dropped.
-		maintenance := database
-		if database == clean {
-			maintenance = "postgres"
+		// In Postgres, you cannot be connected to the database being dropped.
+		// Always connect to a maintenance database (postgres or template1).
+		maintenance := "postgres"
+		if strings.EqualFold(clean, "postgres") {
+			maintenance = "template1"
 		}
 		pool, err := s.DB.GetPool(ctx(), profile, maintenance)
 		if err != nil {
-			return err
+			maintenance = "template1"
+			pool, err = s.DB.GetPool(ctx(), profile, maintenance)
+			if err != nil {
+				return fmt.Errorf("could not connect to Postgres maintenance database: %w", err)
+			}
 		}
-		// Other sessions have to go too. Best effort: without the privilege to
-		// terminate them the DROP below reports the real problem.
+		// Terminate all other sessions connected to this database.
 		_, _ = pool.Query(ctx(), fmt.Sprintf(
 			"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '%s' AND pid <> pg_backend_pid()",
 			strings.ReplaceAll(clean, "'", "''")), nil)
@@ -196,9 +216,13 @@ func (s *Service) AdminDropDatabase(id, database, name string) error {
 			return err
 		}
 	} else {
-		pool, err := s.DB.GetPool(ctx(), profile, database)
+		// For MySQL / MariaDB, connect to information_schema or mysql system database
+		pool, err := s.DB.GetPool(ctx(), profile, "information_schema")
 		if err != nil {
-			return err
+			pool, err = s.DB.GetPool(ctx(), profile, "mysql")
+			if err != nil {
+				return fmt.Errorf("could not connect to MySQL server: %w", err)
+			}
 		}
 		if _, err := pool.Exec(ctx(), "DROP DATABASE `"+strings.ReplaceAll(clean, "`", "``")+"`"); err != nil {
 			return err
@@ -206,6 +230,13 @@ func (s *Service) AdminDropDatabase(id, database, name string) error {
 	}
 
 	s.DB.ClosePools(profile.ID)
+
+	// If the profile's saved default database was this dropped database, reset it
+	if strings.EqualFold(profile.Database, clean) {
+		profile.Database = ""
+		_, _ = s.SaveProfile(profile)
+	}
+
 	return nil
 }
 

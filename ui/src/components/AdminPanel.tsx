@@ -83,8 +83,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [dumpLoadingTables, setDumpLoadingTables] = useState(false);
   const [fetchedTables, setFetchedTables] = useState<string[]>([]);
 
-  // Drop Database Modal State
-  const [dbToDrop, setDbToDrop] = useState<string | null>(null);
+  // Selected databases for batch operations
+  const [selectedDbs, setSelectedDbs] = useState<Set<string>>(new Set());
+
+  // Drop Database Modal State (Single or Batch)
+  const [dbsToDrop, setDbsToDrop] = useState<string[] | null>(null);
   const [confirmDropInput, setConfirmDropInput] = useState("");
   const [dropDbLoading, setDropDbLoading] = useState(false);
   const [dropDbError, setDropDbError] = useState<string | null>(null);
@@ -257,28 +260,85 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   };
 
   // Drop Database Handlers
-  const handleOpenDropDbModal = (name: string) => {
-    setDbToDrop(name);
+  const handleOpenDropDbModal = (names: string | string[]) => {
+    const list = Array.isArray(names) ? names : [names];
+    if (list.length === 0) return;
+    setDbsToDrop(list);
     setConfirmDropInput("");
     setDropDbError(null);
   };
 
+  const toggleSelectDb = (db: string) => {
+    setSelectedDbs((prev) => {
+      const next = new Set(prev);
+      if (next.has(db)) {
+        next.delete(db);
+      } else {
+        next.add(db);
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectAllDbs = () => {
+    if (selectedDbs.size === databases.length) {
+      setSelectedDbs(new Set());
+    } else {
+      setSelectedDbs(new Set(databases));
+    }
+  };
+
   const handleConfirmDropDatabase = async () => {
-    if (!activeProfile || !dbToDrop) return;
-    if (confirmDropInput.trim() !== dbToDrop) return;
+    if (!activeProfile || !dbsToDrop || dbsToDrop.length === 0) return;
+    const isSingle = dbsToDrop.length === 1;
+    const requiredConfirmation = isSingle ? dbsToDrop[0] : "DROP";
+
+    if (
+      confirmDropInput.trim().toUpperCase() !== requiredConfirmation.toUpperCase() &&
+      confirmDropInput.trim() !== requiredConfirmation
+    ) {
+      return;
+    }
+
     setDropDbLoading(true);
     setDropDbError(null);
-    try {
-      await apiClient.adminDropDatabase(activeProfile.id, currentDb, dbToDrop);
-      setDbMsg({ success: true, text: `Database '${dbToDrop}' dropped successfully` });
-      setDbToDrop(null);
-      onRefreshDatabases();
-    } catch (err: any) {
-      const msg = err?.message || String(err);
-      setDropDbError(msg);
-    } finally {
-      setDropDbLoading(false);
+    const dropped: string[] = [];
+    const errors: string[] = [];
+
+    for (const db of dbsToDrop) {
+      try {
+        await apiClient.adminDropDatabase(activeProfile.id, currentDb, db);
+        dropped.push(db);
+      } catch (err: any) {
+        const msg = err?.message || String(err);
+        errors.push(`'${db}': ${msg}`);
+      }
     }
+
+    if (errors.length === 0) {
+      setDbMsg({
+        success: true,
+        text: isSingle
+          ? `Database '${dbsToDrop[0]}' dropped successfully`
+          : `Successfully dropped ${dropped.length} databases`,
+      });
+      setDbsToDrop(null);
+      setSelectedDbs((prev) => {
+        const next = new Set(prev);
+        dropped.forEach((d) => next.delete(d));
+        return next;
+      });
+      onRefreshDatabases();
+    } else {
+      setDropDbError(`Dropped ${dropped.length}/${dbsToDrop.length}. Errors:\n${errors.join("\n")}`);
+      setSelectedDbs((prev) => {
+        const next = new Set(prev);
+        dropped.forEach((d) => next.delete(d));
+        return next;
+      });
+      onRefreshDatabases();
+    }
+    setDropDbLoading(false);
   };
 
   // Create User Handler
@@ -468,17 +528,37 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <h4 className="section-heading">Existing Databases ({databases.length})</h4>
                   <span className="section-sub">List of all databases hosted on {activeProfile.host || "server"}</span>
                 </div>
-                <button className="btn btn-secondary" onClick={onRefreshDatabases}>
-                  <RefreshCw size={12} />
-                  <span>Refresh</span>
-                </button>
+                <div className="section-actions-right">
+                  {selectedDbs.size > 0 && (
+                    <button
+                      className="btn btn-danger"
+                      onClick={() => handleOpenDropDbModal(Array.from(selectedDbs))}
+                      title={`Drop ${selectedDbs.size} selected databases`}
+                    >
+                      <Trash2 size={12} />
+                      <span>Drop Selected ({selectedDbs.size})</span>
+                    </button>
+                  )}
+                  <button className="btn btn-secondary" onClick={onRefreshDatabases}>
+                    <RefreshCw size={12} />
+                    <span>Refresh</span>
+                  </button>
+                </div>
               </div>
 
               <div className="table-wrapper">
                 <table className="admin-table">
                   <thead>
                     <tr>
-                      <th style={{ width: "60px" }}>#</th>
+                      <th style={{ width: "40px", textAlign: "center" }}>
+                        <input
+                          type="checkbox"
+                          checked={databases.length > 0 && selectedDbs.size === databases.length}
+                          onChange={toggleSelectAllDbs}
+                          title="Select all databases"
+                        />
+                      </th>
+                      <th style={{ width: "50px" }}>#</th>
                       <th>Database Name</th>
                       <th>Engine</th>
                       <th>Status</th>
@@ -487,7 +567,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   </thead>
                   <tbody>
                     {databases.map((db, idx) => (
-                      <tr key={db} className={db === currentDb ? "active-db-row" : ""}>
+                      <tr key={db} className={`${db === currentDb ? "active-db-row" : ""} ${selectedDbs.has(db) ? "selected-row" : ""}`}>
+                        <td style={{ textAlign: "center" }}>
+                          <input
+                            type="checkbox"
+                            checked={selectedDbs.has(db)}
+                            onChange={() => toggleSelectDb(db)}
+                            title={`Select ${db}`}
+                          />
+                        </td>
                         <td className="row-num font-mono">{idx + 1}</td>
                         <td className="font-mono db-name-col">
                           <div className="db-name-wrap">
@@ -1163,17 +1251,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       </div>
 
       {/* Confirmation Modal: Drop Database */}
-      {dbToDrop && (
+      {dbsToDrop && dbsToDrop.length > 0 && (
         <div className="admin-modal-overlay">
           <div className="admin-modal-card danger-card">
             <div className="admin-modal-header danger-header">
               <div className="modal-title-wrap">
                 <AlertTriangle size={16} className="danger-icon" />
-                <span className="modal-title">Drop Database</span>
+                <span className="modal-title">
+                  {dbsToDrop.length === 1 ? "Drop Database" : `Drop ${dbsToDrop.length} Databases`}
+                </span>
               </div>
               <button
                 className="modal-close-btn"
-                onClick={() => !dropDbLoading && setDbToDrop(null)}
+                onClick={() => !dropDbLoading && setDbsToDrop(null)}
                 disabled={dropDbLoading}
               >
                 <X size={14} />
@@ -1184,23 +1274,45 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               <div className="danger-callout">
                 <span className="callout-bold">Permanent Deletion Warning:</span>
                 <span>
-                  You are about to permanently drop the database <strong>&quot;{dbToDrop}&quot;</strong>.
-                  All tables, rows, views, and schemas inside this database will be destroyed immediately.
+                  {dbsToDrop.length === 1 ? (
+                    <>
+                      You are about to permanently drop the database <strong>&quot;{dbsToDrop[0]}&quot;</strong>.
+                      All tables, rows, views, and schemas inside this database will be destroyed immediately.
+                    </>
+                  ) : (
+                    <>
+                      You are about to permanently drop <strong>{dbsToDrop.length} databases</strong> (
+                      <span className="font-mono">{dbsToDrop.join(", ")}</span>).
+                      All tables, rows, views, and schemas inside these databases will be destroyed immediately.
+                    </>
+                  )}
                 </span>
               </div>
 
               <div className="confirm-input-section">
                 <label className="confirm-label">
-                  To confirm, type <code>{dbToDrop}</code> below:
+                  To confirm, type <code>{dbsToDrop.length === 1 ? dbsToDrop[0] : "DROP"}</code> below:
                 </label>
                 <input
                   type="text"
                   className="input confirm-input font-mono"
-                  placeholder={dbToDrop}
+                  placeholder={dbsToDrop.length === 1 ? dbsToDrop[0] : "DROP"}
                   value={confirmDropInput}
                   autoFocus
                   disabled={dropDbLoading}
                   onChange={(e) => setConfirmDropInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !dropDbLoading) {
+                      const req = dbsToDrop.length === 1 ? dbsToDrop[0] : "DROP";
+                      if (
+                        confirmDropInput.trim().toUpperCase() === req.toUpperCase() ||
+                        confirmDropInput.trim() === req
+                      ) {
+                        e.preventDefault();
+                        handleConfirmDropDatabase();
+                      }
+                    }
+                  }}
                 />
               </div>
 
@@ -1208,7 +1320,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <div className="modal-error-box">
                   <div className="modal-error-left">
                     <XCircle size={13} className="error-icon" />
-                    <span className="modal-error-text font-mono">{dropDbError}</span>
+                    <span className="modal-error-text font-mono" style={{ whiteSpace: "pre-wrap" }}>{dropDbError}</span>
                   </div>
                   <button
                     type="button"
@@ -1227,7 +1339,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               <button
                 type="button"
                 className="btn btn-secondary"
-                onClick={() => setDbToDrop(null)}
+                onClick={() => setDbsToDrop(null)}
                 disabled={dropDbLoading}
               >
                 Cancel
@@ -1235,11 +1347,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               <button
                 type="button"
                 className="btn btn-danger confirm-danger-btn"
-                disabled={confirmDropInput.trim() !== dbToDrop || dropDbLoading}
+                disabled={
+                  (dbsToDrop.length === 1
+                    ? confirmDropInput.trim() !== dbsToDrop[0]
+                    : confirmDropInput.trim().toUpperCase() !== "DROP") || dropDbLoading
+                }
                 onClick={handleConfirmDropDatabase}
               >
                 <Trash2 size={13} />
-                <span>{dropDbLoading ? "Dropping Database..." : "Drop Database"}</span>
+                <span>
+                  {dropDbLoading
+                    ? "Dropping..."
+                    : dbsToDrop.length === 1
+                      ? "Drop Database"
+                      : `Drop ${dbsToDrop.length} Databases`}
+                </span>
               </button>
             </div>
           </div>
@@ -1461,6 +1583,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           display: flex;
           justify-content: space-between;
           align-items: center;
+          gap: 12px;
+        }
+        .section-actions-right {
+          display: flex;
+          align-items: center;
+          gap: 8px;
         }
 
         .section-header {
@@ -1585,6 +1713,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
         .active-db-row td {
           background: rgba(59, 130, 246, 0.05);
+        }
+        .admin-table tr.selected-row td {
+          background: rgba(59, 130, 246, 0.1) !important;
         }
 
         .row-num { color: var(--text-muted); }

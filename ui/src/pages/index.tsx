@@ -460,8 +460,13 @@ export default function Home() {
     const dbList = (await apiClient.getDatabases(profile.id)) as string[];
     setDatabases(dbList);
     if (dbList.length > 0) {
-      const defaultDb = dbList.includes(profile.database) ? profile.database : dbList[0];
-      setActiveDatabase(defaultDb);
+      setActiveDatabase((prev) => {
+        if (prev && dbList.includes(prev)) return prev;
+        if (profile.database && dbList.includes(profile.database)) return profile.database;
+        return dbList[0];
+      });
+    } else {
+      setActiveDatabase("");
     }
     setConnectionError(null);
     return dbList;

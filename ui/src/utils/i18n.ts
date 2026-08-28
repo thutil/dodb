@@ -50,6 +50,11 @@ export const translations = {
 
     // DataGrid & Table Actions
     gridFilter: "Filter",
+    gridApplyFilter: "Query",
+    gridAddFilterRule: "Add Filter Rule",
+    gridClearFilters: "Clear All",
+    gridFilterRules: "Filter Rules",
+    gridFilterUnapplied: "Unapplied",
     gridAddRow: "Add Row",
     gridExport: "Export",
     gridExportJson: "Export JSON",
@@ -298,6 +303,11 @@ export const translations = {
 
     // DataGrid & Table Actions
     gridFilter: "ตัวกรอง",
+    gridApplyFilter: "ประมวลผล (Query)",
+    gridAddFilterRule: "เพิ่มเงื่อนไข",
+    gridClearFilters: "ล้างทั้งหมด",
+    gridFilterRules: "เงื่อนไขตัวกรอง",
+    gridFilterUnapplied: "ยังไม่ได้ Query",
     gridAddRow: "เพิ่มแถว",
     gridExport: "ส่งออก",
     gridExportJson: "ส่งออก JSON",

@@ -19,16 +19,23 @@ func (s *Service) GetDatabases(id string) ([]string, error) {
 		return nil, err
 	}
 	var query string
+	var maintenanceDb string
 	switch profile.Type {
 	case model.Postgres:
 		query = "SELECT datname::text as name FROM pg_database WHERE datistemplate = false ORDER BY datname"
+		maintenanceDb = "postgres"
 	case model.Mariadb:
 		query = "SHOW DATABASES"
+		maintenanceDb = "information_schema"
 	default:
 		query = "SELECT name FROM pragma_database_list"
+		maintenanceDb = ""
 	}
 
-	pool, err := s.DB.GetPool(ctx(), profile, "")
+	pool, err := s.DB.GetPool(ctx(), profile, maintenanceDb)
+	if err != nil && profile.Type == model.Postgres {
+		pool, err = s.DB.GetPool(ctx(), profile, "template1")
+	}
 	if err != nil {
 		return nil, err
 	}

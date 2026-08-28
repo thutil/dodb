@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useLayoutEffect } from "react";
+import React, { useState, useEffect, useRef, useLayoutEffect, useMemo } from "react";
 import Editor from "@monaco-editor/react";
 import {
   Table2,
@@ -20,6 +20,7 @@ import {
   FileCode,
   FileSpreadsheet,
   Filter,
+  Play,
   ArrowUp,
   ArrowDown,
   ArrowUpDown,
@@ -156,6 +157,19 @@ export const DataGrid: React.FC<DataGridProps> = ({
         : "postgres";
 
   const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
+
+  // Draft filter state so editing rules does not immediately trigger heavy DB queries
+  const [draftFilters, setDraftFilters] = useState<ColumnFilter[]>(filters);
+  const filtersKey = JSON.stringify(filters);
+
+  // Sync draft filters whenever external filters change (e.g. table switch or external reset)
+  useEffect(() => {
+    setDraftFilters(filters);
+  }, [filtersKey]);
+
+  const hasUnappliedFilters = useMemo(() => {
+    return JSON.stringify(draftFilters) !== JSON.stringify(filters);
+  }, [draftFilters, filters]);
 
   // View Mode: Table vs JSON vs GIS Map
   const [viewMode, setViewMode] = useState<"table" | "json" | "gis">("table");
@@ -402,7 +416,6 @@ export const DataGrid: React.FC<DataGridProps> = ({
   }, [commitMsg]);
 
   // Reset local transaction draft on table, database, or page/sort change
-  const filtersKey = JSON.stringify(filters);
   useEffect(() => {
     setNewRows([]);
     setEditedCells({});
@@ -979,35 +992,39 @@ export const DataGrid: React.FC<DataGridProps> = ({
 
   // Filter Management Functions
   const addFilter = () => {
-    if (!columns || columns.length === 0 || !onFiltersChange) return;
+    if (!columns || columns.length === 0) return;
     const newFilter: ColumnFilter = {
       id: String(Date.now()),
       column: columns[0].name,
       operator: "equals",
       value: "",
     };
-    onFiltersChange([...filters, newFilter]);
-    onPageChange(0);
+    setDraftFilters((prev) => [...prev, newFilter]);
   };
 
   const updateFilter = (id: string, updated: Partial<ColumnFilter>) => {
-    if (!onFiltersChange) return;
-    const next = filters.map((f) => (f.id === id ? { ...f, ...updated } : f));
-    onFiltersChange(next);
-    onPageChange(0);
+    setDraftFilters((prev) =>
+      prev.map((f) => (f.id === id ? { ...f, ...updated } : f))
+    );
   };
 
   const removeFilter = (id: string) => {
-    if (!onFiltersChange) return;
-    const next = filters.filter((f) => f.id !== id);
-    onFiltersChange(next);
-    onPageChange(0);
+    setDraftFilters((prev) => prev.filter((f) => f.id !== id));
+  };
+
+  const applyFilters = () => {
+    if (onFiltersChange) {
+      onFiltersChange(draftFilters);
+      onPageChange(0);
+    }
   };
 
   const clearAllFilters = () => {
-    if (onFiltersChange) onFiltersChange([]);
-    if (onSearchChange) onSearchChange("");
-    onPageChange(0);
+    setDraftFilters([]);
+    if (onFiltersChange) {
+      onFiltersChange([]);
+      onPageChange(0);
+    }
   };
 
   const handleHeaderClick = (colName: string) => {
@@ -1228,8 +1245,17 @@ export const DataGrid: React.FC<DataGridProps> = ({
           <div className="filter-drawer-header">
             <div className="filter-drawer-title">
               <Filter size={14} className="filter-icon" />
-              <span>Filter Rules</span>
-              {filters.length > 0 && <span className="filter-count-badge">{filters.length} active</span>}
+              <span>{t("gridFilterRules", language)}</span>
+              {filters.length > 0 && (
+                <span className="filter-count-badge" title={`${filters.length} active filter rule(s) applied`}>
+                  {filters.length} active
+                </span>
+              )}
+              {hasUnappliedFilters && (
+                <span className="filter-unapplied-badge" title="You have unapplied filter changes. Click Query to apply.">
+                  {t("gridFilterUnapplied", language)}
+                </span>
+              )}
             </div>
             <div className="filter-drawer-actions">
               <button
@@ -1238,34 +1264,55 @@ export const DataGrid: React.FC<DataGridProps> = ({
                 title="Add a new filter condition"
               >
                 <Plus size={13} />
-                <span>Add Filter Rule</span>
+                <span>{t("gridAddFilterRule", language)}</span>
               </button>
-              {filters.length > 0 && (
+              {(filters.length > 0 || draftFilters.length > 0) && (
                 <button
                   className="btn btn-secondary filter-clear-btn"
                   onClick={clearAllFilters}
-                  title="Remove all filter conditions"
+                  title="Remove all filter conditions and show unfiltered data"
                 >
                   <Trash2 size={12} />
-                  <span>Clear All</span>
+                  <span>{t("gridClearFilters", language)}</span>
                 </button>
               )}
+              <button
+                className={`btn filter-query-btn ${hasUnappliedFilters ? "btn-primary filter-query-btn-highlight" : "btn-secondary"}`}
+                onClick={applyFilters}
+                disabled={loading}
+                title="Apply filter conditions and execute query on database (Press Enter)"
+              >
+                <Play size={12} fill="currentColor" />
+                <span>{t("gridApplyFilter", language)}</span>
+              </button>
             </div>
           </div>
 
-          {filters.length === 0 ? (
+          {draftFilters.length === 0 ? (
             <div className="empty-filters-msg">
-              <span>No active filter rules. Click <strong>&quot;Add Filter Rule&quot;</strong> to filter rows by column values.</span>
+              <span>
+                {language === "th" ? (
+                  <>ยังไม่มีเงื่อนไขตัวกรอง คลิก <strong>&quot;เพิ่มเงื่อนไข&quot;</strong> เพื่อกำหนดตัวกรอง แล้วคลิก <strong>&quot;ประมวลผล (Query)&quot;</strong> เพื่อดึงข้อมูล</>
+                ) : (
+                  <>No filter rules configured. Click <strong>&quot;Add Filter Rule&quot;</strong> to configure conditions, then click <strong>&quot;Query&quot;</strong> to execute.</>
+                )}
+              </span>
             </div>
           ) : (
             <div className="filter-list">
-              {filters.map((f, idx) => (
+              {draftFilters.map((f, idx) => (
                 <div key={f.id} className="filter-row">
                   <span className="filter-row-num" title={`Filter rule #${idx + 1}`}>{idx + 1}</span>
                   <select
                     className="select select-column font-mono"
                     value={f.column}
                     onChange={(e) => updateFilter(f.id, { column: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        applyFilters();
+                      }
+                    }}
                     title="Select column to filter"
                   >
                     {columns.map((c) => (
@@ -1279,6 +1326,12 @@ export const DataGrid: React.FC<DataGridProps> = ({
                     className="select select-operator"
                     value={f.operator}
                     onChange={(e) => updateFilter(f.id, { operator: e.target.value as FilterOperator })}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        applyFilters();
+                      }
+                    }}
                     title="Select comparison operator"
                   >
                     <option value="equals">= Equals</option>
@@ -1301,10 +1354,16 @@ export const DataGrid: React.FC<DataGridProps> = ({
                   ) : (
                     <input
                       className="input filter-val-input font-mono"
-                      placeholder="Filter value..."
+                      placeholder={language === "th" ? "ค่าที่ต้องการกรอง... (กด Enter เพื่อ Query)" : "Filter value... (Press Enter to Query)"}
                       value={f.value}
                       onChange={(e) => updateFilter(f.id, { value: e.target.value })}
-                      title="Enter value to compare against"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          applyFilters();
+                        }
+                      }}
+                      title="Enter value to compare against and press Enter to Query"
                     />
                   )}
 
@@ -3729,6 +3788,20 @@ export const DataGrid: React.FC<DataGridProps> = ({
           border-radius: var(--radius-full);
           font-weight: 600;
         }
+        .filter-unapplied-badge {
+          font-size: 10px;
+          padding: 1px 7px;
+          background: rgba(234, 179, 8, 0.15);
+          color: var(--accent-amber, #eab308);
+          border: 1px solid rgba(234, 179, 8, 0.3);
+          border-radius: var(--radius-full);
+          font-weight: 600;
+          animation: filterPulse 2s infinite ease-in-out;
+        }
+        @keyframes filterPulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.65; }
+        }
         .filter-icon { color: var(--accent-blue); }
         .filter-drawer-actions {
           display: flex;
@@ -3752,6 +3825,16 @@ export const DataGrid: React.FC<DataGridProps> = ({
         .filter-clear-btn:hover {
           background: rgba(244, 63, 94, 0.1) !important;
           border-color: rgba(244, 63, 94, 0.3) !important;
+        }
+        .filter-query-btn {
+          padding: 5px 14px;
+          font-size: 11.5px;
+          font-weight: 600;
+          gap: 6px;
+          transition: all 0.15s ease;
+        }
+        .filter-query-btn-highlight {
+          box-shadow: 0 0 10px rgba(59, 130, 246, 0.35);
         }
 
         .empty-filters-msg {
