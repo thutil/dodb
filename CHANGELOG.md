@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.6] - 2026-08-28
+
+### Added
+- **Native 2-Page Executive Schema Report**:
+  - Direct zero-dependency vector canvas rendering with paper size presets (`A4`, `A3`, `US Letter`, `Fit`) and orientation (`Landscape`, `Portrait`).
+  - **Page 1 (Architecture Diagram)**: High-resolution visual entity relationship map with database metadata banner and keys legend.
+  - **Page 2 (Executive Data Dictionary)**: Detailed schema specifications including table summaries, column data types, primary keys, and foreign key reference matrix.
+- **Transparent PNG Export Mode**:
+  - Transparent background option for PNG that automatically strips background fills, dot grids, title banners, and watermark/copyright text for clean embedding into Figma, Keynote, PowerPoint, and documentation.
+- **Topological Sugiyama Auto-Layout**:
+  - Upgraded ERD auto-layout algorithm with dependency hierarchy layering (Root/Parent tables on the left, Core entities in the middle, Child/Junction tables on the right).
+  - Cross-reduction sorting to drastically minimize edge crossings and zigzag relationship lines.
+  - Dynamic vertical stacking based on actual column count to eliminate table overlapping.
+- **Seamless Canvas & Sidebar Selection**:
+  - Multi-table selection via `Command + Click` (Mac) / `Ctrl + Click` (Win/Linux) on the left sidebar, or `Shift + Click` directly on canvas table cards.
+  - Automatically synchronizes selection with the Export modal.
+- **Smart Relationship Edge Filtering**:
+  - Automatically omits relationship lines when exporting a single standalone table.
+  - For multi-table exports, only draws relationship lines where both source and target tables are included in the export scope.
+- **Visual Query Builder - GROUP BY Support**:
+  - Added support for `GROUP BY` clause and aggregation functions (`COUNT`, `SUM`, `AVG`, `MIN`, `MAX`) across visual query builder.
+
+### Fixed
+- **Connection Explorer Folder Persistence**: Fixed connection folder collapse state to persist reliably without auto-expanding on reload.
+- **React Flow Edge Handle Warning (#008)**: Added fallback handle bridges for all table columns to eliminate React Flow handle connection errors when columns are truncated in compact mode.
+- **Suppressed Browser Header/Footer in Print & PDF**: Configured zero-margin print stylesheet with internal body padding to remove browser URL headers (`http://localhost:...`), document titles, and timestamps from generated PDFs.
+
+---
+
 ## [0.3.5] - 2026-08-28
 
 ### Added
