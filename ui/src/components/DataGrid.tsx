@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useLayoutEffect } from "react";
 import Editor from "@monaco-editor/react";
 import {
   Table2,
@@ -214,6 +214,38 @@ export const DataGrid: React.FC<DataGridProps> = ({
   const [selectedRowIndices, setSelectedRowIndices] = useState<Set<number>>(new Set());
   const [lastSelectedRowIdx, setLastSelectedRowIdx] = useState<number | null>(null);
   const [batchCopied, setBatchCopied] = useState<string | null>(null);
+
+  // Scroll Container Ref & Horizontal Scroll Retention
+  const tableAreaRef = useRef<HTMLDivElement>(null);
+  const lastScrollLeftRef = useRef<number>(0);
+
+  const handleTableAreaScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    lastScrollLeftRef.current = e.currentTarget.scrollLeft;
+  };
+
+  // Reset scroll to top-left when table or database changes
+  useEffect(() => {
+    lastScrollLeftRef.current = 0;
+    if (tableAreaRef.current) {
+      tableAreaRef.current.scrollLeft = 0;
+      tableAreaRef.current.scrollTop = 0;
+    }
+  }, [tableName, activeDatabase]);
+
+  // Reset vertical scroll to top on sort change while preserving horizontal scroll
+  useEffect(() => {
+    if (tableAreaRef.current) {
+      tableAreaRef.current.scrollTop = 0;
+      tableAreaRef.current.scrollLeft = lastScrollLeftRef.current;
+    }
+  }, [sortColumn, sortOrder]);
+
+  // Ensure horizontal scroll is restored after rows or columns update
+  useLayoutEffect(() => {
+    if (tableAreaRef.current && lastScrollLeftRef.current > 0) {
+      tableAreaRef.current.scrollLeft = lastScrollLeftRef.current;
+    }
+  }, [rows, columns]);
 
   // Close export dropdown and context menu on outside click
   useEffect(() => {
@@ -1327,8 +1359,13 @@ export const DataGrid: React.FC<DataGridProps> = ({
         </div>
       )}
 
-      <div className="grid-table-area">
-        {loading ? (
+      <div className="grid-table-area" ref={tableAreaRef} onScroll={handleTableAreaScroll}>
+        {loading && columns.length > 0 && (
+          <div className="grid-loading-bar" aria-label="Loading...">
+            <div className="grid-loading-bar-inner" />
+          </div>
+        )}
+        {loading && columns.length === 0 ? (
           <div className="grid-state-msg">{t("loading", language)}</div>
         ) : viewMode === "gis" ? (
           <div className="gis-view-wrapper" style={{ height: "100%", width: "100%", position: "relative" }}>
@@ -1364,7 +1401,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
             />
           </div>
         ) : (
-          <table className="pro-table">
+          <table className={`pro-table ${loading ? "is-reloading" : ""}`}>
             <thead>
               <tr>
                 <th className="th-index">#</th>
@@ -1453,7 +1490,9 @@ export const DataGrid: React.FC<DataGridProps> = ({
               {rows.length === 0 && newRows.length === 0 ? (
                 <tr>
                   <td colSpan={Math.max(columns.length + 2, 3)} className="empty-cell">
-                    {errorMessage ? (
+                    {loading ? (
+                      t("loading", language)
+                    ) : errorMessage ? (
                       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "8px", color: "var(--accent-red, #ef4444)" }}>
                         <AlertCircle size={22} />
                         <span style={{ fontSize: "12px", fontWeight: 600 }}>{t("gridQueryError", language)}</span>
@@ -2788,6 +2827,50 @@ export const DataGrid: React.FC<DataGridProps> = ({
           flex: 1;
           overflow: auto;
           position: relative;
+        }
+
+        .grid-loading-bar {
+          position: sticky;
+          top: 0;
+          left: 0;
+          right: 0;
+          width: 100%;
+          height: 2.5px;
+          z-index: 25;
+          overflow: hidden;
+          background: rgba(59, 130, 246, 0.12);
+        }
+
+        .grid-loading-bar-inner {
+          position: absolute;
+          top: 0;
+          left: 0;
+          bottom: 0;
+          width: 35%;
+          background: var(--accent-blue, #3b82f6);
+          animation: grid-indeterminate 1.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+          border-radius: 2px;
+          box-shadow: 0 0 8px rgba(59, 130, 246, 0.6);
+        }
+
+        @keyframes grid-indeterminate {
+          0% {
+            left: -35%;
+            width: 35%;
+          }
+          50% {
+            left: 30%;
+            width: 50%;
+          }
+          100% {
+            left: 100%;
+            width: 35%;
+          }
+        }
+
+        .pro-table.is-reloading {
+          opacity: 0.65;
+          transition: opacity 0.15s ease;
         }
 
         .json-view-wrapper {

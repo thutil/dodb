@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.5] - 2026-08-28
+
+### Added
+- **Horizontal Scroll Retention in DataGrid**: Preserves horizontal scroll position when sorting, filtering, or refreshing data across wide tables with many columns.
+- **Non-Destructive Loading Indicator**: Added a slim, animated top loading bar in the DataGrid that keeps the table mounted and prevents layout collapse during data reloads.
+- **Production Build Hardening**: Added `-tags production` to all macOS/Windows compilation scripts to disable devtools and secure production runtime binaries.
+- **Indexes Editor Enhancements**: Improved index creation workflow with clearer tooltips and refined styling.
+
+### Fixed
+- **Scroll Left Jump on Sort**: Fixed an issue where clicking a column header on the right side of a scrolled table caused the horizontal scroll to jump back to `0` (far left).
+- **Auto-Scroll Behavior on Table Switch**: Automatically resets scroll position cleanly to the top-left `(0, 0)` only when changing tables or switching databases.
+
+---
+
 ## [0.3.3] - 2026-08-28
 
 ### Added
