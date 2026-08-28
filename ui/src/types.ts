@@ -127,3 +127,36 @@ export interface VisualSortCondition {
   direction: "ASC" | "DESC";
 }
 
+export type AggregateFunction =
+  | "NONE"
+  | "COUNT"
+  | "SUM"
+  | "AVG"
+  | "MIN"
+  | "MAX"
+  | "COUNT_DISTINCT";
+
+export interface VisualGroupByCondition {
+  id: string;
+  table: string;
+  column: string;
+}
+
+export interface VisualAggregateItem {
+  id: string;
+  table: string;
+  column: string;
+  func: AggregateFunction;
+  alias?: string;
+}
+
+export interface VisualHavingCondition {
+  id: string;
+  table: string;
+  column: string;
+  func: AggregateFunction;
+  operator: VisualFilterOperator;
+  value: string;
+  logic: "AND" | "OR";
+}
+

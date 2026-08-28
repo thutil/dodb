@@ -86,7 +86,17 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
   const [connecting, setConnecting] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [isCustomGroup, setIsCustomGroup] = useState(false);
-  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("dodb_collapsed_groups");
+        if (saved) return JSON.parse(saved);
+      } catch {
+        // ignore
+      }
+    }
+    return {};
+  });
 
   // Group Management State
   const [groupOrder, setGroupOrder] = useState<string[]>(() => {
@@ -589,6 +599,18 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
       localStorage.setItem("dodb_group_order", JSON.stringify(newOrder));
     } catch { }
 
+    setCollapsedGroups((prev) => {
+      if (prev[oldName] !== undefined) {
+        const next = { ...prev, [trimmed]: prev[oldName] };
+        delete next[oldName];
+        try {
+          localStorage.setItem("dodb_collapsed_groups", JSON.stringify(next));
+        } catch { }
+        return next;
+      }
+      return prev;
+    });
+
     if ((form.group || "Default") === oldName) {
       setForm((prev) => ({ ...prev, group: trimmed }));
     }
@@ -624,6 +646,19 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
     try {
       localStorage.setItem("dodb_group_order", JSON.stringify(newOrder));
     } catch { }
+
+    setCollapsedGroups((prev) => {
+      if (prev[groupName] !== undefined) {
+        const next = { ...prev };
+        delete next[groupName];
+        try {
+          localStorage.setItem("dodb_collapsed_groups", JSON.stringify(next));
+        } catch { }
+        return next;
+      }
+      return prev;
+    });
+
     setDeletingGroup(null);
   };
 
@@ -667,7 +702,15 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
   }, [allGroupKeys, groupOrder]);
 
   const toggleGroupCollapse = (gName: string) => {
-    setCollapsedGroups((prev) => ({ ...prev, [gName]: !prev[gName] }));
+    setCollapsedGroups((prev) => {
+      const next = { ...prev, [gName]: !prev[gName] };
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.setItem("dodb_collapsed_groups", JSON.stringify(next));
+        } catch { }
+      }
+      return next;
+    });
   };
 
   const isCurrentActive = Boolean(activeProfile && selectedId === activeProfile.id);
@@ -894,63 +937,62 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
 
 
               {/* Database Engine Type Segmented Picker */}
-              <div className="form-section-card">
-                <div className="section-label">Database Type</div>
+              <div className="minimal-engine-section">
                 <div className="engine-segmented-control">
                   <button
                     type="button"
-                    className={`engine-seg-btn postgres ${form.type === "postgres" ? "active" : ""}`}
+                    className={`engine-seg-btn ${form.type === "postgres" ? "active" : ""}`}
                     onClick={() => handleTypeChange("postgres")}
                   >
-                    <Server size={14} className="seg-icon" />
+                    <Server size={13} className="seg-icon" />
                     <span className="seg-label">PostgreSQL</span>
                   </button>
                   <button
                     type="button"
-                    className={`engine-seg-btn mariadb ${form.type === "mariadb" ? "active" : ""}`}
+                    className={`engine-seg-btn ${form.type === "mariadb" ? "active" : ""}`}
                     onClick={() => handleTypeChange("mariadb")}
                   >
-                    <Server size={14} className="seg-icon" />
+                    <Server size={13} className="seg-icon" />
                     <span className="seg-label">MySQL / MariaDB</span>
                   </button>
                   <button
                     type="button"
-                    className={`engine-seg-btn sqlite ${form.type === "sqlite" ? "active" : ""}`}
+                    className={`engine-seg-btn ${form.type === "sqlite" ? "active" : ""}`}
                     onClick={() => handleTypeChange("sqlite")}
                   >
-                    <HardDrive size={14} className="seg-icon" />
+                    <HardDrive size={13} className="seg-icon" />
                     <span className="seg-label">SQLite</span>
                   </button>
                 </div>
               </div>
 
-              {/* General Connection Settings */}
-              <div className="form-section-card">
-                {testResult && (
-                  <div className={`status-feedback-box ${testResult.success ? "success" : "error"}`}>
-                    <div className="feedback-content-left">
-                      {testResult.success ? <CheckCircle2 size={14} className="feedback-icon" /> : <XCircle size={14} className="feedback-icon" />}
-                      <span className="feedback-text">{testResult.text}</span>
-                    </div>
-                    {!testResult.success && (
-                      <button
-                        type="button"
-                        className="btn-feedback-copy"
-                        onClick={() => {
-                          navigator.clipboard.writeText(testResult.text);
-                          setCopiedErrorText(true);
-                          setTimeout(() => setCopiedErrorText(false), 2000);
-                        }}
-                        title="Copy error message"
-                      >
-                        {copiedErrorText ? <Check size={11} /> : <Copy size={11} />}
-                        <span>{copiedErrorText ? "Copied" : "Copy"}</span>
-                      </button>
-                    )}
+              {/* Status Feedback Toast / Box */}
+              {testResult && (
+                <div className={`status-feedback-box ${testResult.success ? "success" : "error"}`}>
+                  <div className="feedback-content-left">
+                    {testResult.success ? <CheckCircle2 size={14} className="feedback-icon" /> : <XCircle size={14} className="feedback-icon" />}
+                    <span className="feedback-text">{testResult.text}</span>
                   </div>
-                )}
-                <div className="section-label">Connection Details</div>
+                  {!testResult.success && (
+                    <button
+                      type="button"
+                      className="btn-feedback-copy"
+                      onClick={() => {
+                        navigator.clipboard.writeText(testResult.text);
+                        setCopiedErrorText(true);
+                        setTimeout(() => setCopiedErrorText(false), 2000);
+                      }}
+                      title="Copy error message"
+                    >
+                      {copiedErrorText ? <Check size={11} /> : <Copy size={11} />}
+                      <span>{copiedErrorText ? "Copied" : "Copy"}</span>
+                    </button>
+                  )}
+                </div>
+              )}
 
+              {/* Form Fields Canvas */}
+              <div className="form-fields-canvas">
                 <div className="field-grid-2">
                   <div className="field-group flex-2">
                     <label className="field-label">Profile Name</label>
@@ -963,7 +1005,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
                   </div>
 
                   <div className="field-group flex-1">
-                    <label className="field-label">Group / Folder</label>
+                    <label className="field-label">Group</label>
                     {isCustomGroup ? (
                       <div className="custom-group-input-wrap">
                         <input
@@ -1009,8 +1051,8 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
                 </div>
 
                 {form.type === "sqlite" ? (
-                  <div className="field-group mt-12">
-                    <label className="field-label">SQLite Database File Path</label>
+                  <div className="field-group mt-10">
+                    <label className="field-label">Database File Path</label>
                     <div className="file-input-group">
                       <input
                         className="input form-input font-mono"
@@ -1025,13 +1067,13 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
                         title="Browse file on disk"
                       >
                         <FolderOpen size={13} />
-                        <span>Browse...</span>
+                        <span>Browse</span>
                       </button>
                     </div>
                   </div>
                 ) : (
                   <>
-                    <div className="field-grid-2 mt-12">
+                    <div className="field-grid-2 mt-10">
                       <div className="field-group flex-2">
                         <label className="field-label">Host</label>
                         <input
@@ -1059,7 +1101,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
                       </div>
                     </div>
 
-                    <div className="field-grid-2 mt-12">
+                    <div className="field-grid-2 mt-10">
                       <div className="field-group">
                         <label className="field-label">User</label>
                         <input
@@ -1097,7 +1139,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
                       </div>
                     </div>
 
-                    <div className="field-group mt-12">
+                    <div className="field-group mt-10">
                       <label className="field-label">Database Name</label>
                       <input
                         className="input form-input font-mono"
@@ -1106,38 +1148,31 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
                         onChange={(e) => setForm({ ...form, database: e.target.value })}
                       />
                     </div>
+                  </>
+                )}
 
-                    <label className="field-switch mt-12">
+                {/* Minimal Options Switches */}
+                <div className="options-toggles-row">
+                  {form.type !== "sqlite" && (
+                    <label className="minimal-switch">
                       <input
                         type="checkbox"
                         checked={form.savePassword !== false}
                         onChange={(e) => setForm({ ...form, savePassword: e.target.checked })}
                       />
-                      <span className="field-switch-text">
-                        <span className="field-switch-title">Save password</span>
-                        <span className="field-switch-hint">
-                          Off: the password is never written to disk - dodb asks for it once each
-                          time the app starts.
-                        </span>
-                      </span>
+                      <span className="switch-label-text">Save password securely</span>
                     </label>
-                  </>
-                )}
+                  )}
 
-                <label className="field-switch mt-12">
-                  <input
-                    type="checkbox"
-                    checked={form.keepAlive === true}
-                    onChange={(e) => setForm({ ...form, keepAlive: e.target.checked })}
-                  />
-                  <span className="field-switch-text">
-                    <span className="field-switch-title">Keep connection alive</span>
-                    <span className="field-switch-hint">
-                      Holds the connection open, reconnects on its own when it drops, and connects
-                      this profile when dodb starts.
-                    </span>
-                  </span>
-                </label>
+                  <label className="minimal-switch">
+                    <input
+                      type="checkbox"
+                      checked={form.keepAlive === true}
+                      onChange={(e) => setForm({ ...form, keepAlive: e.target.checked })}
+                    />
+                    <span className="switch-label-text">Keep alive &amp; auto-reconnect</span>
+                  </label>
+                </div>
               </div>
             </div>
 
@@ -1447,38 +1482,38 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
         .modal-overlay {
           position: fixed;
           inset: 0;
-          background: rgba(0, 0, 0, 0.72);
+          background: rgba(0, 0, 0, 0.68);
           backdrop-filter: blur(8px);
           display: flex;
           align-items: center;
           justify-content: center;
           z-index: 1000;
-          padding: 20px;
+          padding: 16px;
         }
 
         .modal-window {
-          width: 860px;
-          height: 600px;
+          width: 820px;
+          height: 560px;
           max-width: 95vw;
           max-height: 90vh;
           background: var(--bg-app);
           border: 1px solid var(--border-medium);
-          border-radius: 12px;
-          box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.2);
+          border-radius: var(--radius-lg, 12px);
+          box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.2);
           display: flex;
           flex-direction: column;
           overflow: hidden;
-          animation: modalAppear 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+          animation: modalAppear 0.16s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
         @keyframes modalAppear {
-          from { opacity: 0; transform: scale(0.97) translateY(8px); }
+          from { opacity: 0; transform: scale(0.98) translateY(6px); }
           to { opacity: 1; transform: scale(1) translateY(0); }
         }
 
         /* Top Header */
         .window-header {
-          padding: 12px 18px;
+          padding: 10px 16px;
           background: var(--bg-header);
           border-bottom: 1px solid var(--border-light);
           display: flex;
@@ -1492,54 +1527,55 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           gap: 10px;
         }
         .app-icon-badge {
-          width: 28px;
-          height: 28px;
+          width: 24px;
+          height: 24px;
           display: flex;
           align-items: center;
           justify-content: center;
+          color: var(--accent-blue);
         }
         .title-text-group {
           display: flex;
-          flex-direction: column;
-          gap: 1px;
+          align-items: baseline;
+          gap: 8px;
         }
         .window-main-title {
-          font-size: 13.5px;
-          font-weight: 700;
+          font-size: 13px;
+          font-weight: 600;
           color: var(--text-main);
           letter-spacing: -0.2px;
         }
         .window-sub-title {
-          font-size: 10.5px;
+          font-size: 11px;
+          color: var(--text-muted);
         }
         .window-sub-title.required {
-          color: gray;
-          font-weight: 600;
+          color: var(--accent-rose, #f87171);
+          font-weight: 500;
         }
         .active-conn-pill {
           display: inline-flex;
           align-items: center;
-          gap: 6px;
-          background: rgba(16, 185, 129, 0.12);
-          border: 1px solid rgba(16, 185, 129, 0.35);
+          gap: 5px;
+          background: rgba(16, 185, 129, 0.1);
+          border: 1px solid rgba(16, 185, 129, 0.3);
           color: var(--accent-green);
           font-size: 10px;
-          padding: 2.5px 8px;
+          padding: 2px 7px;
           border-radius: 12px;
           font-weight: 600;
-          margin-left: 8px;
         }
         .pulse-green-dot {
           width: 6px;
           height: 6px;
           border-radius: 50%;
           background: var(--accent-green);
-          box-shadow: 0 0 8px rgba(16, 185, 129, 0.8);
+          box-shadow: 0 0 6px rgba(16, 185, 129, 0.8);
           animation: pulseDot 2s infinite;
         }
         @keyframes pulseDot {
           0%, 100% { transform: scale(1); opacity: 1; }
-          50% { transform: scale(1.2); opacity: 0.6; }
+          50% { transform: scale(1.25); opacity: 0.6; }
         }
 
         .window-close-btn {
@@ -1547,8 +1583,8 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           border: none;
           color: var(--text-muted);
           cursor: pointer;
-          padding: 6px;
-          border-radius: 6px;
+          padding: 5px;
+          border-radius: var(--radius-xs, 4px);
           display: flex;
           align-items: center;
           justify-content: center;
@@ -1568,7 +1604,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
 
         /* Left Master Sidebar */
         .conn-sidebar {
-          width: 270px;
+          width: 240px;
           background: var(--bg-sidebar);
           border-right: 1px solid var(--border-light);
           display: flex;
@@ -1576,30 +1612,29 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           flex-shrink: 0;
         }
         .sidebar-top-action {
-          padding: 12px 14px;
+          padding: 10px 12px;
           border-bottom: 1px solid var(--border-light);
         }
         .new-conn-btn {
           width: 100%;
-          height: 32px;
-          font-size: 12px;
+          height: 30px;
+          font-size: 11.5px;
           font-weight: 600;
           gap: 6px;
-          border-radius: 6px;
-          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+          border-radius: var(--radius-sm, 6px);
         }
 
         .sidebar-scrollable-list {
           flex: 1;
           overflow-y: auto;
-          padding: 8px;
+          padding: 8px 6px;
           display: flex;
           flex-direction: column;
-          gap: 10px;
+          gap: 6px;
         }
 
         .empty-profiles-notice {
-          padding: 32px 16px;
+          padding: 36px 12px;
           text-align: center;
           color: var(--text-muted);
           font-size: 11px;
@@ -1608,23 +1643,25 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           align-items: center;
           gap: 8px;
         }
-        .empty-icon { opacity: 0.4; }
+        .empty-icon { opacity: 0.35; }
 
         .conn-group-section {
           display: flex;
           flex-direction: column;
-          gap: 3px;
+          gap: 2px;
         }
         .conn-group-header {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 5px 8px;
-          border-radius: 5px;
+          padding: 4px 6px;
+          border-radius: var(--radius-xs, 4px);
           cursor: pointer;
-          color: var(--text-sub);
-          font-size: 11px;
+          color: var(--text-muted);
+          font-size: 10.5px;
           font-weight: 600;
+          text-transform: uppercase;
+          letter-spacing: 0.3px;
           user-select: none;
           transition: all 0.12s ease;
         }
@@ -1635,7 +1672,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
         .group-header-left {
           display: flex;
           align-items: center;
-          gap: 6px;
+          gap: 5px;
           overflow: hidden;
           flex: 1;
         }
@@ -1647,11 +1684,11 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           white-space: nowrap;
         }
         .group-count-badge {
-          font-size: 9.5px;
+          font-size: 9px;
           color: var(--text-muted);
           background: var(--bg-tertiary);
-          padding: 1px 5px;
-          border-radius: 8px;
+          padding: 1px 4px;
+          border-radius: 6px;
           border: 1px solid var(--border-light);
         }
 
@@ -1667,7 +1704,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           background: transparent;
           border: none;
           color: var(--text-muted);
-          padding: 2px 4px;
+          padding: 2px 3px;
           border-radius: 3px;
           cursor: pointer;
           display: flex;
@@ -1686,16 +1723,16 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
         .conn-items-list {
           display: flex;
           flex-direction: column;
-          gap: 3px;
-          padding-left: 10px;
+          gap: 2px;
+          padding-left: 6px;
         }
 
         .conn-card-item {
           display: flex;
           align-items: center;
-          gap: 9px;
-          padding: 7px 10px;
-          border-radius: 7px;
+          gap: 8px;
+          padding: 6px 8px;
+          border-radius: var(--radius-sm, 6px);
           cursor: pointer;
           border: 1px solid transparent;
           background: transparent;
@@ -1706,12 +1743,12 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           background: var(--bg-hover);
         }
         .conn-card-item.active {
-          background: var(--bg-tertiary);
+          background: var(--bg-card);
           border-color: var(--border-medium);
           box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
         }
         .conn-card-item.is-connected {
-          border-left: 3px solid var(--accent-green);
+          border-left: 2.5px solid var(--accent-green);
         }
         .conn-card-item.is-draft-card {
           border: 1px dashed var(--border-focus);
@@ -1719,30 +1756,28 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
         }
 
         .engine-avatar {
-          width: 24px;
-          height: 24px;
-          border-radius: var(--radius-sm);
+          width: 22px;
+          height: 22px;
+          border-radius: var(--radius-xs, 4px);
           display: flex;
           align-items: center;
           justify-content: center;
           flex-shrink: 0;
           position: relative;
-          background: var(--bg-card);
+          background: var(--bg-tertiary);
           border: 1px solid var(--border-light);
           color: var(--text-muted);
         }
         .postgres-avatar, .mariadb-avatar, .sqlite-avatar, .new-avatar {
-          color: var(--text-muted);
-          background: var(--bg-tertiary);
-          border-color: var(--border-light);
+          color: var(--text-sub);
         }
 
         .avatar-online-dot {
           position: absolute;
           top: -2px;
           right: -2px;
-          width: 6px;
-          height: 6px;
+          width: 5px;
+          height: 5px;
           border-radius: 50%;
           background: var(--accent-green);
         }
@@ -1752,7 +1787,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           flex-direction: column;
           overflow: hidden;
           flex: 1;
-          gap: 2px;
+          gap: 1px;
         }
         .card-top-line {
           display: flex;
@@ -1761,7 +1796,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           gap: 4px;
         }
         .card-title {
-          font-size: 11.5px;
+          font-size: 11px;
           font-weight: 500;
           color: var(--text-main);
           overflow: hidden;
@@ -1769,42 +1804,39 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           white-space: nowrap;
         }
         .connected-tag {
-          font-size: 8.5px;
+          font-size: 8px;
           font-weight: 600;
           color: var(--accent-green);
-          background: var(--bg-tertiary);
-          border: 1px solid var(--border-light);
-          padding: 0.5px 4px;
+          background: rgba(16, 185, 129, 0.1);
+          padding: 0.5px 3.5px;
           border-radius: 3px;
           text-transform: uppercase;
         }
         .draft-pill {
-          font-size: 8.5px;
+          font-size: 8px;
           font-weight: 500;
           color: var(--text-muted);
           background: var(--bg-tertiary);
-          border: 1px solid var(--border-light);
-          padding: 0.5px 4px;
+          padding: 0.5px 3.5px;
           border-radius: 3px;
         }
         .card-subtitle {
           display: flex;
           align-items: center;
-          gap: 5px;
-          font-size: 10px;
+          gap: 4px;
+          font-size: 9.5px;
           color: var(--text-muted);
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
         }
         .engine-type-tag {
-          font-size: 8.5px;
+          font-size: 8px;
           font-family: var(--font-mono);
           font-weight: 500;
-          padding: 0.5px 3.5px;
-          border-radius: 3px;
+          padding: 0 3px;
+          border-radius: 2px;
           background: var(--bg-tertiary);
-          border: 1px solid var(--border-light);
           color: var(--text-muted);
         }
 
@@ -1818,12 +1850,12 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
         .quick-zap-btn {
           display: none;
           position: absolute;
-          right: 8px;
+          right: 6px;
           background: var(--btn-primary-bg);
           color: var(--btn-primary-text);
           border: none;
           border-radius: 4px;
-          padding: 3px 6px;
+          padding: 2.5px 5px;
           cursor: pointer;
           transition: all 0.12s ease;
         }
@@ -1847,38 +1879,38 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
 
         .editor-content-area {
           flex: 1;
-          padding: 20px 24px;
+          padding: 16px 20px;
           overflow-y: auto;
           display: flex;
           flex-direction: column;
-          gap: 14px;
+          gap: 12px;
         }
 
         .active-profile-banner {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 8px 12px;
+          padding: 6px 10px;
           background: var(--bg-tertiary);
           border: 1px solid var(--border-light);
-          border-radius: var(--radius-sm);
+          border-radius: var(--radius-sm, 6px);
         }
         .banner-left {
           display: flex;
           align-items: center;
-          gap: 8px;
+          gap: 6px;
         }
         .banner-msg {
-          font-size: 11.5px;
+          font-size: 11px;
           color: var(--text-sub);
         }
         .btn-disconnect-chip {
           background: transparent;
-          border: 1px solid rgba(239, 68, 68, 0.3);
-          color: #f87171;
-          font-size: 10.5px;
+          border: 1px solid rgba(239, 68, 68, 0.25);
+          color: var(--accent-rose, #f87171);
+          font-size: 10px;
           font-weight: 500;
-          padding: 2px 7px;
+          padding: 2px 6px;
           border-radius: 4px;
           display: flex;
           align-items: center;
@@ -1887,61 +1919,58 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           transition: all 0.12s ease;
         }
         .btn-disconnect-chip:hover {
-          background: rgba(239, 68, 68, 0.12);
-        }
-
-        .form-section-card {
-          background: var(--bg-card);
-          border: 1px solid var(--border-light);
-          border-radius: var(--radius-md);
-          padding: 14px 16px;
-          display: flex;
-          flex-direction: column;
-          gap: 10px;
-        }
-        .section-label {
-          font-size: 10.5px;
-          font-weight: 600;
-          text-transform: uppercase;
-          letter-spacing: 0.3px;
-          color: var(--text-muted);
+          background: rgba(239, 68, 68, 0.1);
         }
 
         /* Database Type Segmented Control */
+        .minimal-engine-section {
+          display: flex;
+        }
         .engine-segmented-control {
           display: grid;
           grid-template-columns: repeat(3, 1fr);
+          width: 100%;
           background: var(--bg-tertiary);
           padding: 2px;
-          border-radius: var(--radius-sm);
+          border-radius: var(--radius-sm, 6px);
           border: 1px solid var(--border-light);
-          gap: 3px;
+          gap: 2px;
         }
         .engine-seg-btn {
           display: flex;
           align-items: center;
           justify-content: center;
-          gap: 7px;
-          padding: 6px 10px;
+          gap: 6px;
+          padding: 5px 8px;
           border: 1px solid transparent;
           background: transparent;
           color: var(--text-sub);
-          font-size: 11.5px;
+          font-size: 11px;
           font-weight: 500;
-          border-radius: var(--radius-sm);
+          border-radius: var(--radius-xs, 4px);
           cursor: pointer;
           transition: all 0.12s ease;
         }
         .engine-seg-btn:hover {
           color: var(--text-main);
-          background: var(--bg-hover);
         }
         .engine-seg-btn.active {
           background: var(--bg-card);
           color: var(--text-main);
           font-weight: 600;
           border-color: var(--border-light);
-          box-shadow: var(--shadow-sm);
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+        }
+
+        /* Form Fields Canvas */
+        .form-fields-canvas {
+          background: var(--bg-card);
+          border: 1px solid var(--border-light);
+          border-radius: var(--radius-md, 8px);
+          padding: 14px 16px;
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
         }
 
         .field-grid-2 {
@@ -1950,54 +1979,24 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
         }
         .flex-1 { flex: 1; }
         .flex-2 { flex: 2; }
-        .mt-12 { margin-top: 8px; }
+        .mt-10 { margin-top: 2px; }
 
         .field-group {
           display: flex;
           flex-direction: column;
-          gap: 4px;
+          gap: 3px;
           flex: 1;
         }
         .field-label {
-          font-size: 11px;
+          font-size: 10.5px;
           font-weight: 500;
-          color: var(--text-sub);
-        }
-        .field-switch {
-          display: flex;
-          align-items: flex-start;
-          gap: 8px;
-          cursor: pointer;
-          user-select: none;
-        }
-        .field-switch input[type="checkbox"] {
-          width: 13px;
-          height: 13px;
-          margin: 1px 0 0;
-          accent-color: var(--accent-blue);
-          cursor: pointer;
-          flex-shrink: 0;
-        }
-        .field-switch-text {
-          display: flex;
-          flex-direction: column;
-          gap: 2px;
-        }
-        .field-switch-title {
-          font-size: 11px;
-          font-weight: 500;
-          color: var(--text-sub);
-        }
-        .field-switch-hint {
-          font-size: 10px;
-          line-height: 1.4;
           color: var(--text-muted);
         }
         .form-input, .form-select {
           width: 100%;
           height: 28px;
           font-size: 11.5px;
-          border-radius: var(--radius-sm);
+          border-radius: var(--radius-sm, 6px);
         }
         .form-input.input-invalid,
         .form-input.input-invalid:focus {
@@ -2008,8 +2007,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           display: flex;
           align-items: center;
           gap: 4px;
-          font-size: 10px;
-          line-height: 1.4;
+          font-size: 9.5px;
           color: var(--accent-red);
         }
 
@@ -2025,7 +2023,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           border: none;
           color: var(--text-muted);
           cursor: pointer;
-          font-size: 11px;
+          font-size: 10px;
           padding: 2px 4px;
         }
         .btn-clear-group:hover { color: var(--text-main); }
@@ -2040,21 +2038,56 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           height: 28px;
           font-size: 11px;
           gap: 4px;
+          padding: 0 10px;
         }
 
+        /* Minimal Options Switches */
+        .options-toggles-row {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 16px;
+          padding-top: 4px;
+          border-top: 1px solid var(--border-light);
+          margin-top: 4px;
+        }
+        .minimal-switch {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          cursor: pointer;
+          user-select: none;
+        }
+        .minimal-switch input[type="checkbox"] {
+          width: 13px;
+          height: 13px;
+          margin: 0;
+          accent-color: var(--accent-blue);
+          cursor: pointer;
+        }
+        .switch-label-text {
+          font-size: 11px;
+          color: var(--text-sub);
+          font-weight: 500;
+        }
+        .minimal-switch:hover .switch-label-text {
+          color: var(--text-main);
+        }
+
+        /* Status Feedback Toast */
         .status-feedback-box {
           display: flex;
           align-items: center;
           justify-content: space-between;
           gap: 8px;
-          padding: 8px 12px;
-          border-radius: var(--radius-xs);
-          font-size: 11.5px;
+          padding: 7px 10px;
+          border-radius: var(--radius-sm, 6px);
+          font-size: 11px;
         }
         .feedback-content-left {
           display: flex;
           align-items: center;
-          gap: 8px;
+          gap: 6px;
           flex: 1;
           min-width: 0;
         }
@@ -2062,14 +2095,14 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           flex-shrink: 0;
         }
         .status-feedback-box.success {
-          background: var(--bg-tertiary);
+          background: rgba(16, 185, 129, 0.1);
           color: var(--accent-green);
-          border: 1px solid var(--border-light);
+          border: 1px solid rgba(16, 185, 129, 0.25);
         }
         .status-feedback-box.error {
-          background: var(--bg-tertiary);
-          color: var(--accent-rose);
-          border: 1px solid rgba(244, 63, 94, 0.3);
+          background: rgba(244, 63, 94, 0.1);
+          color: var(--accent-rose, #f87171);
+          border: 1px solid rgba(244, 63, 94, 0.25);
         }
         .feedback-text {
           font-weight: 500;
@@ -2079,12 +2112,12 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
         .btn-feedback-copy {
           display: inline-flex;
           align-items: center;
-          gap: 4px;
-          padding: 2px 7px;
+          gap: 3px;
+          padding: 2px 6px;
           background: var(--bg-card);
           border: 1px solid var(--border-medium);
-          border-radius: var(--radius-xs);
-          font-size: 10px;
+          border-radius: var(--radius-xs, 4px);
+          font-size: 9.5px;
           color: var(--text-main);
           cursor: pointer;
           flex-shrink: 0;
@@ -2092,12 +2125,11 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
         }
         .btn-feedback-copy:hover {
           background: var(--bg-hover);
-          border-color: var(--text-muted);
         }
 
         /* Sticky Footer Bar */
         .editor-footer-bar {
-          padding: 10px 20px;
+          padding: 10px 16px;
           background: var(--bg-header);
           border-top: 1px solid var(--border-light);
           display: flex;
@@ -2113,9 +2145,9 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           color: var(--text-muted);
           display: flex;
           align-items: center;
-          gap: 5px;
+          gap: 4px;
           padding: 4px 8px;
-          border-radius: var(--radius-sm);
+          border-radius: var(--radius-sm, 6px);
           font-size: 11px;
           font-weight: 500;
           cursor: pointer;
@@ -2123,19 +2155,19 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
         }
         .btn-del-profile:hover {
           background: rgba(239, 68, 68, 0.1);
-          color: #f87171;
+          color: var(--accent-rose, #f87171);
           border-color: rgba(239, 68, 68, 0.3);
         }
 
         .test-btn, .save-btn {
           height: 28px;
-          font-size: 11.5px;
+          font-size: 11px;
         }
         .connect-main-btn {
           height: 28px;
           font-size: 11.5px;
           font-weight: 600;
-          padding: 0 14px;
+          padding: 0 12px;
           gap: 5px;
         }
 
@@ -2143,7 +2175,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
         .group-context-menu {
           background: var(--bg-card);
           border: 1px solid var(--border-medium);
-          border-radius: var(--radius-md);
+          border-radius: var(--radius-md, 8px);
           box-shadow: var(--shadow-popup);
           padding: 4px;
           min-width: 180px;
@@ -2153,29 +2185,29 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           user-select: none;
         }
         .context-menu-header {
-          padding: 5px 8px;
+          padding: 4px 8px;
           display: flex;
           align-items: center;
           gap: 6px;
         }
         .context-group-title {
-          font-size: 11px;
+          font-size: 10.5px;
           font-weight: 600;
           color: var(--text-main);
         }
         .context-menu-divider {
           height: 1px;
           background: var(--border-light);
-          margin: 3px 0;
+          margin: 2px 0;
         }
         .context-menu-item {
           display: flex;
           align-items: center;
-          gap: 7px;
-          padding: 5px 8px;
+          gap: 6px;
+          padding: 4px 8px;
           background: transparent;
           border: none;
-          border-radius: var(--radius-sm);
+          border-radius: var(--radius-xs, 4px);
           color: var(--text-main);
           font-size: 11px;
           cursor: pointer;
@@ -2188,7 +2220,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
         }
         .context-menu-item.danger:hover {
           background: rgba(239, 68, 68, 0.1);
-          color: #f87171;
+          color: var(--accent-rose, #f87171);
         }
 
         /* Submodal Dialogs */
@@ -2203,22 +2235,22 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           z-index: 10000;
         }
         .submodal-card {
-          width: 400px;
+          width: 380px;
           background: var(--bg-card);
           border: 1px solid var(--border-medium);
           border-radius: 10px;
           box-shadow: 0 16px 36px rgba(0, 0, 0, 0.45);
-          padding: 16px 20px;
+          padding: 16px 18px;
           display: flex;
           flex-direction: column;
-          gap: 14px;
+          gap: 12px;
         }
         .submodal-header {
           display: flex;
           align-items: center;
           gap: 8px;
-          font-size: 13.5px;
-          font-weight: 700;
+          font-size: 13px;
+          font-weight: 600;
           color: var(--text-main);
         }
         .submodal-header.danger-header {
@@ -2226,32 +2258,32 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
         }
         .danger-icon { color: var(--accent-red); }
         .submodal-desc {
-          font-size: 12px;
+          font-size: 11.5px;
           color: var(--text-main);
           line-height: 1.45;
         }
         .submodal-actions {
           display: flex;
           justify-content: flex-end;
-          gap: 8px;
+          gap: 6px;
         }
         .submodal-column-actions {
           display: flex;
           flex-direction: column;
-          gap: 8px;
+          gap: 6px;
         }
         .submodal-btn-choice {
           display: flex;
           align-items: center;
           gap: 8px;
           justify-content: flex-start;
-          padding: 8px 12px;
-          font-size: 11.5px;
+          padding: 7px 10px;
+          font-size: 11px;
           height: auto;
           text-align: left;
         }
         .cancel-choice-btn {
-          margin-top: 4px;
+          margin-top: 2px;
           justify-content: center;
         }
 

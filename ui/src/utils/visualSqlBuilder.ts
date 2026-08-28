@@ -5,6 +5,10 @@ import {
   VisualSortCondition,
   JoinType,
   VisualFilterOperator,
+  VisualGroupByCondition,
+  VisualHavingCondition,
+  VisualAggregateItem,
+  AggregateFunction,
 } from "../types";
 import { quoteTableIdent } from "./ddlBuilder";
 
@@ -19,6 +23,9 @@ export interface BuildVisualSqlParams {
   joins: VisualJoinInfo[];
   filters: VisualFilterCondition[];
   sorts: VisualSortCondition[];
+  groupBys?: VisualGroupByCondition[];
+  having?: VisualHavingCondition[];
+  aggregates?: VisualAggregateItem[];
   limit?: number;
   offset?: number;
   dbType?: DBType;
@@ -41,6 +48,9 @@ export function buildVisualSql({
   joins,
   filters,
   sorts,
+  groupBys = [],
+  having = [],
+  aggregates = [],
   limit = 50,
   offset = 0,
   dbType = "mariadb",
@@ -50,7 +60,7 @@ export function buildVisualSql({
   }
 
   const selectItems: string[] = [];
-  let hasMultipleTables = tables.length > 1;
+  const hasMultipleTables = tables.length > 1;
 
   const colNameCount: Record<string, number> = {};
   for (const tbl of tables) {
@@ -59,6 +69,7 @@ export function buildVisualSql({
     }
   }
 
+  // 1. Regular Columns
   for (const tbl of tables) {
     if (tbl.selectedColumns.length === 0) continue;
     for (const col of tbl.selectedColumns) {
@@ -75,6 +86,20 @@ export function buildVisualSql({
         selectItems.push(`${qCol}`);
       }
     }
+  }
+
+  // 2. Aggregate Columns (COUNT, SUM, AVG, MIN, MAX)
+  for (const agg of aggregates) {
+    if (!agg.table || !agg.column || !agg.func || agg.func === "NONE") continue;
+    const qTbl = quoteTableIdent(agg.table, dbType);
+    const qCol = agg.column === "*" ? "*" : quoteIdent(agg.column, dbType);
+    const colExpr = agg.column === "*" ? "*" : (hasMultipleTables ? `${qTbl}.${qCol}` : qCol);
+    const aggExpr = agg.func === "COUNT_DISTINCT"
+      ? `COUNT(DISTINCT ${colExpr})`
+      : `${agg.func}(${colExpr})`;
+
+    const defaultAlias = agg.alias?.trim() || `${agg.func.toLowerCase()}_${agg.column === "*" ? "rows" : agg.column}`;
+    selectItems.push(`${aggExpr} AS ${quoteIdent(defaultAlias, dbType)}`);
   }
 
   const selectClause = selectItems.length > 0 ? selectItems.join(",\n  ") : "*";
@@ -130,7 +155,6 @@ export function buildVisualSql({
           progress = true;
           break;
         } else if (fromIn && toIn) {
-          // Already in FROM, additional join condition
           remainingJoins.splice(i, 1);
           progress = true;
           break;
@@ -171,7 +195,6 @@ export function buildVisualSql({
       } else if (f.operator === "LIKE" || f.operator === "NOT LIKE") {
         cond = `${qCol} ${f.operator} '${escapeSqlString(f.value)}'`;
       } else {
-        // Numeric or String comparison
         const isNum =
           f.value !== "" && !isNaN(Number(f.value)) && !f.value.includes(" ");
         const formattedVal = isNum ? f.value : `'${escapeSqlString(f.value)}'`;
@@ -187,7 +210,39 @@ export function buildVisualSql({
     whereClause = "\nWHERE " + filterClauses.join("\n  ");
   }
 
-  // 4. ORDER BY clause (deterministic stable sort by default to prevent updated rows jumping to the bottom)
+  // 4. GROUP BY clause
+  const validGroupBys = (groupBys || []).filter((g) => g.table && g.column);
+  let groupByClause = "";
+  if (validGroupBys.length > 0) {
+    const groupByItems = validGroupBys.map((g) => {
+      return hasMultipleTables
+        ? `${quoteTableIdent(g.table, dbType)}.${quoteIdent(g.column, dbType)}`
+        : quoteIdent(g.column, dbType);
+    });
+    groupByClause = "\nGROUP BY " + groupByItems.join(", ");
+  }
+
+  // 5. HAVING clause
+  const validHavings = (having || []).filter((h) => h.table && h.column && h.operator);
+  let havingClause = "";
+  if (validHavings.length > 0) {
+    const havingItems = validHavings.map((h, idx) => {
+      const qCol = h.column === "*"
+        ? "*"
+        : (hasMultipleTables ? `${quoteTableIdent(h.table, dbType)}.${quoteIdent(h.column, dbType)}` : quoteIdent(h.column, dbType));
+      const aggExpr = h.func && h.func !== "NONE"
+        ? (h.func === "COUNT_DISTINCT" ? `COUNT(DISTINCT ${qCol})` : `${h.func}(${qCol})`)
+        : qCol;
+      const isNum = h.value !== "" && !isNaN(Number(h.value)) && !h.value.includes(" ");
+      const formattedVal = isNum ? h.value : `'${escapeSqlString(h.value)}'`;
+      const cond = `${aggExpr} ${h.operator} ${formattedVal}`;
+      if (idx === 0) return cond;
+      return `${h.logic || "AND"} ${cond}`;
+    });
+    havingClause = "\nHAVING " + havingItems.join("\n  ");
+  }
+
+  // 6. ORDER BY clause
   const validSorts = (sorts || []).filter((s) => s.table && s.column);
   let orderByClause = "";
   if (validSorts.length > 0) {
@@ -198,10 +253,9 @@ export function buildVisualSql({
       return `${qCol} ${s.direction}`;
     });
     orderByClause = "\nORDER BY " + sortItems.join(", ");
-  } else if (tables.length > 0 && tables[0]?.tableName) {
+  } else if (validGroupBys.length === 0 && tables.length > 0 && tables[0]?.tableName) {
     const baseTable = tables[0].tableName;
     const baseCols = tables[0].selectedColumns || [];
-    // Default to sorting by "id" or first column to guarantee stable row positions
     const idCol = baseCols.includes("id") ? "id" : baseCols[0];
     if (idCol) {
       const qCol = hasMultipleTables
@@ -211,7 +265,7 @@ export function buildVisualSql({
     }
   }
 
-  // 5. LIMIT and OFFSET clause
+  // 7. LIMIT and OFFSET clause
   let limitClause = "";
   if (limit && limit > 0) {
     limitClause = `\nLIMIT ${limit}`;
@@ -220,7 +274,7 @@ export function buildVisualSql({
     }
   }
 
-  return `SELECT\n  ${selectClause}\nFROM\n  ${fromClause}${whereClause}${orderByClause}${limitClause};`;
+  return `SELECT\n  ${selectClause}\nFROM\n  ${fromClause}${whereClause}${groupByClause}${havingClause}${orderByClause}${limitClause};`;
 }
 
 // -------------------------------------------------------------
@@ -506,6 +560,9 @@ export interface ParsedVisualSql {
   joins: VisualJoinInfo[];
   filters: VisualFilterCondition[];
   sorts: VisualSortCondition[];
+  groupBys?: VisualGroupByCondition[];
+  having?: VisualHavingCondition[];
+  aggregates?: VisualAggregateItem[];
   limit: number;
   offset: number;
 }
@@ -547,6 +604,7 @@ export function parseSqlToVisual(
   // Split remaining query into major SQL clause sections
   const whereIndex = fromAndBeyond.search(/\bWHERE\b/i);
   const groupIndex = fromAndBeyond.search(/\bGROUP\s+BY\b/i);
+  const havingIndex = fromAndBeyond.search(/\bHAVING\b/i);
   const orderIndex = fromAndBeyond.search(/\bORDER\s+BY\b/i);
   const limitIndex = fromAndBeyond.search(/\bLIMIT\b/i);
 
@@ -554,6 +612,7 @@ export function parseSqlToVisual(
   const fromEnd = [
     whereIndex,
     groupIndex,
+    havingIndex,
     orderIndex,
     limitIndex,
     fromAndBeyond.length,
@@ -565,10 +624,26 @@ export function parseSqlToVisual(
 
   let wherePart = "";
   if (whereIndex !== -1) {
-    const whereEnd = [groupIndex, orderIndex, limitIndex, fromAndBeyond.length]
+    const whereEnd = [groupIndex, havingIndex, orderIndex, limitIndex, fromAndBeyond.length]
       .filter((pos) => pos > whereIndex)
       .sort((a, b) => a - b)[0];
     wherePart = fromAndBeyond.slice(whereIndex + 5, whereEnd).trim(); // without "WHERE "
+  }
+
+  let groupPart = "";
+  if (groupIndex !== -1) {
+    const groupEnd = [havingIndex, orderIndex, limitIndex, fromAndBeyond.length]
+      .filter((pos) => pos > groupIndex)
+      .sort((a, b) => a - b)[0];
+    groupPart = fromAndBeyond.slice(groupIndex + 8, groupEnd).trim(); // without "GROUP BY "
+  }
+
+  let havingPart = "";
+  if (havingIndex !== -1) {
+    const havingEnd = [orderIndex, limitIndex, fromAndBeyond.length]
+      .filter((pos) => pos > havingIndex)
+      .sort((a, b) => a - b)[0];
+    havingPart = fromAndBeyond.slice(havingIndex + 6, havingEnd).trim(); // without "HAVING "
   }
 
   let orderPart = "";
@@ -709,8 +784,10 @@ export function parseSqlToVisual(
     }
   }
 
-  // 4. Parse Selected Columns
+  // 4. Parse Selected Columns and Aggregates
   const tableColumnSelections: Record<string, Set<string>> = {};
+  const aggregates: VisualAggregateItem[] = [];
+
   tableOrder.forEach((t) => {
     tableColumnSelections[t] = new Set();
   });
@@ -728,6 +805,42 @@ export function parseSqlToVisual(
     });
   } else {
     for (const item of selectItems) {
+      // Check if item is an aggregate function
+      const aggMatch = item.match(/\b(COUNT|SUM|AVG|MIN|MAX)\s*\(\s*(DISTINCT\s+)?([`"a-zA-Z0-9_.*]+)\s*\)(?:\s+(?:AS\s+)?([`"a-zA-Z0-9_]+))?/i);
+      if (aggMatch) {
+        const funcRaw = aggMatch[1].toUpperCase();
+        const isDistinct = Boolean(aggMatch[2]);
+        const rawCol = cleanIdentifier(aggMatch[3]);
+        const alias = aggMatch[4] ? cleanIdentifier(aggMatch[4]) : undefined;
+        const func: AggregateFunction = isDistinct && funcRaw === "COUNT" ? "COUNT_DISTINCT" : (funcRaw as AggregateFunction);
+
+        let targetTable = tableOrder[0] || "";
+        let targetCol = rawCol;
+
+        if (rawCol.includes(".")) {
+          const [tPart, cPart] = rawCol.split(".");
+          targetTable = aliasMap[cleanIdentifier(tPart).toLowerCase()] || cleanIdentifier(tPart);
+          targetCol = cleanIdentifier(cPart);
+        } else if (rawCol !== "*") {
+          for (const t of tableOrder) {
+            const schemaCols = tableSchemas[t] || [];
+            if (schemaCols.some((col) => col.name === targetCol)) {
+              targetTable = t;
+              break;
+            }
+          }
+        }
+
+        aggregates.push({
+          id: `agg-${targetTable}-${targetCol}-${aggregates.length}`,
+          table: targetTable,
+          column: targetCol,
+          func,
+          alias,
+        });
+        continue;
+      }
+
       const cleanItem = item
         .replace(/\s+(?:AS\s+)?[`"a-zA-Z0-9_]+$/i, "")
         .trim(); // strip alias
@@ -853,7 +966,134 @@ export function parseSqlToVisual(
     }
   }
 
-  // 6. Parse ORDER BY
+  // 6. Parse GROUP BY
+  const groupBys: VisualGroupByCondition[] = [];
+  if (groupPart) {
+    const groupItems = groupPart
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    for (const item of groupItems) {
+      const rawCol = cleanIdentifier(item);
+      let targetTable = tableOrder[0] || "";
+      let targetCol = rawCol;
+
+      if (rawCol.includes(".")) {
+        const [tPart, cPart] = rawCol.split(".");
+        targetTable =
+          aliasMap[cleanIdentifier(tPart).toLowerCase()] ||
+          cleanIdentifier(tPart);
+        targetCol = cleanIdentifier(cPart);
+      } else {
+        for (const t of tableOrder) {
+          const schemaCols = tableSchemas[t] || [];
+          if (schemaCols.some((col) => col.name === targetCol)) {
+            targetTable = t;
+            break;
+          }
+        }
+      }
+
+      groupBys.push({
+        id: `groupby-${targetTable}-${targetCol}-${groupBys.length}`,
+        table: targetTable,
+        column: targetCol,
+      });
+    }
+  }
+
+  // 7. Parse HAVING
+  const having: VisualHavingCondition[] = [];
+  if (havingPart) {
+    const condTokens = havingPart.split(/\s+\b(AND|OR)\b\s+/i);
+    let currentLogic: "AND" | "OR" = "AND";
+
+    for (let i = 0; i < condTokens.length; i++) {
+      const token = condTokens[i].trim();
+      if (!token) continue;
+
+      if (/^AND$/i.test(token)) {
+        currentLogic = "AND";
+        continue;
+      }
+      if (/^OR$/i.test(token)) {
+        currentLogic = "OR";
+        continue;
+      }
+
+      const opMatch = token.match(
+        /^(.*?)\s+(=|!=|<>|>=|<=|>|<|NOT\s+LIKE|LIKE|IN|IS\s+NOT\s+NULL|IS\s+NULL)\s*(.*)$/i,
+      );
+      if (opMatch) {
+        const leftExpr = opMatch[1].trim();
+        const rawOp = opMatch[2].toUpperCase().replace(/\s+/, " ");
+        const rawVal = opMatch[3].trim().replace(/^['"]|['"]$/g, "");
+
+        let op: VisualFilterOperator = "=";
+        if (rawOp === "<>") op = "!=";
+        else if (
+          [
+            "=",
+            "!=",
+            ">",
+            "<",
+            ">=",
+            "<=",
+            "LIKE",
+            "NOT LIKE",
+            "IN",
+            "IS NULL",
+            "IS NOT NULL",
+          ].includes(rawOp)
+        ) {
+          op = rawOp as VisualFilterOperator;
+        }
+
+        const aggMatch = leftExpr.match(/\b(COUNT|SUM|AVG|MIN|MAX)\s*\(\s*(DISTINCT\s+)?([`"a-zA-Z0-9_.*]+)\s*\)/i);
+        let func: AggregateFunction = "NONE";
+        let rawColStr = leftExpr;
+        if (aggMatch) {
+          const funcRaw = aggMatch[1].toUpperCase();
+          const isDistinct = Boolean(aggMatch[2]);
+          rawColStr = cleanIdentifier(aggMatch[3]);
+          func = isDistinct && funcRaw === "COUNT" ? "COUNT_DISTINCT" : (funcRaw as AggregateFunction);
+        } else {
+          rawColStr = cleanIdentifier(leftExpr);
+        }
+
+        let targetTable = tableOrder[0] || "";
+        let targetCol = rawColStr;
+
+        if (rawColStr.includes(".")) {
+          const [tPart, cPart] = rawColStr.split(".");
+          targetTable =
+            aliasMap[cleanIdentifier(tPart).toLowerCase()] ||
+            cleanIdentifier(tPart);
+          targetCol = cleanIdentifier(cPart);
+        } else if (rawColStr !== "*") {
+          for (const t of tableOrder) {
+            const schemaCols = tableSchemas[t] || [];
+            if (schemaCols.some((col) => col.name === targetCol)) {
+              targetTable = t;
+              break;
+            }
+          }
+        }
+
+        having.push({
+          id: `having-${targetTable}-${targetCol}-${having.length}`,
+          table: targetTable,
+          column: targetCol,
+          func,
+          operator: op,
+          value: rawVal,
+          logic: having.length === 0 ? "AND" : currentLogic,
+        });
+      }
+    }
+  }
+
+  // 8. Parse ORDER BY
   const sorts: VisualSortCondition[] = [];
   if (orderPart) {
     const sortItems = orderPart
@@ -897,6 +1137,9 @@ export function parseSqlToVisual(
     joins,
     filters,
     sorts,
+    groupBys,
+    having,
+    aggregates,
     limit: limitVal,
     offset: offsetVal,
   };

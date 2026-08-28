@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   ReactFlow,
   Background,
@@ -20,12 +20,13 @@ import "@xyflow/react/dist/style.css";
 import {
   GitFork, Table2, Key, ArrowRight, Search, RefreshCw,
   Database, Globe, LayoutGrid, Maximize2, Sparkles, X, Eye, Layers, Filter,
-  ChevronDown, ChevronUp, PanelLeftClose, PanelLeftOpen
+  ChevronDown, ChevronUp, PanelLeftClose, PanelLeftOpen, Printer, Download
 } from "lucide-react";
 import { ConnectionProfile } from "../types";
 import { apiClient } from "../utils/apiClient";
 import { isGeometryColumn, isCoordinateColumn } from "../utils/gisUtils";
 import { Language, t } from "../utils/i18n";
+import { ErdExportModal } from "./ErdExportModal";
 
 interface SchemaDiagramProps {
   activeProfile: ConnectionProfile | null;
@@ -85,12 +86,16 @@ const TableNodeComponent: React.FC<NodeProps<Node<TableNodeData>>> = ({ data, se
   // Keys-only or compact truncation
   const visibleColumns = useMemo(() => {
     if (isCollapsed) return [];
-    if (expanded) return matchedColumns;
+    if (expanded || viewMode === "all") return matchedColumns;
     if (viewMode === "keys_only") {
       return matchedColumns.filter((c) => c.primaryKey || fkMap[c.name]);
     }
-    if (viewMode === "compact" && matchedColumns.length > 8) {
-      return matchedColumns.slice(0, 8);
+    if (viewMode === "compact") {
+      // In compact mode: ALWAYS keep PKs and FKs visible, then add up to 8 other columns
+      const keySet = new Set(matchedColumns.filter((c) => c.primaryKey || fkMap[c.name]).map((c) => c.name));
+      const otherCols = matchedColumns.filter((c) => !keySet.has(c.name)).slice(0, 8);
+      otherCols.forEach((c) => keySet.add(c.name));
+      return matchedColumns.filter((c) => keySet.has(c.name));
     }
     return matchedColumns;
   }, [matchedColumns, viewMode, expanded, fkMap, isCollapsed]);
@@ -103,13 +108,15 @@ const TableNodeComponent: React.FC<NodeProps<Node<TableNodeData>>> = ({ data, se
         selected ? "is-selected" : ""
       } ${isCollapsed ? "is-collapsed" : ""}`}
     >
-      {/* 4 Multi-directional handles for when table is collapsed */}
-      {isCollapsed && (
-        <>
-          <Handle type="target" position={Position.Left} id={`${table.name}:header-tgt`} className="flow-handle handle-left" />
-          <Handle type="source" position={Position.Right} id={`${table.name}:header-src`} className="flow-handle handle-right" />
-        </>
-      )}
+      {/* Hidden fallback handles for all table columns to completely eliminate React Flow #008 warnings */}
+      <div style={{ position: "absolute", inset: 0, pointerEvents: "none", opacity: 0 }}>
+        {table.columns.map((col) => (
+          <React.Fragment key={`fb-h-${col.name}`}>
+            <Handle type="target" position={Position.Left} id={`${table.name}:${col.name}`} style={{ top: 20 }} />
+            <Handle type="source" position={Position.Right} id={`${table.name}:${col.name}`} style={{ top: 20 }} />
+          </React.Fragment>
+        ))}
+      </div>
 
       {/* Header with Table Name & Collapse Toggle Button */}
       <div className="card-header" onClick={() => setIsCollapsed((prev) => !prev)}>
@@ -212,7 +219,12 @@ const TableNodeComponent: React.FC<NodeProps<Node<TableNodeData>>> = ({ data, se
 };
 
 const TableNode = React.memo(TableNodeComponent);
-const nodeTypes = { tableNode: TableNode };
+
+const NODE_TYPES = Object.freeze({
+  tableNode: TableNode,
+});
+
+const EDGE_TYPES = Object.freeze({});
 
 const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
   activeProfile,
@@ -231,43 +243,139 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
   const [filterConnectedOnly, setFilterConnectedOnly] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [sidebarSearch, setSidebarSearch] = useState("");
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const flowWrapperRef = useRef<HTMLDivElement>(null);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<TableNodeData>>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const { fitView } = useReactFlow();
 
-  // Compute Layout: Organizes nodes into a clean grid based on topology
+  const selectedTableIds = useMemo(() => {
+    const ids = new Set<string>();
+    nodes.forEach((n) => {
+      if (n.selected || n.data?.highlighted) {
+        ids.add(n.id);
+      }
+    });
+    return ids;
+  }, [nodes]);
+
+  // Compute Intelligent Topological Layered Layout:
+  // Groups tables into dependency ranks (Root Parent -> Core Entity -> Child Detail)
+  // to minimize edge crossings and eliminate table overlap.
   const arrangeLayout = useCallback((tablesList: TableData[], relationsList: Relation[], currentMode: ViewMode) => {
     // Precalculate FK map per table
     const tableFkMaps: Record<string, Record<string, Relation>> = {};
+    const outgoingTargets: Record<string, Set<string>> = {};
+    const incomingSources: Record<string, Set<string>> = {};
+
     tablesList.forEach((t) => {
       tableFkMaps[t.name] = {};
+      outgoingTargets[t.name] = new Set();
+      incomingSources[t.name] = new Set();
     });
+
     relationsList.forEach((r) => {
       if (tableFkMaps[r.fromTable]) {
         tableFkMaps[r.fromTable][r.fromColumn] = r;
       }
+      if (outgoingTargets[r.fromTable]) {
+        outgoingTargets[r.fromTable].add(r.toTable);
+      }
+      if (incomingSources[r.toTable]) {
+        incomingSources[r.toTable].add(r.fromTable);
+      }
     });
 
-    const colsInGrid = Math.max(3, Math.min(6, Math.ceil(Math.sqrt(tablesList.length * 1.6))));
-    const cardWidth = 280;
-    const cardHeight = currentMode === "keys_only" ? 220 : currentMode === "compact" ? 280 : 340;
+    // 1. Calculate Dependency Rank for each table (Sugiyama Layering)
+    const tableRanks: Record<string, number> = {};
 
-    const newNodes: Node<TableNodeData>[] = tablesList.map((t, idx) => {
-      const col = idx % colsInGrid;
-      const row = Math.floor(idx / colsInGrid);
-      return {
-        id: t.name,
-        type: "tableNode",
-        position: { x: col * (cardWidth + 60) + 40, y: row * (cardHeight + 60) + 40 },
-        data: {
-          table: t,
-          fkMap: tableFkMaps[t.name] || {},
-          searchQuery,
-          highlighted: false,
-          viewMode: currentMode,
-        },
-      };
+    tablesList.forEach((t) => {
+      const outCount = outgoingTargets[t.name]?.size || 0;
+      const inCount = incomingSources[t.name]?.size || 0;
+
+      if (outCount === 0 && inCount === 0) {
+        // Standalone isolated tables
+        tableRanks[t.name] = 0;
+      } else if (outCount === 0 && inCount > 0) {
+        // Root Parent tables (e.g. users, categories)
+        tableRanks[t.name] = 0;
+      } else if (outCount > 0 && inCount > 0) {
+        // Intermediate Core Entities (e.g. properties)
+        tableRanks[t.name] = 1;
+      } else {
+        // Child Leaf Entities (e.g. property_images, reviews)
+        tableRanks[t.name] = 2;
+      }
+    });
+
+    // 2. Group into Layer Columns
+    const maxRank = 3;
+    const layers: TableData[][] = Array.from({ length: maxRank + 1 }, () => []);
+
+    tablesList.forEach((t) => {
+      const rank = Math.min(maxRank, tableRanks[t.name] ?? 0);
+      layers[rank].push(t);
+    });
+
+    // 3. If a layer has too many tables, split into sub-columns
+    const columnsGrid: TableData[][] = [];
+    const maxTablesPerCol = 4;
+
+    layers.forEach((layerTables) => {
+      if (layerTables.length === 0) return;
+      // Sort tables in layer by connected parent affinity to minimize crossings
+      layerTables.sort((a, b) => {
+        const aTarget = Array.from(outgoingTargets[a.name] || [])[0] || "";
+        const bTarget = Array.from(outgoingTargets[b.name] || [])[0] || "";
+        return aTarget.localeCompare(bTarget);
+      });
+
+      for (let i = 0; i < layerTables.length; i += maxTablesPerCol) {
+        columnsGrid.push(layerTables.slice(i, i + maxTablesPerCol));
+      }
+    });
+
+    if (columnsGrid.length === 0) {
+      columnsGrid.push([...tablesList]);
+    }
+
+    const cardWidth = 280;
+    const colGap = 100;
+    const vGap = 50;
+
+    // 4. Calculate coordinates with dynamic vertical stacking per column
+    const newNodes: Node<TableNodeData>[] = [];
+
+    columnsGrid.forEach((colTables, colIdx) => {
+      const colX = colIdx * (cardWidth + colGap) + 50;
+      let currY = 50;
+
+      colTables.forEach((t) => {
+        const renderedColsCount =
+          currentMode === "keys_only"
+            ? Math.max(1, t.columns.filter((c) => c.primaryKey || tableFkMaps[t.name]?.[c.name]).length)
+            : currentMode === "compact"
+            ? Math.min(10, Math.max(1, t.columns.length))
+            : Math.max(1, t.columns.length);
+
+        const cardH = 38 + renderedColsCount * 28 + 14;
+
+        newNodes.push({
+          id: t.name,
+          type: "tableNode",
+          position: { x: colX, y: currY },
+          data: {
+            table: t,
+            fkMap: tableFkMaps[t.name] || {},
+            searchQuery,
+            highlighted: false,
+            viewMode: currentMode,
+          },
+        });
+
+        currY += cardH + vGap;
+      });
     });
 
     setNodes(newNodes);
@@ -540,6 +648,16 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
             <span>Fit</span>
           </button>
 
+          <button
+            className="btn btn-secondary btn-sm export-print-btn"
+            onClick={() => setIsExportModalOpen(true)}
+            disabled={tables.length === 0}
+            title="Export PNG, JPG, or Print PDF"
+          >
+            <Printer size={12} />
+            <span>Export / Print</span>
+          </button>
+
           <button className="btn btn-primary btn-sm" onClick={fetchSchemaDiagram} disabled={loading} title="Reload schema">
             <RefreshCw size={12} className={loading ? "spin" : ""} />
             <span>{loading ? "..." : "Refresh"}</span>
@@ -621,26 +739,49 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
               <div className="sidebar-tables-list">
                 {tables
                   .filter((t) => t.name.toLowerCase().includes(sidebarSearch.toLowerCase()))
-                  .map((t) => (
-                    <button
-                      key={t.name}
-                      type="button"
-                      className={`sidebar-table-item font-mono ${nodes.find((n) => n.id === t.name)?.data?.highlighted ? "active" : ""}`}
-                      onClick={() => {
-                        fitView({ nodes: [{ id: t.name }], padding: 0.5, duration: 400 });
-                        setNodes((nds) =>
-                          nds.map((n) => ({
-                            ...n,
-                            data: { ...n.data, highlighted: n.id === t.name },
-                          }))
-                        );
-                      }}
-                    >
-                      <Table2 size={11} className="tbl-item-icon" />
-                      <span className="tbl-item-name" title={t.name}>{t.name}</span>
-                      <span className="tbl-item-count font-mono">{t.columns.length}</span>
-                    </button>
-                  ))}
+                  .map((t) => {
+                    const isSelected = selectedTableIds.has(t.name);
+                    return (
+                      <button
+                        key={t.name}
+                        type="button"
+                        className={`sidebar-table-item font-mono ${isSelected ? "active" : ""}`}
+                        onClick={(e) => {
+                          const isMulti = e.metaKey || e.ctrlKey || e.shiftKey;
+                          if (isMulti) {
+                            // Toggle selection on Command / Ctrl / Shift + Click
+                            setNodes((nds) =>
+                              nds.map((n) => {
+                                if (n.id === t.name) {
+                                  const nextState = !isSelected;
+                                  return {
+                                    ...n,
+                                    selected: nextState,
+                                    data: { ...n.data, highlighted: nextState },
+                                  };
+                                }
+                                return n;
+                              })
+                            );
+                          } else {
+                            // Single click: focus & highlight this table
+                            fitView({ nodes: [{ id: t.name }], padding: 0.5, duration: 400 });
+                            setNodes((nds) =>
+                              nds.map((n) => ({
+                                ...n,
+                                selected: n.id === t.name,
+                                data: { ...n.data, highlighted: n.id === t.name },
+                              }))
+                            );
+                          }
+                        }}
+                      >
+                        <Table2 size={11} className="tbl-item-icon" />
+                        <span className="tbl-item-name" title={t.name}>{t.name}</span>
+                        <span className="tbl-item-count font-mono">{t.columns.length}</span>
+                      </button>
+                    );
+                  })}
               </div>
             </>
           ) : (
@@ -651,7 +792,7 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
         </div>
 
         {/* Right Side: React Flow Canvas */}
-        <div className="flow-wrapper">
+        <div className="flow-wrapper" ref={flowWrapperRef}>
           {loading && (
             <div className="diagram-loading-overlay">
               <RefreshCw size={28} className="spin loading-icon" />
@@ -671,10 +812,12 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
               edges={edges}
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
-              nodeTypes={nodeTypes}
+              nodeTypes={NODE_TYPES}
+              edgeTypes={EDGE_TYPES}
               onlyRenderVisibleElements={true}
               minZoom={0.05}
               maxZoom={2}
+              multiSelectionKeyCode={["Shift", "Meta", "Control"]}
               fitView
               colorMode={theme}
             >
@@ -698,6 +841,19 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
           )}
         </div>
       </div>
+
+      <ErdExportModal
+        isOpen={isExportModalOpen}
+        onClose={() => setIsExportModalOpen(false)}
+        flowContainerRef={flowWrapperRef}
+        databaseName={activeDatabase}
+        totalTablesCount={tables.length}
+        selectedTablesCount={selectedTableIds.size}
+        selectedTableIds={selectedTableIds}
+        nodes={nodes}
+        edges={edges}
+        theme={theme}
+      />
 
       <style jsx>{`
         .diagram-pane {

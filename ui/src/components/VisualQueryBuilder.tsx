@@ -63,6 +63,10 @@ import {
   VisualFilterCondition,
   VisualSortCondition,
   VisualFilterOperator,
+  VisualGroupByCondition,
+  VisualHavingCondition,
+  VisualAggregateItem,
+  AggregateFunction,
   DBType,
 } from "../types";
 import { apiClient } from "../utils/apiClient";
@@ -859,16 +863,18 @@ const FilterBlockNode: React.FC<NodeProps> = React.memo(function FilterBlockNode
   );
 });
 
-const nodeTypes = {
+const NODE_TYPES = Object.freeze({
   visualTable: VisualTableNode,
   visualFilter: FilterBlockNode,
-};
+});
+
+const EDGE_TYPES = Object.freeze({});
 
 // Module-level so React Flow does not see a new object on every render.
-const DEFAULT_EDGE_OPTIONS = {
+const DEFAULT_EDGE_OPTIONS = Object.freeze({
   animated: true,
   style: { stroke: "var(--accent-blue)", strokeWidth: 2 },
-};
+});
 
 export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
   activeProfile,
@@ -894,11 +900,14 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
   // Filters & Sorting & Limit & Pagination
   const [filters, setFilters] = useState<VisualFilterCondition[]>([]);
   const [sorts, setSorts] = useState<VisualSortCondition[]>([]);
+  const [groupBys, setGroupBys] = useState<VisualGroupByCondition[]>([]);
+  const [aggregates, setAggregates] = useState<VisualAggregateItem[]>([]);
+  const [havings, setHavings] = useState<VisualHavingCondition[]>([]);
   const [limit, setLimit] = useState<number>(50);
   const [page, setPage] = useState<number>(0);
 
   // Bottom drawer state (starts collapsed by default, expands on Run Query or tab click)
-  const [bottomTab, setBottomTab] = useState<"results" | "sql" | "filters" | "sort">("results");
+  const [bottomTab, setBottomTab] = useState<"results" | "sql" | "filters" | "sort" | "groupby">("results");
   const [drawerHeight, setDrawerHeight] = useState<number>(360);
   const [isDrawerCollapsed, setIsDrawerCollapsed] = useState(true);
   const [isDraggingResize, setIsDraggingResize] = useState<boolean>(false);
@@ -946,6 +955,9 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
     setJoins([]);
     setFilters([]);
     setSorts([]);
+    setGroupBys([]);
+    setAggregates([]);
+    setHavings([]);
     setPage(0);
     setQueryResult(null);
     setSelectedEdgeId(null);
@@ -1631,11 +1643,14 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
       joins,
       filters,
       sorts,
+      groupBys,
+      having: havings,
+      aggregates,
       limit,
       offset: page > 0 ? page * limit : undefined,
       dbType: dialect,
     });
-  }, [selectionKey, joins, filters, sorts, limit, page, activeProfile?.type]);
+  }, [selectionKey, joins, filters, sorts, groupBys, havings, aggregates, limit, page, activeProfile?.type]);
 
   // SQL text is shared with the SQL console tab (module-level store, survives unmount).
   const sqlText = useSharedSql();
@@ -1806,6 +1821,9 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
       setJoins(parsed.joins);
       setFilters(parsed.filters);
       setSorts(parsed.sorts);
+      setGroupBys(parsed.groupBys || []);
+      setHavings(parsed.having || []);
+      setAggregates(parsed.aggregates || []);
       setLimit(parsed.limit);
       // The canvas we just built is now authoritative: re-publish its canonical SQL.
       lastPushedSqlRef.current = null;
@@ -2296,6 +2314,93 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
     setSorts((prev) => prev.filter((s) => s.id !== id));
   };
 
+  // Group By Handlers
+  const addGroupBy = () => {
+    if (canvasTableNames.length === 0) return;
+    const firstTable = canvasTableNames[0];
+    const cols = tableSchemas[firstTable] || [];
+    const firstCol = cols[0]?.name || "id";
+
+    setGroupBys((prev) => [
+      ...prev,
+      {
+        id: `gb-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        table: firstTable,
+        column: firstCol,
+      },
+    ]);
+  };
+
+  const updateGroupBy = (id: string, updates: Partial<VisualGroupByCondition>) => {
+    setGroupBys((prev) =>
+      prev.map((g) => (g.id === id ? { ...g, ...updates } : g))
+    );
+  };
+
+  const removeGroupBy = (id: string) => {
+    setGroupBys((prev) => prev.filter((g) => g.id !== id));
+  };
+
+  // Aggregate Handlers
+  const addAggregate = () => {
+    if (canvasTableNames.length === 0) return;
+    const firstTable = canvasTableNames[0];
+    const cols = tableSchemas[firstTable] || [];
+    const firstCol = cols[0]?.name || "*";
+
+    setAggregates((prev) => [
+      ...prev,
+      {
+        id: `agg-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        table: firstTable,
+        column: firstCol,
+        func: "COUNT",
+        alias: `count_${firstCol === "*" ? "rows" : firstCol}`,
+      },
+    ]);
+  };
+
+  const updateAggregate = (id: string, updates: Partial<VisualAggregateItem>) => {
+    setAggregates((prev) =>
+      prev.map((a) => (a.id === id ? { ...a, ...updates } : a))
+    );
+  };
+
+  const removeAggregate = (id: string) => {
+    setAggregates((prev) => prev.filter((a) => a.id !== id));
+  };
+
+  // HAVING Handlers
+  const addHaving = () => {
+    if (canvasTableNames.length === 0) return;
+    const firstTable = canvasTableNames[0];
+    const cols = tableSchemas[firstTable] || [];
+    const firstCol = cols[0]?.name || "*";
+
+    setHavings((prev) => [
+      ...prev,
+      {
+        id: `hav-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        table: firstTable,
+        column: firstCol,
+        func: "COUNT",
+        operator: ">",
+        value: "0",
+        logic: "AND",
+      },
+    ]);
+  };
+
+  const updateHaving = (id: string, updates: Partial<VisualHavingCondition>) => {
+    setHavings((prev) =>
+      prev.map((h) => (h.id === id ? { ...h, ...updates } : h))
+    );
+  };
+
+  const removeHaving = (id: string) => {
+    setHavings((prev) => prev.filter((h) => h.id !== id));
+  };
+
   // Selected edge object for join editor modal
   const activeJoin = useMemo(() => {
     if (!selectedEdgeId) return null;
@@ -2600,7 +2705,8 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
             onEdgeClick={handleEdgeClick}
-            nodeTypes={nodeTypes}
+            nodeTypes={NODE_TYPES}
+            edgeTypes={EDGE_TYPES}
             colorMode={theme}
             fitView
             minZoom={0.2}
@@ -2781,6 +2887,18 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
             >
               <ArrowUpDown size={12} />
               <span>Sorting & Limit</span>
+            </button>
+
+            <button
+              type="button"
+              className={`drawer-tab-btn ${bottomTab === "groupby" ? "active" : ""}`}
+              onClick={() => {
+                setBottomTab("groupby");
+                if (isDrawerCollapsed) setIsDrawerCollapsed(false);
+              }}
+            >
+              <Layers size={12} />
+              <span>Group By ({groupBys.length + aggregates.length})</span>
             </button>
           </div>
 
@@ -3316,6 +3434,316 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
                       <option value={1000}>1000 rows</option>
                     </select>
                   </div>
+                </div>
+              </div>
+            )}
+
+            {/* Tab 5: Group By & Aggregations */}
+            {bottomTab === "groupby" && (
+              <div className="tab-content groupby-tab-content">
+                {/* 1. GROUP BY Columns */}
+                <div className="groupby-section">
+                  <div className="tab-toolbar">
+                    <div className="tab-tip-group">
+                      <span className="section-badge font-mono">GROUP BY</span>
+                      <span className="tab-tip">Group query rows by one or more columns</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={addGroupBy}
+                      disabled={canvasTableNames.length === 0}
+                    >
+                      <Plus size={11} />
+                      <span>Add Group Column</span>
+                    </button>
+                  </div>
+
+                  {groupBys.length === 0 ? (
+                    <div className="empty-panel-msg">
+                      No GROUP BY columns selected. Click <strong>&quot;Add Group Column&quot;</strong> to aggregate data by categories or keys.
+                    </div>
+                  ) : (
+                    <div className="conditions-list">
+                      {groupBys.map((g) => (
+                        <div key={g.id} className="condition-row">
+                          <span className="where-tag font-mono">GROUP BY</span>
+                          <select
+                            value={g.table}
+                            onChange={(e) => {
+                              const newTbl = e.target.value;
+                              const cols = tableSchemas[newTbl] || [];
+                              updateGroupBy(g.id, {
+                                table: newTbl,
+                                column: cols[0]?.name || "",
+                              });
+                            }}
+                            className="input-select table-select font-mono"
+                          >
+                            {canvasTableNames.map((tbl) => (
+                              <option key={tbl} value={tbl}>
+                                {tbl}
+                              </option>
+                            ))}
+                          </select>
+
+                          <select
+                            value={g.column}
+                            onChange={(e) => updateGroupBy(g.id, { column: e.target.value })}
+                            className="input-select col-select font-mono"
+                          >
+                            {(tableSchemas[g.table] || []).map((c) => (
+                              <option key={c.name} value={c.name}>
+                                {c.name} ({c.type})
+                              </option>
+                            ))}
+                          </select>
+
+                          <button
+                            type="button"
+                            className="btn-icon remove-filter-btn"
+                            onClick={() => removeGroupBy(g.id)}
+                            title="Remove group by column"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* 2. Aggregate Functions (COUNT, SUM, AVG, MIN, MAX) */}
+                <div className="groupby-section">
+                  <div className="tab-toolbar">
+                    <div className="tab-tip-group">
+                      <span className="section-badge font-mono">AGGREGATES</span>
+                      <span className="tab-tip">Calculate summary values (COUNT, SUM, AVG, MIN, MAX)</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={addAggregate}
+                      disabled={canvasTableNames.length === 0}
+                    >
+                      <Plus size={11} />
+                      <span>Add Aggregate</span>
+                    </button>
+                  </div>
+
+                  {aggregates.length === 0 ? (
+                    <div className="empty-panel-msg">
+                      No aggregate functions added. Click <strong>&quot;Add Aggregate&quot;</strong> to calculate totals or counts.
+                    </div>
+                  ) : (
+                    <div className="conditions-list">
+                      {aggregates.map((agg) => (
+                        <div key={agg.id} className="condition-row">
+                          <select
+                            value={agg.func}
+                            onChange={(e) =>
+                              updateAggregate(agg.id, {
+                                func: e.target.value as AggregateFunction,
+                                alias: `${e.target.value.toLowerCase()}_${agg.column === "*" ? "rows" : agg.column}`,
+                              })
+                            }
+                            className="input-select op-select font-mono agg-func-select"
+                          >
+                            <option value="COUNT">COUNT(...)</option>
+                            <option value="COUNT_DISTINCT">COUNT(DISTINCT ...)</option>
+                            <option value="SUM">SUM(...)</option>
+                            <option value="AVG">AVG(...)</option>
+                            <option value="MIN">MIN(...)</option>
+                            <option value="MAX">MAX(...)</option>
+                          </select>
+
+                          <select
+                            value={agg.table}
+                            onChange={(e) => {
+                              const newTbl = e.target.value;
+                              const cols = tableSchemas[newTbl] || [];
+                              updateAggregate(agg.id, {
+                                table: newTbl,
+                                column: cols[0]?.name || "*",
+                              });
+                            }}
+                            className="input-select table-select font-mono"
+                          >
+                            {canvasTableNames.map((tbl) => (
+                              <option key={tbl} value={tbl}>
+                                {tbl}
+                              </option>
+                            ))}
+                          </select>
+
+                          <select
+                            value={agg.column}
+                            onChange={(e) => {
+                              const newCol = e.target.value;
+                              updateAggregate(agg.id, {
+                                column: newCol,
+                                alias: `${agg.func.toLowerCase()}_${newCol === "*" ? "rows" : newCol}`,
+                              });
+                            }}
+                            className="input-select col-select font-mono"
+                          >
+                            {agg.func.startsWith("COUNT") && <option value="*">* (All rows)</option>}
+                            {(tableSchemas[agg.table] || []).map((c) => (
+                              <option key={c.name} value={c.name}>
+                                {c.name} ({c.type})
+                              </option>
+                            ))}
+                          </select>
+
+                          <span className="as-tag font-mono">AS</span>
+
+                          <input
+                            type="text"
+                            placeholder="Alias (e.g. total_count)"
+                            value={agg.alias || ""}
+                            onChange={(e) => updateAggregate(agg.id, { alias: e.target.value })}
+                            className="input-text value-input font-mono agg-alias-input"
+                          />
+
+                          <button
+                            type="button"
+                            className="btn-icon remove-filter-btn"
+                            onClick={() => removeAggregate(agg.id)}
+                            title="Remove aggregate"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* 3. HAVING Clause */}
+                <div className="groupby-section">
+                  <div className="tab-toolbar">
+                    <div className="tab-tip-group">
+                      <span className="section-badge font-mono">HAVING</span>
+                      <span className="tab-tip">Filter grouped summary results (HAVING conditions)</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={addHaving}
+                      disabled={canvasTableNames.length === 0}
+                    >
+                      <Plus size={11} />
+                      <span>Add HAVING Condition</span>
+                    </button>
+                  </div>
+
+                  {havings.length === 0 ? (
+                    <div className="empty-panel-msg">
+                      No HAVING conditions configured. Click <strong>&quot;Add HAVING Condition&quot;</strong> to filter groups (e.g. COUNT(*) &gt; 5).
+                    </div>
+                  ) : (
+                    <div className="conditions-list">
+                      {havings.map((h, idx) => (
+                        <div key={h.id} className="condition-row">
+                          {idx > 0 && (
+                            <select
+                              value={h.logic}
+                              onChange={(e) =>
+                                updateHaving(h.id, { logic: e.target.value as "AND" | "OR" })
+                              }
+                              className="input-select logic-select font-mono"
+                            >
+                              <option value="AND">AND</option>
+                              <option value="OR">OR</option>
+                            </select>
+                          )}
+                          {idx === 0 && <span className="where-tag font-mono">HAVING</span>}
+
+                          <select
+                            value={h.func}
+                            onChange={(e) =>
+                              updateHaving(h.id, { func: e.target.value as AggregateFunction })
+                            }
+                            className="input-select op-select font-mono agg-func-select"
+                          >
+                            <option value="COUNT">COUNT(...)</option>
+                            <option value="COUNT_DISTINCT">COUNT(DISTINCT ...)</option>
+                            <option value="SUM">SUM(...)</option>
+                            <option value="AVG">AVG(...)</option>
+                            <option value="MIN">MIN(...)</option>
+                            <option value="MAX">MAX(...)</option>
+                            <option value="NONE">Column Value</option>
+                          </select>
+
+                          <select
+                            value={h.table}
+                            onChange={(e) => {
+                              const newTbl = e.target.value;
+                              const cols = tableSchemas[newTbl] || [];
+                              updateHaving(h.id, {
+                                table: newTbl,
+                                column: cols[0]?.name || "*",
+                              });
+                            }}
+                            className="input-select table-select font-mono"
+                          >
+                            {canvasTableNames.map((tbl) => (
+                              <option key={tbl} value={tbl}>
+                                {tbl}
+                              </option>
+                            ))}
+                          </select>
+
+                          <select
+                            value={h.column}
+                            onChange={(e) => updateHaving(h.id, { column: e.target.value })}
+                            className="input-select col-select font-mono"
+                          >
+                            {h.func.startsWith("COUNT") && <option value="*">* (All rows)</option>}
+                            {(tableSchemas[h.table] || []).map((c) => (
+                              <option key={c.name} value={c.name}>
+                                {c.name} ({c.type})
+                              </option>
+                            ))}
+                          </select>
+
+                          <select
+                            value={h.operator}
+                            onChange={(e) =>
+                              updateHaving(h.id, {
+                                operator: e.target.value as VisualFilterOperator,
+                              })
+                            }
+                            className="input-select op-select font-mono"
+                          >
+                            <option value="=">=</option>
+                            <option value="!=">!=</option>
+                            <option value=">">&gt;</option>
+                            <option value="<">&lt;</option>
+                            <option value=">=">&gt;=</option>
+                            <option value="<=">&lt;=</option>
+                          </select>
+
+                          <input
+                            type="text"
+                            placeholder="Value (e.g. 10)"
+                            value={h.value}
+                            onChange={(e) => updateHaving(h.id, { value: e.target.value })}
+                            className="input-text value-input font-mono"
+                          />
+
+                          <button
+                            type="button"
+                            className="btn-icon remove-filter-btn"
+                            onClick={() => removeHaving(h.id)}
+                            title="Remove HAVING condition"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -4333,6 +4761,60 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
           display: flex;
           flex-direction: column;
           gap: 14px;
+        }
+
+        /* Group By & Aggregates Tab */
+        .groupby-tab-content {
+          display: flex;
+          flex-direction: column;
+          gap: 18px;
+        }
+
+        .groupby-section {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          border-bottom: 1px dashed var(--border-light);
+          padding-bottom: 14px;
+        }
+
+        .groupby-section:last-child {
+          border-bottom: none;
+          padding-bottom: 0;
+        }
+
+        .tab-tip-group {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .section-badge {
+          font-size: 9.5px;
+          font-weight: 700;
+          color: var(--accent-blue);
+          background: rgba(59, 130, 246, 0.12);
+          border: 1px solid rgba(59, 130, 246, 0.25);
+          padding: 2px 6px;
+          border-radius: var(--radius-xs);
+          letter-spacing: 0.5px;
+        }
+
+        .as-tag {
+          font-size: 10px;
+          font-weight: 700;
+          color: var(--text-muted);
+          padding: 0 4px;
+        }
+
+        .agg-func-select {
+          min-width: 110px;
+          font-weight: 600;
+          color: var(--accent-blue);
+        }
+
+        .agg-alias-input {
+          max-width: 160px;
         }
 
         .limit-section {

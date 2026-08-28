@@ -90,7 +90,8 @@ interface FkFlowCanvasProps {
   onConnectPair: (localCol: string, refCol: string) => void;
 }
 
-const nodeTypes = { fkNode: FkFlowNode };
+const NODE_TYPES = Object.freeze({ fkNode: FkFlowNode });
+const EDGE_TYPES = Object.freeze({});
 
 const FkFlowCanvasInner: React.FC<FkFlowCanvasProps> = ({
   localTableName,
@@ -176,7 +177,8 @@ const FkFlowCanvasInner: React.FC<FkFlowCanvasProps> = ({
       <ReactFlow
         nodes={nodes}
         edges={edges}
-        nodeTypes={nodeTypes}
+        nodeTypes={NODE_TYPES}
+        edgeTypes={EDGE_TYPES}
         onConnect={handleConnect}
         fitView
         fitViewOptions={{ padding: 0.2 }}

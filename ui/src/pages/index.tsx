@@ -281,7 +281,7 @@ export default function Home() {
     });
   }, []);
 
-  // Block F12, DevTools shortcuts, and Right-Click Inspect
+  // Block F12, DevTools shortcuts, Reload (Cmd+R, Ctrl+R, F5), and Right-Click Inspect
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -291,21 +291,34 @@ export default function Home() {
 
     const handleKeyDown = (e: KeyboardEvent) => {
       const key = (e.key || "").toLowerCase();
-      const isF12 = key === "f12";
-      const isInspect = (e.ctrlKey || e.metaKey) && (e.shiftKey || e.altKey) && (key === "i" || key === "j" || key === "c");
-      const isViewSource = (e.ctrlKey || e.metaKey) && key === "u";
+      const code = e.code || "";
+      const isCmdOrCtrl = e.metaKey || e.ctrlKey;
 
-      if (isF12 || isInspect || isViewSource) {
+      const isReload =
+        (isCmdOrCtrl && (key === "r" || code === "KeyR")) ||
+        key === "f5" ||
+        code === "F5" ||
+        e.keyCode === 116;
+      const isF12 = key === "f12" || code === "F12" || e.keyCode === 123;
+      const isInspect =
+        isCmdOrCtrl &&
+        (e.shiftKey || e.altKey) &&
+        (key === "i" || key === "j" || key === "c" || code === "KeyI" || code === "KeyJ" || code === "KeyC");
+      const isViewSource = isCmdOrCtrl && (key === "u" || code === "KeyU");
+
+      if (isReload || isF12 || isInspect || isViewSource) {
         e.preventDefault();
         e.stopPropagation();
       }
     };
 
     window.addEventListener("contextmenu", handleContextMenu);
-    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown, { capture: true, passive: false });
+    document.addEventListener("keydown", handleKeyDown, { capture: true, passive: false });
     return () => {
       window.removeEventListener("contextmenu", handleContextMenu);
-      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keydown", handleKeyDown, { capture: true });
+      document.removeEventListener("keydown", handleKeyDown, { capture: true });
     };
   }, []);
 

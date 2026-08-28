@@ -32,25 +32,21 @@ export async function saveTextFile(
   suggestedName: string,
   contents: string,
 ): Promise<string | null> {
-  // If running in browser dev mode (e.g. localhost:3000), use browser download immediately
-  // to avoid losing user gesture activation across async network trips.
-  if (
-    typeof window !== "undefined" &&
-    (window.location.port === "3000" || Boolean(process.env.NEXT_PUBLIC_DODB_API))
-  ) {
-    return browserDownload(suggestedName, contents);
-  }
-
   try {
     return await apiClient.saveTextFile(suggestedName, contents);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     if (
       typeof window !== "undefined" &&
-      (msg.includes("no file dialogs") ||
+      (msg.includes("dialog") ||
         msg.includes("Failed to fetch") ||
-        msg.includes("save_text_file failed"))
+        msg.includes("save_text_file failed") ||
+        msg.includes("ErrNoDialogs") ||
+        msg.includes("not available in this build"))
     ) {
+      return browserDownload(suggestedName, contents);
+    }
+    if (typeof window !== "undefined") {
       return browserDownload(suggestedName, contents);
     }
     throw err;

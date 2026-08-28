@@ -200,6 +200,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
   }, [tables, activeProfile, fetchTablesForDump]);
 
+  // Initial load: Fetch users and processes so tab count badges are populated immediately
+  useEffect(() => {
+    if (activeProfile) {
+      fetchUsers();
+      fetchProcesses(true);
+    }
+  }, [activeProfile?.id, currentDb, fetchUsers, fetchProcesses]);
+
   useEffect(() => {
     if (activeProfile) {
       if (subTab === "users") fetchUsers();
