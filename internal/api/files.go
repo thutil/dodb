@@ -1,9 +1,11 @@
 package api
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // FileFilter is one entry in a native file dialog's type list.
@@ -69,9 +71,23 @@ func (s *Service) SaveTextFile(suggestedName, contents string) (*string, error) 
 			return nil, fmt.Errorf("could not create %s: %w", dir, err)
 		}
 	}
+
+	var data []byte
+	if idx := strings.Index(contents, ";base64,"); idx != -1 && strings.HasPrefix(contents, "data:") {
+		b64 := contents[idx+len(";base64,"):]
+		decoded, err := base64.StdEncoding.DecodeString(b64)
+		if err == nil {
+			data = decoded
+		} else {
+			data = []byte(contents)
+		}
+	} else {
+		data = []byte(contents)
+	}
+
 	// 0644 rather than 0600: an export is a document the user asked for and will
 	// likely share, unlike the master key.
-	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+	if err := os.WriteFile(path, data, 0o644); err != nil {
 		return nil, fmt.Errorf("could not write %s: %w", path, err)
 	}
 	return &path, nil

@@ -330,6 +330,9 @@ func (h *Handler) buildRoutes() map[string]func(json.RawMessage) (any, error) {
 		"app_version": func(json.RawMessage) (any, error) {
 			return s.AppVersion(), nil
 		},
+		"print_window": func(json.RawMessage) (any, error) {
+			return nil, s.PrintWindow()
+		},
 	}
 
 	for name, route := range h.importRoutes() {

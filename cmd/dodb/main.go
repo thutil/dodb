@@ -70,6 +70,8 @@ func main() {
 		StartState: application.WindowStateMaximised,
 	})
 
+	svc.SetWindow(&wailsWindow{window: window})
+
 	if runtime.GOOS == "darwin" {
 		// macOS convention, and what the Tauri build did: closing the window
 		// hides it and leaves the app in the dock, so reopening is instant and
@@ -129,4 +131,14 @@ func (d *wailsDialogs) SaveFile(title, suggestedName string) (string, error) {
 	}
 	dialog.CanCreateDirectories(true)
 	return dialog.PromptForSingleSelection()
+}
+
+// wailsWindow adapts Wails' WebviewWindow to the api.WindowHandler interface.
+type wailsWindow struct{ window *application.WebviewWindow }
+
+func (w *wailsWindow) Print() error {
+	if w.window == nil {
+		return nil
+	}
+	return w.window.Print()
 }

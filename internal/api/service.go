@@ -14,6 +14,11 @@ import (
 	"github.com/thutil/dodb/internal/dbcore"
 )
 
+// WindowHandler provides host window actions.
+type WindowHandler interface {
+	Print() error
+}
+
 // Service holds the process-wide connection state.
 type Service struct {
 	DB *dbcore.State
@@ -25,6 +30,9 @@ type Service struct {
 	// dialogs is nil until the host installs one; see SetDialogs.
 	dialogs Dialogs
 
+	// window is nil until the host installs one; see SetWindow.
+	window WindowHandler
+
 	// imports guards the single-import-at-a-time slot.
 	imports importState
 }
@@ -32,6 +40,17 @@ type Service struct {
 // New returns a Service with empty connection state.
 func New(version string) *Service {
 	return &Service{DB: dbcore.NewState(), Version: version}
+}
+
+// SetWindow installs the host window implementation.
+func (s *Service) SetWindow(w WindowHandler) { s.window = w }
+
+// PrintWindow triggers the host window print dialog.
+func (s *Service) PrintWindow() error {
+	if s.window == nil {
+		return nil
+	}
+	return s.window.Print()
 }
 
 // AppVersion replaces the getVersion() call at ui/src/pages/index.tsx:220.

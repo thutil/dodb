@@ -4,6 +4,9 @@
  * Zero external libraries: uses native Canvas 2D rendering and Print iframe.
  */
 
+import { saveFile } from "./saveFile";
+import { apiClient } from "./apiClient";
+
 export type PaperSize = "A4" | "A3" | "Letter" | "Fit";
 export type PaperOrientation = "landscape" | "portrait";
 export type ExportFormat = "png" | "jpg" | "print";
@@ -863,6 +866,18 @@ export async function printDiagram(
       selectedNodeIds
     );
     diagramDataUrl = canvas.toDataURL("image/png");
+
+    // Preload image so it is fully decoded before printing
+    await new Promise<void>((resolve) => {
+      const img = new Image();
+      img.src = diagramDataUrl;
+      if (img.complete) {
+        resolve();
+      } else {
+        img.onload = () => resolve();
+        img.onerror = () => resolve();
+      }
+    });
   }
 
   // Generate Page 2 Data Dictionary HTML if requested
@@ -871,266 +886,256 @@ export async function printDiagram(
       ? generateDataDictionaryHtml(flowContainer, options, selectedNodeIds)
       : "";
 
-  // Create hidden iframe for print
-  const iframe = document.createElement("iframe");
-  iframe.style.position = "fixed";
-  iframe.style.right = "0";
-  iframe.style.bottom = "0";
-  iframe.style.width = "0";
-  iframe.style.height = "0";
-  iframe.style.border = "none";
-  document.body.appendChild(iframe);
+  const pageSizeStyle =
+    options.paperSize === "Fit" ? "A4 landscape" : `${options.paperSize} ${options.orientation}`;
 
-  const doc = iframe.contentWindow?.document;
-  if (!doc) throw new Error("Could not access print frame document");
+  // Clean up any stale portal / style elements
+  const existingPortal = document.getElementById("dodb-print-portal");
+  if (existingPortal?.parentNode) existingPortal.parentNode.removeChild(existingPortal);
+  const existingStyle = document.getElementById("dodb-print-styles");
+  if (existingStyle?.parentNode) existingStyle.parentNode.removeChild(existingStyle);
 
-  const pageSizeStyle = options.paperSize === "Fit" ? "A4 landscape" : `${options.paperSize} ${options.orientation}`;
-
-  doc.open();
-  doc.write(`
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <title></title>
-        <style>
-          @page {
-            size: ${pageSizeStyle};
-            margin: 0;
-          }
-          * {
-            box-sizing: border-box;
-          }
-          body {
-            margin: 0;
-            padding: 8mm;
-            background: #ffffff;
-            color: #0f172a;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            font-size: 11px;
-            line-height: 1.4;
-          }
-          .font-mono {
-            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-          }
-
-          /* Page 1: Diagram Page - Top Aligned */
-          .page-diagram {
-            display: block;
-            width: 100%;
-            margin: 0;
-            padding: 0;
-            page-break-after: always;
-          }
-          .diagram-image {
-            width: 100%;
-            max-height: 94vh;
-            object-fit: contain;
-            display: block;
-            margin: 0 auto;
-          }
-
-          /* Page 2: Data Dictionary Page */
-          .data-dictionary-page {
-            padding: 10px 0;
-            page-break-before: always;
-          }
-          .report-header {
-            display: flex;
-            align-items: flex-end;
-            justify-content: space-between;
-            border-bottom: 2px solid #0f172a;
-            padding-bottom: 10px;
-            margin-bottom: 16px;
-          }
-          .report-main-title {
-            font-size: 16px;
-            font-weight: 800;
-            margin: 0 0 4px 0;
-            color: #0f172a;
-          }
-          .report-subtitle {
-            font-size: 10.5px;
-            color: #64748b;
-            margin: 0;
-          }
-          .report-stats-grid {
-            display: flex;
-            gap: 8px;
-          }
-          .stat-pill {
-            background: #f1f5f9;
-            border: 1px solid #cbd5e1;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 10px;
-            color: #334155;
-          }
-          .stat-num {
-            font-weight: 700;
-            color: #0f172a;
-          }
-
-          .dictionary-grid {
-            display: grid;
-            gap: 14px;
-            margin-bottom: 18px;
-          }
-          .landscape-grid {
-            grid-template-columns: repeat(2, 1fr);
-          }
-          .portrait-grid {
-            grid-template-columns: 1fr;
-          }
-
-          .table-card {
-            border: 1px solid #cbd5e1;
-            border-radius: 6px;
-            overflow: hidden;
-            background: #ffffff;
-            break-inside: avoid;
-          }
-          .table-card-header {
-            background: #f8fafc;
-            border-bottom: 1px solid #cbd5e1;
-            padding: 6px 10px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-          }
-          .table-title {
-            font-weight: 700;
-            font-family: ui-monospace, monospace;
-            font-size: 12px;
-            color: #0f172a;
-          }
-          .table-badge {
-            font-size: 9.5px;
-            font-family: ui-monospace, monospace;
-            background: #e2e8f0;
-            color: #475569;
-            padding: 2px 6px;
-            border-radius: 10px;
-          }
-
-          .dictionary-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 10.5px;
-          }
-          .dictionary-table th {
-            background: #f1f5f9;
-            text-align: left;
-            padding: 5px 8px;
-            font-size: 9.5px;
-            color: #475569;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            border-bottom: 1px solid #e2e8f0;
-          }
-          .dictionary-table td {
-            padding: 5px 8px;
-            border-bottom: 1px solid #f1f5f9;
-            vertical-align: middle;
-          }
-          .dictionary-table tr:last-child td {
-            border-bottom: none;
-          }
-          .col-name-cell {
-            font-family: ui-monospace, monospace;
-            color: #0f172a;
-          }
-          .col-type-cell code {
-            font-family: ui-monospace, monospace;
-            color: #64748b;
-            background: #f8fafc;
-            padding: 1px 4px;
-            border-radius: 3px;
-          }
-
-          .badge {
-            display: inline-block;
-            font-size: 8.5px;
-            font-weight: 700;
-            padding: 1px 5px;
-            border-radius: 3px;
-            font-family: ui-monospace, monospace;
-          }
-          .pk-badge {
-            background: #dbeafe;
-            color: #1d4ed8;
-          }
-          .fk-badge {
-            background: #d1fae5;
-            color: #047857;
-          }
-
-          .section-card {
-            border: 1px solid #cbd5e1;
-            border-radius: 6px;
-            overflow: hidden;
-            margin-top: 14px;
-            break-inside: avoid;
-          }
-          .section-heading {
-            background: #f8fafc;
-            border-bottom: 1px solid #cbd5e1;
-            padding: 6px 10px;
-            margin: 0;
-            font-size: 11.5px;
-            font-weight: 700;
-            color: #0f172a;
-          }
-
-          .report-footer {
-            border-top: 1px solid #e2e8f0;
-            padding-top: 8px;
-            margin-top: 20px;
-            display: flex;
-            justify-content: space-between;
-            font-size: 9.5px;
-            color: #94a3b8;
-          }
-
-          @media print {
-            body {
-              background: #ffffff !important;
-            }
-            .page-diagram {
-              height: 100vh;
-            }
-          }
-        </style>
-      </head>
-      <body>
-        ${
-          diagramDataUrl
-            ? `
-          <div class="page-diagram">
-            <img src="${diagramDataUrl}" alt="ERD Diagram" class="diagram-image" />
-          </div>
-        `
-            : ""
-        }
-        ${dictionaryHtml}
-        <script>
-          window.onload = () => {
-            setTimeout(() => {
-              window.focus();
-              window.print();
-            }, 300);
-          };
-        </script>
-      </body>
-    </html>
-  `);
-  doc.close();
-
-  // Cleanup iframe after print
-  setTimeout(() => {
-    if (iframe.parentNode) {
-      iframe.parentNode.removeChild(iframe);
+  // Inject print stylesheet
+  const styleEl = document.createElement("style");
+  styleEl.id = "dodb-print-styles";
+  styleEl.textContent = `
+    @media screen {
+      #dodb-print-portal {
+        display: none !important;
+      }
     }
-  }, 60000);
+    @media print {
+      @page {
+        size: ${pageSizeStyle};
+        margin: 8mm;
+      }
+      body > *:not(#dodb-print-portal) {
+        display: none !important;
+      }
+      #dodb-print-portal {
+        display: block !important;
+        position: absolute !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100% !important;
+        background: #ffffff !important;
+        color: #0f172a !important;
+        z-index: 9999999 !important;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        font-size: 11px;
+        line-height: 1.4;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      .font-mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      }
+      .page-diagram {
+        display: block;
+        width: 100%;
+        margin: 0;
+        padding: 0;
+        page-break-after: always;
+      }
+      .diagram-image {
+        width: 100%;
+        max-height: 94vh;
+        object-fit: contain;
+        display: block;
+        margin: 0 auto;
+      }
+      .data-dictionary-page {
+        padding: 10px 0;
+        page-break-before: always;
+      }
+      .report-header {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        border-bottom: 2px solid #0f172a;
+        padding-bottom: 10px;
+        margin-bottom: 16px;
+      }
+      .report-main-title {
+        font-size: 16px;
+        font-weight: 800;
+        margin: 0 0 4px 0;
+        color: #0f172a;
+      }
+      .report-subtitle {
+        font-size: 10.5px;
+        color: #64748b;
+        margin: 0;
+      }
+      .report-stats-grid {
+        display: flex;
+        gap: 8px;
+      }
+      .stat-pill {
+        background: #f1f5f9;
+        border: 1px solid #cbd5e1;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 10px;
+        color: #334155;
+      }
+      .stat-num {
+        font-weight: 700;
+        color: #0f172a;
+      }
+      .dictionary-grid {
+        display: grid;
+        gap: 14px;
+        margin-bottom: 18px;
+      }
+      .landscape-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      .portrait-grid {
+        grid-template-columns: 1fr;
+      }
+      .table-card {
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        overflow: hidden;
+        background: #ffffff;
+        break-inside: avoid;
+      }
+      .table-card-header {
+        background: #f8fafc;
+        border-bottom: 1px solid #cbd5e1;
+        padding: 6px 10px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .table-title {
+        font-weight: 700;
+        font-family: ui-monospace, monospace;
+        font-size: 12px;
+        color: #0f172a;
+      }
+      .table-badge {
+        font-size: 9.5px;
+        font-family: ui-monospace, monospace;
+        background: #e2e8f0;
+        color: #475569;
+        padding: 2px 6px;
+        border-radius: 10px;
+      }
+      .dictionary-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 10.5px;
+      }
+      .dictionary-table th {
+        background: #f1f5f9;
+        text-align: left;
+        padding: 5px 8px;
+        font-size: 9.5px;
+        color: #475569;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        border-bottom: 1px solid #e2e8f0;
+      }
+      .dictionary-table td {
+        padding: 5px 8px;
+        border-bottom: 1px solid #f1f5f9;
+        vertical-align: middle;
+      }
+      .dictionary-table tr:last-child td {
+        border-bottom: none;
+      }
+      .col-name-cell {
+        font-family: ui-monospace, monospace;
+        color: #0f172a;
+      }
+      .col-type-cell code {
+        font-family: ui-monospace, monospace;
+        color: #64748b;
+        background: #f8fafc;
+        padding: 1px 4px;
+        border-radius: 3px;
+      }
+      .badge {
+        display: inline-block;
+        font-size: 8.5px;
+        font-weight: 700;
+        padding: 1px 5px;
+        border-radius: 3px;
+        font-family: ui-monospace, monospace;
+      }
+      .pk-badge {
+        background: #dbeafe;
+        color: #1d4ed8;
+      }
+      .fk-badge {
+        background: #d1fae5;
+        color: #047857;
+      }
+      .section-card {
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        overflow: hidden;
+        margin-top: 14px;
+        break-inside: avoid;
+      }
+      .section-heading {
+        background: #f8fafc;
+        border-bottom: 1px solid #cbd5e1;
+        padding: 6px 10px;
+        margin: 0;
+        font-size: 11.5px;
+        font-weight: 700;
+        color: #0f172a;
+      }
+      .report-footer {
+        border-top: 1px solid #e2e8f0;
+        padding-top: 8px;
+        margin-top: 20px;
+        display: flex;
+        justify-content: space-between;
+        font-size: 9.5px;
+        color: #94a3b8;
+      }
+    }
+  `;
+  document.head.appendChild(styleEl);
+
+  // Inject print portal into body
+  const portal = document.createElement("div");
+  portal.id = "dodb-print-portal";
+  portal.innerHTML = `
+    ${
+      diagramDataUrl
+        ? `<div class="page-diagram"><img src="${diagramDataUrl}" alt="ERD Diagram" class="diagram-image" /></div>`
+        : ""
+    }
+    ${dictionaryHtml}
+  `;
+  document.body.appendChild(portal);
+
+  // Short delay to allow layout reflow
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  const cleanup = () => {
+    if (portal.parentNode) portal.parentNode.removeChild(portal);
+    if (styleEl.parentNode) styleEl.parentNode.removeChild(styleEl);
+  };
+
+  try {
+    // Attempt Wails native window print first
+    await apiClient.printWindow();
+    // Also trigger window.print() for web browsers / webview
+    window.print();
+  } catch (err) {
+    console.error("Print invocation error:", err);
+    window.print();
+  } finally {
+    // Clean up after print sheet closes
+    setTimeout(cleanup, 2500);
+  }
 }
 
 /**
@@ -1140,7 +1145,7 @@ export async function downloadDiagramImage(
   flowContainer: HTMLElement,
   options: DiagramExportOptions,
   selectedNodeIds?: Set<string>
-): Promise<void> {
+): Promise<string | null> {
   const canvas = await captureDiagramToCanvas(flowContainer, options, selectedNodeIds);
   const mimeType = options.format === "jpg" ? "image/jpeg" : "image/png";
   const quality = options.format === "jpg" ? 0.92 : 1.0;
@@ -1150,12 +1155,7 @@ export async function downloadDiagramImage(
   const ext = options.format === "jpg" ? "jpg" : "png";
   const defaultFilename =
     options.filename ||
-    `${safeDb}_erd_report_${options.paperSize.toLowerCase()}_${options.orientation}_${Date.now()}.${ext}`;
+    `${safeDb}_erd_${options.scope}_${Date.now()}.${ext}`;
 
-  const link = document.createElement("a");
-  link.download = defaultFilename;
-  link.href = dataUrl;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
+  return await saveFile(defaultFilename, dataUrl);
 }

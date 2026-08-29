@@ -182,6 +182,13 @@ export const apiClient = {
   ): Promise<string | null> => {
     return await invoke("save_text_file", { suggestedName, contents });
   },
+  printWindow: async (): Promise<void> => {
+    try {
+      await invoke("print_window");
+    } catch {
+      // Ignored if host does not implement print_window (e.g. browser dev mode)
+    }
+  },
   // Data Import
   pickImportFile: async (): Promise<ImportFileInfo | null> => {
     return await invoke("pick_import_file");

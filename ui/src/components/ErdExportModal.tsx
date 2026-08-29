@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import {
   X,
   Download,
@@ -8,6 +8,10 @@ import {
   RefreshCw,
   BookOpen,
   FileText,
+  CheckCircle2,
+  Layers,
+  Sparkles,
+  Info,
 } from "lucide-react";
 import {
   DiagramExportOptions,
@@ -54,6 +58,7 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
   const [scale, setScale] = useState<ExportScale>(2);
   const [isTransparent, setIsTransparent] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [exportSuccess, setExportSuccess] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
 
   // Paper Aspect Ratio calculation for preview card
@@ -66,12 +71,13 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
     return orientation === "landscape" ? 1.294 : 1 / 1.294;
   }, [paperSize, orientation]);
 
-  if (!isOpen) return null;
+  const activeCount = scope === "selected" ? selectedTablesCount : totalTablesCount;
 
-  const handleExecuteExport = async () => {
-    if (!flowContainerRef.current) return;
+  const handleExecuteExport = useCallback(async () => {
+    if (!flowContainerRef.current || isExporting) return;
     setIsExporting(true);
     setExportError(null);
+    setExportSuccess(null);
 
     const options: DiagramExportOptions = {
       format,
@@ -90,19 +96,66 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
     try {
       if (format === "print") {
         await printDiagram(flowContainerRef.current, options, selectedTableIds);
+        setExportSuccess("Print dialog opened");
+        setTimeout(() => {
+          onClose();
+        }, 800);
       } else {
-        await downloadDiagramImage(flowContainerRef.current, options, selectedTableIds);
+        const savedPath = await downloadDiagramImage(flowContainerRef.current, options, selectedTableIds);
+        if (savedPath) {
+          const fileName = savedPath.split("/").pop() || savedPath;
+          setExportSuccess(`Saved: ${fileName}`);
+          setTimeout(() => {
+            onClose();
+          }, 1200);
+        } else {
+          // Native save dialog was cancelled by user
+          setIsExporting(false);
+        }
       }
-      onClose();
     } catch (err: any) {
       console.error("Export diagram failed:", err);
       setExportError(err?.message || "Failed to export diagram. Please try again.");
-    } finally {
       setIsExporting(false);
     }
-  };
+  }, [
+    flowContainerRef,
+    isExporting,
+    format,
+    paperSize,
+    orientation,
+    scope,
+    scale,
+    reportType,
+    isTransparent,
+    theme,
+    databaseName,
+    nodes,
+    edges,
+    selectedTableIds,
+    onClose,
+  ]);
 
-  const activeCount = scope === "selected" ? selectedTablesCount : totalTablesCount;
+  // Keyboard accessibility: Escape to close, Cmd+Enter / Ctrl+Enter to export
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      } else if (
+        (e.key === "Enter" && (e.metaKey || e.ctrlKey)) ||
+        (e.key === "Enter" && e.target === document.body)
+      ) {
+        e.preventDefault();
+        handleExecuteExport();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, handleExecuteExport, onClose]);
+
+  if (!isOpen) return null;
 
   return (
     <div className="erd-export-modal-backdrop" onClick={onClose}>
@@ -114,270 +167,365 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
               {format === "print" ? <Printer size={15} /> : <FileImage size={15} />}
             </div>
             <div>
-              <h3 className="modal-title">Export &amp; Print Schema Report</h3>
+              <h3 className="modal-title">Export &amp; Print Schema</h3>
               <p className="modal-sub font-mono">{databaseName}</p>
             </div>
           </div>
-          <button type="button" className="close-btn" onClick={onClose} title="Close">
+          <button type="button" className="close-btn" onClick={onClose} title="Close (Esc)">
             <X size={15} />
           </button>
         </div>
 
-        {/* Modal Body: 2-Column Balanced Layout */}
+        {/* Primary Format Tab Switcher */}
+        <div className="format-bar">
+          <button
+            type="button"
+            className={`format-tab-btn ${format === "print" ? "active" : ""}`}
+            onClick={() => {
+              setFormat("print");
+              setExportError(null);
+            }}
+          >
+            <Printer size={13} />
+            <span className="tab-text">Print / PDF Report</span>
+            <span className="tab-pill">Document</span>
+          </button>
+          <button
+            type="button"
+            className={`format-tab-btn ${format === "png" ? "active" : ""}`}
+            onClick={() => {
+              setFormat("png");
+              setExportError(null);
+            }}
+          >
+            <FileImage size={13} />
+            <span className="tab-text">PNG Image</span>
+            <span className="tab-pill">Lossless</span>
+          </button>
+          <button
+            type="button"
+            className={`format-tab-btn ${format === "jpg" ? "active" : ""}`}
+            onClick={() => {
+              setFormat("jpg");
+              setExportError(null);
+            }}
+          >
+            <FileImage size={13} />
+            <span className="tab-text">JPG Image</span>
+            <span className="tab-pill">Compact</span>
+          </button>
+        </div>
+
+        {/* Modal Body: Stable Height 2-Column Balanced Layout */}
         <div className="modal-body">
-          {/* Left: Options Settings */}
+          {/* Left Column: Contextual Settings */}
           <div className="settings-column">
-            {/* 1. Report Mode Selection */}
-            <div className="option-section">
-              <label className="section-label">Report Content</label>
-              <div className="report-types-grid">
-                <div
-                  className={`report-card ${reportType === "full_report" ? "is-selected" : ""}`}
-                  onClick={() => setReportType("full_report")}
-                >
-                  <div className="report-card-top">
-                    <BookOpen size={13} className="report-icon" />
-                    <span className="report-badge">Recommended</span>
-                  </div>
-                  <span className="report-card-title">2-Page Full Report</span>
-                  <span className="report-card-desc">Page 1: ERD &bull; Page 2: Dictionary</span>
-                </div>
+            {format === "print" ? (
+              /* Settings for Print / PDF Report */
+              <>
+                {/* 1. Report Mode Selection */}
+                <div className="option-section">
+                  <label className="section-label">Report Content</label>
+                  <div className="report-types-grid">
+                    <div
+                      className={`report-card ${reportType === "full_report" ? "is-selected" : ""}`}
+                      onClick={() => setReportType("full_report")}
+                    >
+                      <div className="report-card-top">
+                        <BookOpen size={13} className="report-icon" />
+                        <span className="report-badge">Recommended</span>
+                      </div>
+                      <span className="report-card-title">2-Page Full Report</span>
+                      <span className="report-card-desc">Page 1: ERD &bull; Page 2: Dictionary</span>
+                    </div>
 
-                <div
-                  className={`report-card ${reportType === "diagram_only" ? "is-selected" : ""}`}
-                  onClick={() => setReportType("diagram_only")}
-                >
-                  <div className="report-card-top">
-                    <FileImage size={13} className="report-icon" />
-                  </div>
-                  <span className="report-card-title">ERD Diagram Only</span>
-                  <span className="report-card-desc">Visual schema diagram</span>
-                </div>
+                    <div
+                      className={`report-card ${reportType === "diagram_only" ? "is-selected" : ""}`}
+                      onClick={() => setReportType("diagram_only")}
+                    >
+                      <div className="report-card-top">
+                        <FileImage size={13} className="report-icon" />
+                      </div>
+                      <span className="report-card-title">ERD Diagram Only</span>
+                      <span className="report-card-desc">Visual schema diagram</span>
+                    </div>
 
-                <div
-                  className={`report-card ${reportType === "dictionary_only" ? "is-selected" : ""}`}
-                  onClick={() => setReportType("dictionary_only")}
-                >
-                  <div className="report-card-top">
-                    <FileText size={13} className="report-icon" />
-                  </div>
-                  <span className="report-card-title">Data Dictionary Only</span>
-                  <span className="report-card-desc">Tables &amp; foreign keys</span>
-                </div>
-              </div>
-            </div>
-
-            {/* 2. Output Format */}
-            <div className="option-section">
-              <label className="section-label">Output Format</label>
-              <div className="segmented-control">
-                <button
-                  type="button"
-                  className={`segment-btn ${format === "print" ? "active" : ""}`}
-                  onClick={() => setFormat("print")}
-                >
-                  <Printer size={13} />
-                  <span>Print / PDF</span>
-                </button>
-                <button
-                  type="button"
-                  className={`segment-btn ${format === "png" ? "active" : ""}`}
-                  onClick={() => setFormat("png")}
-                >
-                  <FileImage size={13} />
-                  <span>PNG Image</span>
-                </button>
-                <button
-                  type="button"
-                  className={`segment-btn ${format === "jpg" ? "active" : ""}`}
-                  onClick={() => setFormat("jpg")}
-                >
-                  <FileImage size={13} />
-                  <span>JPG Image</span>
-                </button>
-              </div>
-            </div>
-
-            {/* 3. Paper Size & Orientation */}
-            <div className="form-grid-row">
-              <div className="option-section flex-1">
-                <label className="section-label">Paper Size</label>
-                <select
-                  value={paperSize}
-                  onChange={(e) => setPaperSize(e.target.value as PaperSize)}
-                  className="input-select font-mono"
-                >
-                  <option value="A4">A4 (210 × 297 mm)</option>
-                  <option value="A3">A3 (297 × 420 mm)</option>
-                  <option value="Letter">US Letter (8.5 × 11 in)</option>
-                  <option value="Fit">Fit to Content (Auto)</option>
-                </select>
-              </div>
-
-              <div className="option-section flex-1">
-                <label className="section-label">Orientation</label>
-                <div className="segmented-control">
-                  <button
-                    type="button"
-                    className={`segment-btn ${orientation === "landscape" ? "active" : ""}`}
-                    onClick={() => setOrientation("landscape")}
-                  >
-                    <Layout size={13} />
-                    <span>Landscape</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={`segment-btn ${orientation === "portrait" ? "active" : ""}`}
-                    onClick={() => setOrientation("portrait")}
-                  >
-                    <Layout size={13} className="rotate-90" />
-                    <span>Portrait</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* 4. Diagram Scope Selection */}
-            <div className="option-section">
-              <label className="section-label">Diagram Scope</label>
-              <div className="scope-cards-grid">
-                <div
-                  className={`scope-card ${scope === "all" ? "is-selected" : ""}`}
-                  onClick={() => setScope("all")}
-                >
-                  <div className="scope-radio">
-                    <div className="radio-dot" />
-                  </div>
-                  <div className="scope-info">
-                    <span className="scope-title">All Tables</span>
-                    <span className="scope-desc font-mono">{totalTablesCount} tables</span>
+                    <div
+                      className={`report-card ${reportType === "dictionary_only" ? "is-selected" : ""}`}
+                      onClick={() => setReportType("dictionary_only")}
+                    >
+                      <div className="report-card-top">
+                        <FileText size={13} className="report-icon" />
+                      </div>
+                      <span className="report-card-title">Data Dictionary Only</span>
+                      <span className="report-card-desc">Tables &amp; foreign keys</span>
+                    </div>
                   </div>
                 </div>
 
-                <div
-                  className={`scope-card ${scope === "selected" ? "is-selected" : ""} ${
-                    selectedTablesCount === 0 ? "is-disabled" : ""
-                  }`}
-                  onClick={() => {
-                    if (selectedTablesCount > 0) setScope("selected");
-                  }}
-                  title={
-                    selectedTablesCount === 0
-                      ? "Select tables on canvas (Click / Shift+Click) or sidebar (Cmd+Click)"
-                      : ""
-                  }
-                >
-                  <div className="scope-radio">
-                    <div className="radio-dot" />
+                {/* 2. Paper Size & Orientation */}
+                <div className="form-grid-row">
+                  <div className="option-section flex-1">
+                    <label className="section-label">Paper Size</label>
+                    <select
+                      value={paperSize}
+                      onChange={(e) => setPaperSize(e.target.value as PaperSize)}
+                      className="input-select font-mono"
+                    >
+                      <option value="A4">A4 (210 × 297 mm)</option>
+                      <option value="A3">A3 (297 × 420 mm)</option>
+                      <option value="Letter">US Letter (8.5 × 11 in)</option>
+                      <option value="Fit">Fit to Content (Auto)</option>
+                    </select>
                   </div>
-                  <div className="scope-info">
-                    <span className="scope-title">Selected Only</span>
-                    <span className="scope-desc font-mono">
-                      {selectedTablesCount > 0
-                        ? `${selectedTablesCount} selected`
-                        : "0 selected (Cmd+Click)"}
-                    </span>
+
+                  <div className="option-section flex-1">
+                    <label className="section-label">Orientation</label>
+                    <div className="segmented-control">
+                      <button
+                        type="button"
+                        className={`segment-btn ${orientation === "landscape" ? "active" : ""}`}
+                        onClick={() => setOrientation("landscape")}
+                      >
+                        <Layout size={13} />
+                        <span>Landscape</span>
+                      </button>
+                      <button
+                        type="button"
+                        className={`segment-btn ${orientation === "portrait" ? "active" : ""}`}
+                        onClick={() => setOrientation("portrait")}
+                      >
+                        <Layout size={13} className="rotate-90" />
+                        <span>Portrait</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
 
-                <div
-                  className={`scope-card ${scope === "viewport" ? "is-selected" : ""}`}
-                  onClick={() => setScope("viewport")}
-                >
-                  <div className="scope-radio">
-                    <div className="radio-dot" />
-                  </div>
-                  <div className="scope-info">
-                    <span className="scope-title">Current Viewport</span>
-                    <span className="scope-desc font-mono">Visible screen</span>
-                  </div>
-                </div>
-              </div>
-            </div>
+                {/* 3. Diagram Scope Selection */}
+                <div className="option-section">
+                  <label className="section-label">Diagram Scope</label>
+                  <div className="scope-cards-grid">
+                    <div
+                      className={`scope-card ${scope === "all" ? "is-selected" : ""}`}
+                      onClick={() => setScope("all")}
+                    >
+                      <div className="scope-radio">
+                        <div className="radio-dot" />
+                      </div>
+                      <div className="scope-info">
+                        <span className="scope-title">All Tables</span>
+                        <span className="scope-desc font-mono">{totalTablesCount} tables</span>
+                      </div>
+                    </div>
 
-            {/* 5. PNG Transparency Options */}
-            {format === "png" && (
-              <div className="option-section">
-                <label className="section-label">Background Style</label>
-                <div className="segmented-control">
-                  <button
-                    type="button"
-                    className={`segment-btn ${!isTransparent ? "active" : ""}`}
-                    onClick={() => setIsTransparent(false)}
-                  >
-                    <span>Solid Background</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={`segment-btn ${isTransparent ? "active" : ""}`}
-                    onClick={() => setIsTransparent(true)}
-                  >
-                    <span>Transparent (No Watermark)</span>
-                  </button>
+                    <div
+                      className={`scope-card ${scope === "selected" ? "is-selected" : ""} ${
+                        selectedTablesCount === 0 ? "is-disabled" : ""
+                      }`}
+                      onClick={() => {
+                        if (selectedTablesCount > 0) setScope("selected");
+                      }}
+                      title={
+                        selectedTablesCount === 0
+                          ? "Select tables on canvas (Click / Shift+Click) or sidebar"
+                          : ""
+                      }
+                    >
+                      <div className="scope-radio">
+                        <div className="radio-dot" />
+                      </div>
+                      <div className="scope-info">
+                        <span className="scope-title">Selected Only</span>
+                        <span className="scope-desc font-mono">
+                          {selectedTablesCount > 0
+                            ? `${selectedTablesCount} selected`
+                            : "0 selected"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div
+                      className={`scope-card ${scope === "viewport" ? "is-selected" : ""}`}
+                      onClick={() => setScope("viewport")}
+                    >
+                      <div className="scope-radio">
+                        <div className="radio-dot" />
+                      </div>
+                      <div className="scope-info">
+                        <span className="scope-title">Current Viewport</span>
+                        <span className="scope-desc font-mono">Visible area</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                {isTransparent && (
-                  <span className="transparent-hint font-mono">
-                    ✓ Clean asset: No background, grid, title banner, or watermark text.
-                  </span>
+              </>
+            ) : (
+              /* Settings for Image Export (PNG / JPG) */
+              <>
+                {/* 1. Diagram Scope Selection */}
+                <div className="option-section">
+                  <label className="section-label">Diagram Scope</label>
+                  <div className="scope-cards-grid">
+                    <div
+                      className={`scope-card ${scope === "all" ? "is-selected" : ""}`}
+                      onClick={() => setScope("all")}
+                    >
+                      <div className="scope-radio">
+                        <div className="radio-dot" />
+                      </div>
+                      <div className="scope-info">
+                        <span className="scope-title">All Tables</span>
+                        <span className="scope-desc font-mono">{totalTablesCount} tables</span>
+                      </div>
+                    </div>
+
+                    <div
+                      className={`scope-card ${scope === "selected" ? "is-selected" : ""} ${
+                        selectedTablesCount === 0 ? "is-disabled" : ""
+                      }`}
+                      onClick={() => {
+                        if (selectedTablesCount > 0) setScope("selected");
+                      }}
+                      title={
+                        selectedTablesCount === 0
+                          ? "Select tables on canvas (Click / Shift+Click) or sidebar"
+                          : ""
+                      }
+                    >
+                      <div className="scope-radio">
+                        <div className="radio-dot" />
+                      </div>
+                      <div className="scope-info">
+                        <span className="scope-title">Selected Only</span>
+                        <span className="scope-desc font-mono">
+                          {selectedTablesCount > 0
+                            ? `${selectedTablesCount} selected`
+                            : "0 selected"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div
+                      className={`scope-card ${scope === "viewport" ? "is-selected" : ""}`}
+                      onClick={() => setScope("viewport")}
+                    >
+                      <div className="scope-radio">
+                        <div className="radio-dot" />
+                      </div>
+                      <div className="scope-info">
+                        <span className="scope-title">Current Viewport</span>
+                        <span className="scope-desc font-mono">Visible area</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. Resolution Scale */}
+                <div className="option-section">
+                  <label className="section-label">Resolution Scale</label>
+                  <div className="segmented-control">
+                    <button
+                      type="button"
+                      className={`segment-btn ${scale === 1 ? "active" : ""}`}
+                      onClick={() => setScale(1)}
+                    >
+                      <span>1x (96 DPI)</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`segment-btn ${scale === 2 ? "active" : ""}`}
+                      onClick={() => setScale(2)}
+                    >
+                      <Sparkles size={11} />
+                      <span>2x (High DPI)</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`segment-btn ${scale === 3 ? "active" : ""}`}
+                      onClick={() => setScale(3)}
+                    >
+                      <span>3x (Ultra Crisp)</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* 3. Background Style (PNG Only) */}
+                {format === "png" ? (
+                  <div className="option-section">
+                    <label className="section-label">Background Style</label>
+                    <div className="segmented-control">
+                      <button
+                        type="button"
+                        className={`segment-btn ${!isTransparent ? "active" : ""}`}
+                        onClick={() => setIsTransparent(false)}
+                      >
+                        <span>Solid Theme</span>
+                      </button>
+                      <button
+                        type="button"
+                        className={`segment-btn ${isTransparent ? "active" : ""}`}
+                        onClick={() => setIsTransparent(true)}
+                      >
+                        <Sparkles size={11} />
+                        <span>Transparent Asset</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="option-section">
+                    <label className="section-label">Quality &amp; Compression</label>
+                    <div className="info-banner">
+                      <Info size={13} className="info-icon" />
+                      <span>JPG uses 92% high-quality compression with solid canvas background.</span>
+                    </div>
+                  </div>
                 )}
-              </div>
-            )}
 
-            {/* 6. Resolution Scale */}
-            {format !== "print" && (
-              <div className="option-section">
-                <label className="section-label">Resolution Scale</label>
-                <div className="segmented-control">
-                  <button
-                    type="button"
-                    className={`segment-btn ${scale === 1 ? "active" : ""}`}
-                    onClick={() => setScale(1)}
-                  >
-                    <span>1x (96 DPI)</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={`segment-btn ${scale === 2 ? "active" : ""}`}
-                    onClick={() => setScale(2)}
-                  >
-                    <span>2x (High DPI)</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={`segment-btn ${scale === 3 ? "active" : ""}`}
-                    onClick={() => setScale(3)}
-                  >
-                    <span>3x (Ultra Crisp)</span>
-                  </button>
+                {/* 4. Asset Guide Card */}
+                <div className="asset-tip-card font-mono">
+                  {format === "png" && isTransparent ? (
+                    <span>
+                      ✓ Clean transparent asset: Background grid, banner, and watermarks removed. Perfect for slides and docs.
+                    </span>
+                  ) : (
+                    <span>
+                      ✓ Full canvas render: Includes theme colors ({theme} mode), relationship connectors, and table schema layout.
+                    </span>
+                  )}
                 </div>
-              </div>
+              </>
             )}
 
             {exportError && <div className="error-banner font-mono">{exportError}</div>}
           </div>
 
-          {/* Right: Paper Visual Live Preview */}
+          {/* Right Column: Live Responsive Visual Preview */}
           <div className="preview-column">
-            <label className="section-label">Report Preview</label>
+            <div className="preview-header">
+              <label className="section-label">Live Preview</label>
+              <span className="preview-badge font-mono">
+                {format === "print"
+                  ? `${paperSize} • ${orientation.toUpperCase()}`
+                  : `${format.toUpperCase()} • ${scale}x`}
+              </span>
+            </div>
+
             <div className="paper-preview-canvas">
-              {reportType === "full_report" ? (
+              {format === "print" && reportType === "full_report" ? (
                 <div className="multi-page-preview-wrapper">
-                  {/* Page 1 Preview */}
+                  {/* Page 1: ERD Diagram */}
                   <div
-                    className={`paper-sheet page-1-preview ${
-                      isTransparent && format === "png" ? "is-transparent-sheet" : ""
-                    }`}
+                    className="paper-sheet page-1-preview"
                     style={{
                       aspectRatio: `${previewRatio}`,
-                      maxHeight: orientation === "portrait" ? "125px" : "105px",
+                      maxHeight: orientation === "portrait" ? "120px" : "98px",
                     }}
                   >
-                    {!isTransparent && (
-                      <div className="preview-header-line">
-                        <div className="preview-dot" />
-                        <div className="preview-line" />
-                      </div>
-                    )}
+                    <div className="preview-header-line">
+                      <div className="preview-dot" />
+                      <div className="preview-line" />
+                    </div>
                     <div className="paper-inner-diagram">
                       <div className="diagram-sketch-box" />
                       <div className="diagram-sketch-box" />
@@ -386,12 +534,12 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
                     <div className="paper-label-pill font-mono">Page 1 &bull; ERD Diagram</div>
                   </div>
 
-                  {/* Page 2 Preview */}
+                  {/* Page 2: Data Dictionary */}
                   <div
                     className="paper-sheet page-2-preview"
                     style={{
                       aspectRatio: `${previewRatio}`,
-                      maxHeight: orientation === "portrait" ? "125px" : "105px",
+                      maxHeight: orientation === "portrait" ? "120px" : "98px",
                     }}
                   >
                     <div className="preview-header-line">
@@ -406,23 +554,19 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
                     <div className="paper-label-pill font-mono">Page 2 &bull; Data Dictionary</div>
                   </div>
                 </div>
-              ) : (
+              ) : format === "print" ? (
                 <div
-                  className={`paper-sheet ${
-                    isTransparent && format === "png" ? "is-transparent-sheet" : ""
-                  }`}
+                  className="paper-sheet single-page-preview"
                   style={{
                     aspectRatio: `${previewRatio}`,
-                    maxHeight: orientation === "portrait" ? "210px" : "175px",
-                    maxWidth: orientation === "landscape" ? "240px" : "170px",
+                    maxHeight: orientation === "portrait" ? "210px" : "165px",
+                    maxWidth: orientation === "landscape" ? "230px" : "160px",
                   }}
                 >
-                  {!isTransparent && (
-                    <div className="preview-header-line">
-                      <div className="preview-dot" />
-                      <div className="preview-line" />
-                    </div>
-                  )}
+                  <div className="preview-header-line">
+                    <div className="preview-dot" />
+                    <div className="preview-line" />
+                  </div>
                   {reportType === "diagram_only" ? (
                     <div className="paper-inner-diagram">
                       <div className="diagram-sketch-box" />
@@ -437,31 +581,85 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
                     </div>
                   )}
                   <div className="paper-label-pill font-mono">
+                    {reportType === "diagram_only" ? "ERD DIAGRAM" : "DATA DICTIONARY"}
+                  </div>
+                </div>
+              ) : (
+                /* Image Export Live Preview (PNG / JPG) */
+                <div
+                  className={`paper-sheet image-preview-sheet ${
+                    isTransparent && format === "png" ? "is-transparent-sheet" : theme === "dark" ? "is-dark-sheet" : "is-light-sheet"
+                  }`}
+                  style={{
+                    aspectRatio: "1.45",
+                    maxHeight: "170px",
+                    maxWidth: "230px",
+                  }}
+                >
+                  <div className="paper-inner-diagram">
+                    <div className="diagram-sketch-box-themed" />
+                    <div className="diagram-sketch-box-themed" />
+                    <div className="diagram-sketch-box-themed" />
+                  </div>
+                  <div className="paper-label-pill font-mono">
                     {isTransparent && format === "png"
                       ? "TRANSPARENT PNG"
-                      : `${paperSize} • ${orientation.toUpperCase()}`}
+                      : `${format.toUpperCase()} IMAGE (${scale}x)`}
                   </div>
                 </div>
               )}
             </div>
+
+            {/* Live Specifications Footer in Preview */}
+            <div className="preview-spec-card font-mono">
+              <div className="spec-item">
+                <span className="spec-key">DATABASE</span>
+                <span className="spec-val" title={databaseName}>{databaseName}</span>
+              </div>
+              <div className="spec-item">
+                <span className="spec-key">SCOPE</span>
+                <span className="spec-val">
+                  <Layers size={10} />
+                  {activeCount} {activeCount === 1 ? "table" : "tables"}
+                </span>
+              </div>
+              <div className="spec-item">
+                <span className="spec-key">OUTPUT</span>
+                <span className="spec-val">
+                  {format === "print"
+                    ? `${paperSize} ${orientation}`
+                    : `${format.toUpperCase()} @ ${scale}x scale`}
+                </span>
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Footer */}
+        {/* Modal Footer */}
         <div className="modal-footer">
-          <button type="button" className="btn btn-secondary btn-sm" onClick={onClose} disabled={isExporting}>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={onClose}
+            disabled={isExporting}
+          >
             Cancel
           </button>
           <button
             type="button"
-            className="btn btn-primary btn-sm export-submit-btn"
+            className={`btn btn-primary btn-sm export-submit-btn ${exportSuccess ? "btn-success" : ""}`}
             onClick={handleExecuteExport}
             disabled={isExporting || (scope === "selected" && selectedTablesCount === 0)}
           >
             {isExporting ? (
               <>
                 <RefreshCw size={13} className="spin" />
-                <span>Generating Report...</span>
+                <span>{format === "print" ? "Preparing Print Sheet..." : "Saving File..."}</span>
+              </>
+            ) : exportSuccess ? (
+              <>
+                <CheckCircle2 size={13} />
+                <span>{exportSuccess}</span>
               </>
             ) : format === "print" ? (
               <>
@@ -471,7 +669,7 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
             ) : (
               <>
                 <Download size={13} />
-                <span>Download {format.toUpperCase()} ({activeCount} tables)</span>
+                <span>Save {format.toUpperCase()} ({activeCount} tables)</span>
               </>
             )}
           </button>
@@ -495,7 +693,7 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
           background: var(--bg-card);
           border: 1px solid var(--border-light);
           border-radius: var(--radius-lg);
-          width: 800px;
+          width: 820px;
           max-width: 95vw;
           box-shadow: var(--shadow-popup);
           display: flex;
@@ -561,11 +759,72 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
           color: var(--text-main);
         }
 
+        /* Format Tabs Bar */
+        .format-bar {
+          display: flex;
+          background: var(--bg-tertiary);
+          border-bottom: 1px solid var(--border-light);
+          padding: 4px 14px;
+          gap: 6px;
+        }
+
+        .format-tab-btn {
+          flex: 1;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          padding: 7px 12px;
+          background: transparent;
+          border: 1px solid transparent;
+          border-radius: var(--radius-sm);
+          color: var(--text-muted);
+          cursor: pointer;
+          font-size: 11.5px;
+          font-weight: 500;
+          transition: all 0.14s ease;
+        }
+
+        .format-tab-btn:hover {
+          color: var(--text-main);
+          background: var(--bg-hover);
+        }
+
+        .format-tab-btn.active {
+          background: var(--bg-card);
+          color: var(--accent-blue);
+          border-color: var(--border-light);
+          font-weight: 600;
+          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+        }
+
+        .tab-text {
+          white-space: nowrap;
+        }
+
+        .tab-pill {
+          font-size: 8px;
+          font-weight: 600;
+          text-transform: uppercase;
+          letter-spacing: 0.4px;
+          padding: 1.5px 5px;
+          border-radius: 4px;
+          background: rgba(0, 0, 0, 0.06);
+          color: var(--text-muted);
+        }
+
+        .format-tab-btn.active .tab-pill {
+          background: rgba(59, 130, 246, 0.12);
+          color: var(--accent-blue);
+        }
+
+        /* Modal Body: Stable Height Layout */
         .modal-body {
           display: grid;
-          grid-template-columns: 1fr 260px;
+          grid-template-columns: 1fr 270px;
           padding: 16px 18px;
           gap: 18px;
+          min-height: 470px;
           max-height: 72vh;
           overflow-y: auto;
         }
@@ -574,6 +833,7 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
           display: flex;
           flex-direction: column;
           gap: 12px;
+          min-height: 440px;
         }
 
         .option-section {
@@ -583,11 +843,11 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
         }
 
         .section-label {
-          font-size: 10.5px;
-          font-weight: 600;
+          font-size: 10px;
+          font-weight: 700;
           color: var(--text-sub);
           text-transform: uppercase;
-          letter-spacing: 0.5px;
+          letter-spacing: 0.6px;
         }
 
         .report-types-grid {
@@ -704,6 +964,7 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
           border-radius: var(--radius-sm);
           outline: none;
           cursor: pointer;
+          width: 100%;
         }
 
         .scope-cards-grid {
@@ -735,7 +996,7 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
         }
 
         .scope-card.is-disabled {
-          opacity: 0.5;
+          opacity: 0.45;
           cursor: not-allowed;
         }
 
@@ -781,13 +1042,32 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
           color: var(--text-muted);
         }
 
-        .transparent-hint {
-          font-size: 9.5px;
-          color: var(--accent-blue);
-          background: rgba(59, 130, 246, 0.08);
-          padding: 4px 8px;
+        .info-banner {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          background: rgba(59, 130, 246, 0.06);
+          border: 1px solid rgba(59, 130, 246, 0.18);
           border-radius: var(--radius-xs);
-          border: 1px solid rgba(59, 130, 246, 0.2);
+          padding: 6px 9px;
+          font-size: 10.5px;
+          color: var(--text-sub);
+        }
+
+        .info-icon {
+          color: var(--accent-blue);
+          flex-shrink: 0;
+        }
+
+        .asset-tip-card {
+          margin-top: auto;
+          background: rgba(59, 130, 246, 0.06);
+          border: 1px solid rgba(59, 130, 246, 0.16);
+          padding: 8px 10px;
+          border-radius: var(--radius-sm);
+          font-size: 10px;
+          color: var(--accent-blue);
+          line-height: 1.4;
         }
 
         .error-banner {
@@ -804,6 +1084,22 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
           display: flex;
           flex-direction: column;
           gap: 8px;
+          min-height: 440px;
+        }
+
+        .preview-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+        }
+
+        .preview-badge {
+          font-size: 8.5px;
+          font-weight: 700;
+          color: var(--accent-blue);
+          background: rgba(59, 130, 246, 0.1);
+          padding: 2px 6px;
+          border-radius: 4px;
         }
 
         .paper-preview-canvas {
@@ -816,6 +1112,8 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
           flex: 1;
           min-height: 220px;
           padding: 12px;
+          position: relative;
+          overflow: hidden;
         }
 
         .multi-page-preview-wrapper {
@@ -839,8 +1137,18 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
           transition: all 0.2s ease;
         }
 
+        .image-preview-sheet.is-dark-sheet {
+          background: #14171f;
+          border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+
+        .image-preview-sheet.is-light-sheet {
+          background: #f8fafc;
+          border: 1px solid #cbd5e1;
+        }
+
         .paper-sheet.is-transparent-sheet {
-          background: repeating-conic-gradient(#e2e8f0 0% 25%, #ffffff 0% 50%) 50% / 14px 14px !important;
+          background: repeating-conic-gradient(#cbd5e1 0% 25%, #f1f5f9 0% 50%) 50% / 14px 14px !important;
           box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
         }
 
@@ -873,6 +1181,7 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
           align-items: center;
           justify-content: center;
           opacity: 0.85;
+          padding: 6px 0;
         }
 
         .diagram-sketch-box {
@@ -881,6 +1190,14 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
           border: 1px solid #94a3b8;
           border-radius: 2px;
           background: #f8fafc;
+        }
+
+        .diagram-sketch-box-themed {
+          width: 38px;
+          height: 22px;
+          border: 1px solid var(--accent-blue);
+          border-radius: 3px;
+          background: rgba(59, 130, 246, 0.12);
         }
 
         .dictionary-sketch-lines {
@@ -908,6 +1225,48 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
           font-weight: 600;
         }
 
+        .is-dark-sheet .paper-label-pill {
+          background: rgba(255, 255, 255, 0.12);
+          color: #cbd5e1;
+        }
+
+        /* Live Specifications Footer in Preview */
+        .preview-spec-card {
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-light);
+          border-radius: var(--radius-sm);
+          padding: 8px 10px;
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+
+        .spec-item {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          font-size: 9.5px;
+        }
+
+        .spec-key {
+          color: var(--text-muted);
+          font-weight: 600;
+          letter-spacing: 0.3px;
+        }
+
+        .spec-val {
+          color: var(--text-main);
+          font-weight: 600;
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          max-width: 140px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        /* Footer */
         .modal-footer {
           padding: 10px 16px;
           border-top: 1px solid var(--border-light);
@@ -922,9 +1281,16 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
           display: flex;
           align-items: center;
           gap: 6px;
-          padding: 6px 12px;
+          padding: 6px 14px;
           font-weight: 600;
           font-size: 11.5px;
+          transition: all 0.15s ease;
+        }
+
+        .btn-success {
+          background: #10b981 !important;
+          border-color: #10b981 !important;
+          color: #ffffff !important;
         }
 
         @keyframes fadeIn {
