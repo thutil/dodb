@@ -71,7 +71,7 @@ import {
 } from "../types";
 import { apiClient } from "../utils/apiClient";
 import { buildVisualSql, VisualTableSelection, findSmartJoinMatch, parseSqlToVisual } from "../utils/visualSqlBuilder";
-import { quoteIdent, quoteTableIdent } from "../utils/ddlBuilder";
+import { quoteIdent, quoteTableIdent, sqlLiteral, toDialect } from "../utils/ddlBuilder";
 import { isGeometryColumn } from "../utils/gisUtils";
 import { extractColumnMappingsFromSql } from "../utils/sqlUtils";
 import { setSharedSql, useSharedSql } from "../utils/queryWorkspaceStore";
@@ -2029,12 +2029,7 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
     setCommitMessage(null);
 
     try {
-      const dialect: DBType =
-        activeProfile?.type === "mariadb"
-          ? "mariadb"
-          : activeProfile?.type === "sqlite"
-          ? "sqlite"
-          : "postgres";
+      const dialect: DBType = toDialect(activeProfile?.type);
 
       const baseTable = canvasTableNames[0] || tables[0] || "";
       const updateStatements: string[] = [];
@@ -2122,7 +2117,7 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
                 } else if (typeof pkVal === "boolean") {
                   whereConditions.push(`${qCol} = ${pkVal ? "TRUE" : "FALSE"}`);
                 } else {
-                  whereConditions.push(`${qCol} = '${String(pkVal).replace(/'/g, "''")}'`);
+                  whereConditions.push(`${qCol} = ${sqlLiteral(pkVal, dialect)}`);
                 }
               }
             }
@@ -2153,7 +2148,7 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
                 } else if (typeof v === "boolean") {
                   whereConditions.push(`${qCol} = ${v ? "TRUE" : "FALSE"}`);
                 } else {
-                  whereConditions.push(`${qCol} = '${String(v).replace(/'/g, "''")}'`);
+                  whereConditions.push(`${qCol} = ${sqlLiteral(v, dialect)}`);
                 }
               });
             } else if (origRow["id"] !== undefined && origRow["id"] !== null) {
@@ -2181,7 +2176,7 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
             if (typeof v === "number" || (isNumeric && !isNaN(Number(v)) && String(v).trim() !== "")) {
               return `${qCol} = ${Number(v)}`;
             }
-            return `${qCol} = '${String(v).replace(/'/g, "''")}'`;
+            return `${qCol} = ${sqlLiteral(v, dialect)}`;
           });
 
           const qTable = quoteTableIdent(tblName, dialect);
@@ -2208,7 +2203,7 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
               if (typeof pkVal === "number") {
                 whereConditions.push(`${qCol} = ${pkVal}`);
               } else {
-                whereConditions.push(`${qCol} = '${String(pkVal).replace(/'/g, "''")}'`);
+                whereConditions.push(`${qCol} = ${sqlLiteral(pkVal, dialect)}`);
               }
             }
           }

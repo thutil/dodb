@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { ColumnInfo, ConnectionProfile } from "../types";
 import { apiClient } from "../utils/apiClient";
+import { toDialect } from "../utils/ddlBuilder";
 import {
   ColumnMapping,
   ConflictStrategy,
@@ -420,7 +421,17 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   const dialectMismatch = useMemo(() => {
     if (preview?.kind !== "sql" || !activeProfile) return null;
     const hints = Array.isArray(preview.dialectHints) ? preview.dialectHints : [];
-    if (hints.length === 0 || hints.includes(activeProfile.type)) return null;
+    // Hints speak the dump's vocabulary ("mysql"), profiles speak ours
+    // ("mariadb"), so both sides are normalised before comparing. The text
+    // shown to the user stays as the dump named it.
+    if (hints.length === 0) return null;
+    const target = toDialect(activeProfile.type);
+    // toDialect falls back to Postgres for anything it does not know, so an
+    // unfamiliar hint must not be allowed to silence the warning.
+    const known = ["mysql", "mariadb", "postgres", "postgresql", "sqlite", "sqlite3"];
+    if (hints.some((h) => known.includes(h.trim().toLowerCase()) && toDialect(h) === target)) {
+      return null;
+    }
     return hints.join(", ");
   }, [preview, activeProfile]);
 

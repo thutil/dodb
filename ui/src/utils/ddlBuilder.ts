@@ -56,6 +56,29 @@ export interface TableDraft {
 }
 
 // ---------------------------------------------------------------------------
+// Dialect
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalise a connection/profile type to the dialect the builders speak.
+ * "mysql" and "mariadb" share one dialect; anything unrecognised is treated as
+ * Postgres, which is what every call site already defaulted to.
+ */
+export function toDialect(dbType?: string | null): DBType {
+  const t = (dbType || "").trim().toLowerCase();
+  if (t === "mysql" || t === "mariadb") return "mariadb";
+  if (t === "sqlite" || t === "sqlite3") return "sqlite";
+  return "postgres";
+}
+
+/** Human-readable dialect name, for labels and dump headers. */
+export const DIALECT_LABEL: Record<DBType, string> = {
+  postgres: "PostgreSQL",
+  mariadb: "MySQL / MariaDB",
+  sqlite: "SQLite",
+};
+
+// ---------------------------------------------------------------------------
 // Identifier quoting
 // ---------------------------------------------------------------------------
 
@@ -105,6 +128,24 @@ const KEYWORD_DEFAULTS = [
   "CURRENT_USER",
   "LOCALTIMESTAMP",
 ];
+
+/**
+ * A runtime value as a SQL literal, ready to paste into a statement.
+ *
+ * MySQL/MariaDB read a backslash inside a string as an escape character unless
+ * NO_BACKSLASH_ESCAPES is set, so it has to be doubled there; Postgres and
+ * SQLite take it literally and must be left alone.
+ */
+export function sqlLiteral(val: unknown, d: DBType): string {
+  if (val === null || val === undefined) return "NULL";
+  if (typeof val === "number") return Number.isFinite(val) ? String(val) : "NULL";
+  if (typeof val === "boolean") {
+    return d === "postgres" ? String(val) : val ? "1" : "0";
+  }
+  const raw = typeof val === "object" ? JSON.stringify(val) : String(val);
+  const escaped = d === "mariadb" ? raw.split("\\").join("\\\\") : raw;
+  return "'" + escaped.split("'").join("''") + "'";
+}
 
 /**
  * Render a user-entered DEFAULT. Numbers, keywords, function calls, casts and
@@ -170,6 +211,11 @@ function fkClause(fk: ForeignKeyDraft, d: DBType): string {
   if (fk.onDelete && fk.onDelete !== "NO ACTION") out += " ON DELETE " + fk.onDelete;
   if (fk.onUpdate && fk.onUpdate !== "NO ACTION") out += " ON UPDATE " + fk.onUpdate;
   return out;
+}
+
+/** Attach one foreign key to an existing table. */
+export function buildAddForeignKey(table: string, fk: ForeignKeyDraft, d: DBType): string {
+  return "ALTER TABLE " + quoteTableIdent(table, d) + " ADD " + fkClause(fk, d) + ";";
 }
 
 function createIndexStmt(idx: IndexDraft, table: string, d: DBType): string {
@@ -416,8 +462,8 @@ export function diffTable(original: TableDraft, draft: TableDraft, d: DBType): s
 // Destructive one-liners
 // ---------------------------------------------------------------------------
 
-export function buildDropTable(table: string, d: DBType, cascade = false): string {
-  const base = "DROP TABLE " + quoteTableIdent(table, d);
+export function buildDropTable(table: string, d: DBType, cascade = false, ifExists = false): string {
+  const base = "DROP TABLE " + (ifExists ? "IF EXISTS " : "") + quoteTableIdent(table, d);
   if (cascade && d !== "sqlite") {
     return base + " CASCADE;";
   }

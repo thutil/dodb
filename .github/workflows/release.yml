@@ -335,7 +335,7 @@ jobs:
             # replace it. Flip to true only once the in-app updater ships:
             # claiming it now leaves \`brew upgrade --cask dodb\` users stale.
             auto_updates false
-            depends_on macos: ">= :big_sur"
+            depends_on macos: ">= :sonoma"
 
             app "dodb.app"
 

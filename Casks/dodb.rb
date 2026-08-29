@@ -17,7 +17,7 @@ cask "dodb" do
   # left `brew upgrade --cask dodb` users on an old build indefinitely. Flip it
   # back to true only once the in-app updater actually ships.
   auto_updates false
-  depends_on macos: ">= :big_sur"
+  depends_on macos: ">= :sonoma"
 
   app "dodb.app"
 

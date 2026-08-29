@@ -33,6 +33,7 @@ import {
 import { ConnectionProfile } from "../types";
 import { apiClient } from "../utils/apiClient";
 import { dumpManager, DumpProgress } from "../utils/dumpManager";
+import { DIALECT_LABEL, toDialect } from "../utils/ddlBuilder";
 
 interface AdminPanelProps {
   activeProfile: ConnectionProfile | null;
@@ -230,6 +231,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const handleDeselectAllTables = () => {
     setDumpSelectedTables([]);
   };
+
+  // A dump is written in the connected database's dialect and only restores
+  // cleanly into that one, so the panel says which flavour it will produce.
+  const dumpFlavour = DIALECT_LABEL[toDialect(activeProfile?.type)];
 
   const handleStartDump = async () => {
     if (!activeProfile || dumpSelectedTables.length === 0) return;
@@ -1002,7 +1007,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 {/* Format & Batch Size */}
                 <div className="dump-dual-row">
                   <div className="dump-field-group">
-                    <label className="dump-field-label">File Format</label>
+                    <label className="dump-field-label">
+                      File Format
+                      {dumpFormat === "sql" && (
+                        <span style={{ opacity: 0.6, fontWeight: 400 }}> · {dumpFlavour}</span>
+                      )}
+                    </label>
                     <div className="dump-format-toggle">
                       <button
                         type="button"

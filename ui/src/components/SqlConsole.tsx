@@ -24,7 +24,7 @@ import { GisMapViewer, GisFeatureRecord } from "./GisMapViewer";
 import { splitSqlStatements, getStatementAtLine, stripCommentsAndTrim, extractTableFromSql, extractColumnMappingsFromSql } from "../utils/sqlUtils";
 import { apiClient } from "../utils/apiClient";
 import { getSharedSql, setSharedSql, useSharedSql } from "../utils/queryWorkspaceStore";
-import { quoteIdent, quoteTableIdent } from "../utils/ddlBuilder";
+import { quoteIdent, quoteTableIdent, sqlLiteral, toDialect } from "../utils/ddlBuilder";
 import {
   DatabaseSchemaInfo,
   SchemaRelation,
@@ -645,12 +645,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
     });
   };
 
-  const dialect: DBType =
-    activeProfile?.type === "mariadb"
-      ? "mariadb"
-      : activeProfile?.type === "sqlite"
-        ? "sqlite"
-        : "postgres";
+  const dialect: DBType = toDialect(activeProfile?.type);
 
   // Helper to quote table name or schema.table correctly for SQL
   const quoteTableIdentifier = useCallback(
@@ -752,8 +747,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
         const qCol = quoteIdent(realCol, dialect);
         const v = orig[colKey];
         if (v === null || v === undefined) whereParts.push(`${qCol} IS NULL`);
-        else if (typeof v === "number" || typeof v === "boolean") whereParts.push(`${qCol} = ${v}`);
-        else whereParts.push(`${qCol} = '${String(v).replace(/'/g, "''")}'`);
+        else whereParts.push(`${qCol} = ${sqlLiteral(v, dialect)}`);
       });
       if (whereParts.length > 0) {
         statements.push(`DELETE FROM ${tbl} WHERE ${whereParts.join(" AND ")};`);
@@ -777,9 +771,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
         const realCol = mapping?.realColumn || colKey;
         const qCol = quoteIdent(realCol, dialect);
         const v = edits[colKey];
-        if (v === null || v === undefined) setParts.push(`${qCol} = NULL`);
-        else if (typeof v === "number" || typeof v === "boolean") setParts.push(`${qCol} = ${v}`);
-        else setParts.push(`${qCol} = '${String(v).replace(/'/g, "''")}'`);
+        setParts.push(`${qCol} = ${sqlLiteral(v, dialect)}`);
       });
 
       if (setParts.length === 0) return;
@@ -792,8 +784,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
         const qCol = quoteIdent(realCol, dialect);
         const v = orig[colKey];
         if (v === null || v === undefined) whereParts.push(`${qCol} IS NULL`);
-        else if (typeof v === "number" || typeof v === "boolean") whereParts.push(`${qCol} = ${v}`);
-        else whereParts.push(`${qCol} = '${String(v).replace(/'/g, "''")}'`);
+        else whereParts.push(`${qCol} = ${sqlLiteral(v, dialect)}`);
       });
 
       if (whereParts.length === 0) {
@@ -2358,12 +2349,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
               const tbl = quoteTableIdentifier(rawTbl);
               const cols = Object.keys(contextMenu.row).filter((k) => contextMenu.row[k] !== undefined);
               const colList = cols.map((c) => quoteIdent(c, dialect)).join(", ");
-              const valList = cols.map((c) => {
-                const v = contextMenu.row[c];
-                if (v === null) return "NULL";
-                if (typeof v === "number" || typeof v === "boolean") return String(v);
-                return `'${String(v).replace(/'/g, "''")}'`;
-              }).join(", ");
+              const valList = cols.map((c) => sqlLiteral(contextMenu.row[c], dialect)).join(", ");
               const sql = `INSERT INTO ${tbl} (${colList}) VALUES (${valList});`;
               navigator.clipboard.writeText(sql);
               setContextMenu(null);
@@ -2521,12 +2507,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                     const tbl = quoteTableIdentifier(rawTbl);
                     const cols = Object.keys(inspectRowModal.row).filter((k) => inspectRowModal.row[k] !== undefined);
                     const colList = cols.map((c) => quoteIdent(c, dialect)).join(", ");
-                    const valList = cols.map((c) => {
-                      const v = inspectRowModal.row[c];
-                      if (v === null) return "NULL";
-                      if (typeof v === "number" || typeof v === "boolean") return String(v);
-                      return `'${String(v).replace(/'/g, "''")}'`;
-                    }).join(", ");
+                    const valList = cols.map((c) => sqlLiteral(inspectRowModal.row[c], dialect)).join(", ");
                     const sql = `INSERT INTO ${tbl} (${colList}) VALUES (${valList});`;
                     navigator.clipboard.writeText(sql);
                   }}

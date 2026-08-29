@@ -10,7 +10,7 @@ import {
   VisualAggregateItem,
   AggregateFunction,
 } from "../types";
-import { quoteTableIdent } from "./ddlBuilder";
+import { quoteTableIdent, sqlLiteral } from "./ddlBuilder";
 
 export interface VisualTableSelection {
   tableName: string;
@@ -37,10 +37,6 @@ export function quoteIdent(ident: string, dbType: DBType = "mariadb"): string {
     return `\`${ident.replace(/`/g, "``")}\``;
   }
   return `"${ident.replace(/"/g, '""')}"`;
-}
-
-export function escapeSqlString(val: string): string {
-  return val.replace(/'/g, "''");
 }
 
 export function buildVisualSql({
@@ -189,15 +185,15 @@ export function buildVisualSql({
       } else if (f.operator === "IN") {
         const valStr = f.value
           .split(",")
-          .map((v) => `'${escapeSqlString(v.trim())}'`)
+          .map((v) => sqlLiteral(v.trim(), dbType))
           .join(", ");
         cond = `${qCol} IN (${valStr})`;
       } else if (f.operator === "LIKE" || f.operator === "NOT LIKE") {
-        cond = `${qCol} ${f.operator} '${escapeSqlString(f.value)}'`;
+        cond = `${qCol} ${f.operator} ${sqlLiteral(f.value, dbType)}`;
       } else {
         const isNum =
           f.value !== "" && !isNaN(Number(f.value)) && !f.value.includes(" ");
-        const formattedVal = isNum ? f.value : `'${escapeSqlString(f.value)}'`;
+        const formattedVal = isNum ? f.value : sqlLiteral(f.value, dbType);
         cond = `${qCol} ${f.operator} ${formattedVal}`;
       }
 
@@ -234,7 +230,7 @@ export function buildVisualSql({
         ? (h.func === "COUNT_DISTINCT" ? `COUNT(DISTINCT ${qCol})` : `${h.func}(${qCol})`)
         : qCol;
       const isNum = h.value !== "" && !isNaN(Number(h.value)) && !h.value.includes(" ");
-      const formattedVal = isNum ? h.value : `'${escapeSqlString(h.value)}'`;
+      const formattedVal = isNum ? h.value : sqlLiteral(h.value, dbType);
       const cond = `${aggExpr} ${h.operator} ${formattedVal}`;
       if (idx === 0) return cond;
       return `${h.logic || "AND"} ${cond}`;

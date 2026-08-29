@@ -20,7 +20,7 @@ import {
   PanelLeftOpen,
 } from "lucide-react";
 import { DBType } from "../types";
-import { quoteTableIdent } from "../utils/ddlBuilder";
+import { quoteTableIdent, toDialect } from "../utils/ddlBuilder";
 import { Language, t } from "../utils/i18n";
 
 interface SidebarExplorerProps {
@@ -130,7 +130,7 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
 
   // Structure editing is unavailable on SQLite (its ALTER TABLE cannot express it).
   const isSqlite = dbType === "sqlite";
-  const dialect: DBType = dbType === "mariadb" || dbType === "mysql" ? "mariadb" : isSqlite ? "sqlite" : "postgres";
+  const dialect: DBType = toDialect(dbType);
   const quoteIdent = (name: string) => quoteTableIdent(name, dialect);
 
   const filteredTables = tables.filter((table) =>

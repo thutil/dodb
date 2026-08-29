@@ -1,10 +1,20 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useState, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { X, Table2, Key, Code, Copy, Check, Terminal, Database, RefreshCw, Layers } from "lucide-react";
+import {
+  X,
+  Table2,
+  Key,
+  Code,
+  Copy,
+  Check,
+  Terminal,
+  Database,
+  RefreshCw,
+  Layers,
+} from "lucide-react";
 import { ColumnInfo, ConnectionProfile, DBType } from "../types";
 import { apiClient } from "../utils/apiClient";
-import { quoteIdent, quoteTableIdent } from "../utils/ddlBuilder";
+import { quoteIdent, quoteTableIdent, toDialect } from "../utils/ddlBuilder";
 
 interface TableStructureModalProps {
   isOpen: boolean;
@@ -42,7 +52,11 @@ export const TableStructureModal: React.FC<TableStructureModalProps> = ({
     setLoading(true);
     setError(null);
     try {
-      const data: any = await apiClient.getColumns(activeProfile.id, activeDatabase, tableName);
+      const data: any = await apiClient.getColumns(
+        activeProfile.id,
+        activeDatabase,
+        tableName,
+      );
       setColumns(data?.columns || []);
     } catch (err: any) {
       setError(err?.message || String(err));
@@ -69,23 +83,23 @@ export const TableStructureModal: React.FC<TableStructureModalProps> = ({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, onClose]);
 
-  const dialect: DBType =
-    activeProfile?.type === "mariadb"
-      ? "mariadb"
-      : activeProfile?.type === "sqlite"
-        ? "sqlite"
-        : "postgres";
+  const dialect: DBType = toDialect(activeProfile?.type);
 
   // Generate DDL based on columns
   const generateDdl = (): string => {
-    if (!columns || columns.length === 0) return `-- No columns found for table ${tableName}`;
-    
+    if (!columns || columns.length === 0)
+      return `-- No columns found for table ${tableName}`;
+
     const lines = columns.map((col) => {
       let line = `  ${quoteIdent(col.name, dialect)} ${col.type.toUpperCase()}`;
       if (!col.nullable) {
         line += " NOT NULL";
       }
-      if (col.default !== null && col.default !== undefined && col.default !== "") {
+      if (
+        col.default !== null &&
+        col.default !== undefined &&
+        col.default !== ""
+      ) {
         line += ` DEFAULT ${col.default}`;
       }
       if (col.primaryKey) {
@@ -126,19 +140,30 @@ export const TableStructureModal: React.FC<TableStructureModalProps> = ({
                 <div className="table-title-row">
                   <h3 className="table-name font-mono">{tableName}</h3>
                   <span className="badge-db">{activeDatabase}</span>
-                  <span className="badge-type">{activeProfile?.type.toUpperCase()}</span>
+                  <span className="badge-type">
+                    {activeProfile?.type.toUpperCase()}
+                  </span>
                 </div>
                 <p className="table-subinfo">
-                  {columns.length} columns {pkCount > 0 ? `• ${pkCount} Primary Key` : ""}
+                  {columns.length} columns{" "}
+                  {pkCount > 0 ? `• ${pkCount} Primary Key` : ""}
                 </p>
               </div>
             </div>
 
             <div className="header-actions">
-              <button className="icon-btn" onClick={fetchColumns} title="Refresh Schema">
+              <button
+                className="icon-btn"
+                onClick={fetchColumns}
+                title="Refresh Schema"
+              >
                 <RefreshCw size={13} className={loading ? "spin" : ""} />
               </button>
-              <button className="icon-btn close-btn" onClick={onClose} title="Close (Esc)">
+              <button
+                className="icon-btn close-btn"
+                onClick={onClose}
+                title="Close (Esc)"
+              >
                 <X size={15} />
               </button>
             </div>
@@ -165,14 +190,32 @@ export const TableStructureModal: React.FC<TableStructureModalProps> = ({
 
             <div className="tab-actions">
               {activeTab === "columns" && (
-                <button className="btn btn-secondary btn-xs" onClick={handleCopyColumnsList} title="Copy comma-separated columns">
-                  {copiedCols ? <Check size={11} className="copy-check" /> : <Copy size={11} />}
-                  <span>{copiedCols ? "Copied Columns!" : "Copy Column Names"}</span>
+                <button
+                  className="btn btn-secondary btn-xs"
+                  onClick={handleCopyColumnsList}
+                  title="Copy comma-separated columns"
+                >
+                  {copiedCols ? (
+                    <Check size={11} className="copy-check" />
+                  ) : (
+                    <Copy size={11} />
+                  )}
+                  <span>
+                    {copiedCols ? "Copied Columns!" : "Copy Column Names"}
+                  </span>
                 </button>
               )}
               {activeTab === "ddl" && (
-                <button className="btn btn-secondary btn-xs" onClick={handleCopyDdl} title="Copy CREATE TABLE SQL">
-                  {copiedDdl ? <Check size={11} className="copy-check" /> : <Copy size={11} />}
+                <button
+                  className="btn btn-secondary btn-xs"
+                  onClick={handleCopyDdl}
+                  title="Copy CREATE TABLE SQL"
+                >
+                  {copiedDdl ? (
+                    <Check size={11} className="copy-check" />
+                  ) : (
+                    <Copy size={11} />
+                  )}
                   <span>{copiedDdl ? "Copied DDL!" : "Copy DDL"}</span>
                 </button>
               )}
@@ -198,14 +241,21 @@ export const TableStructureModal: React.FC<TableStructureModalProps> = ({
                       <th style={{ width: "36px", textAlign: "center" }}>#</th>
                       <th>Column Name</th>
                       <th>Data Type</th>
-                      <th style={{ width: "90px", textAlign: "center" }}>Nullable</th>
+                      <th style={{ width: "90px", textAlign: "center" }}>
+                        Nullable
+                      </th>
                       <th>Default Value</th>
-                      <th style={{ width: "110px", textAlign: "center" }}>Key</th>
+                      <th style={{ width: "110px", textAlign: "center" }}>
+                        Key
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
                     {columns.map((col, idx) => (
-                      <tr key={col.name} className={col.primaryKey ? "pk-row" : ""}>
+                      <tr
+                        key={col.name}
+                        className={col.primaryKey ? "pk-row" : ""}
+                      >
                         <td className="row-num font-mono">{idx + 1}</td>
                         <td className="col-name font-mono">
                           <div className="col-name-cell">
@@ -214,11 +264,17 @@ export const TableStructureModal: React.FC<TableStructureModalProps> = ({
                                 <Key size={11} className="pk-key-icon" />
                               </span>
                             )}
-                            <span className={col.primaryKey ? "pk-name-text" : ""}>{col.name}</span>
+                            <span
+                              className={col.primaryKey ? "pk-name-text" : ""}
+                            >
+                              {col.name}
+                            </span>
                           </div>
                         </td>
                         <td>
-                          <span className="type-badge font-mono">{col.type}</span>
+                          <span className="type-badge font-mono">
+                            {col.type}
+                          </span>
                         </td>
                         <td style={{ textAlign: "center" }}>
                           {col.nullable ? (
@@ -228,8 +284,12 @@ export const TableStructureModal: React.FC<TableStructureModalProps> = ({
                           )}
                         </td>
                         <td className="col-default font-mono">
-                          {col.default !== null && col.default !== undefined && col.default !== "" ? (
-                            <span className="default-pill">{String(col.default)}</span>
+                          {col.default !== null &&
+                          col.default !== undefined &&
+                          col.default !== "" ? (
+                            <span className="default-pill">
+                              {String(col.default)}
+                            </span>
                           ) : (
                             <span className="null-text">-</span>
                           )}
@@ -272,7 +332,9 @@ export const TableStructureModal: React.FC<TableStructureModalProps> = ({
                 <button
                   className="btn btn-secondary"
                   onClick={() => {
-                    onOpenInSql(`SELECT * FROM ${quoteTableIdent(tableName, dialect)} LIMIT 100;`);
+                    onOpenInSql(
+                      `SELECT * FROM ${quoteTableIdent(tableName, dialect)} LIMIT 100;`,
+                    );
                     onClose();
                   }}
                 >
@@ -310,8 +372,12 @@ export const TableStructureModal: React.FC<TableStructureModalProps> = ({
           animation: fadeIn 0.15s ease;
         }
         @keyframes fadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
+          from {
+            opacity: 0;
+          }
+          to {
+            opacity: 1;
+          }
         }
 
         .modal-card {
@@ -321,7 +387,9 @@ export const TableStructureModal: React.FC<TableStructureModalProps> = ({
           background: var(--bg-card);
           border: 1px solid var(--border-medium);
           border-radius: var(--radius-md);
-          box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.1);
+          box-shadow:
+            0 24px 60px rgba(0, 0, 0, 0.6),
+            0 0 0 1px rgba(255, 255, 255, 0.1);
           display: flex;
           flex-direction: column;
           overflow: hidden;
@@ -329,8 +397,14 @@ export const TableStructureModal: React.FC<TableStructureModalProps> = ({
           z-index: 1000000;
         }
         @keyframes slideUp {
-          from { transform: translateY(12px) scale(0.98); opacity: 0; }
-          to { transform: translateY(0) scale(1); opacity: 1; }
+          from {
+            transform: translateY(12px) scale(0.98);
+            opacity: 0;
+          }
+          to {
+            transform: translateY(0) scale(1);
+            opacity: 1;
+          }
         }
 
         .modal-header {
@@ -443,7 +517,7 @@ export const TableStructureModal: React.FC<TableStructureModalProps> = ({
           background: var(--bg-card);
           color: var(--text-main);
           font-weight: 600;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+          box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
         }
 
         .btn-xs {
@@ -595,9 +669,17 @@ export const TableStructureModal: React.FC<TableStructureModalProps> = ({
           color: var(--text-muted);
           font-size: 12px;
         }
-        .loading-icon { color: var(--accent-blue); }
-        .spin { animation: spin 0.9s linear infinite; }
-        @keyframes spin { 100% { transform: rotate(360deg); } }
+        .loading-icon {
+          color: var(--accent-blue);
+        }
+        .spin {
+          animation: spin 0.9s linear infinite;
+        }
+        @keyframes spin {
+          100% {
+            transform: rotate(360deg);
+          }
+        }
 
         .error-message {
           padding: 16px;

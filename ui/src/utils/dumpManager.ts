@@ -1,7 +1,18 @@
 import { saveTextFileAsync } from "./saveFile";
 import { apiClient } from "./apiClient";
 import { ColumnInfo, DBType } from "../types";
-import { quoteIdent, quoteTableIdent } from "./ddlBuilder";
+import { TableConstraints, draftFromSchema } from "../components/tableDesign/draft";
+import {
+  DIALECT_LABEL,
+  ForeignKeyDraft,
+  buildAddForeignKey,
+  buildCreateTable,
+  buildDropTable,
+  quoteIdent,
+  quoteTableIdent,
+  sqlLiteral,
+  toDialect,
+} from "./ddlBuilder";
 
 export interface DumpConfig {
   profileId: string;
@@ -28,6 +39,49 @@ export interface DumpProgress {
 }
 
 type ProgressListener = (progress: DumpProgress) => void;
+
+/**
+ * Statements that make the restore order-independent, before any table is
+ * touched.
+ *
+ * Postgres gets nothing on purpose: `SET session_replication_role` needs
+ * superuser and would fail on managed instances, which is the very failure this
+ * dump is trying to avoid. Its foreign keys are deferred to the end of the file
+ * instead, which needs no privileges at all.
+ */
+function dumpPreamble(d: DBType): string[] {
+  if (d === "mariadb") {
+    return ["SET NAMES utf8mb4;", "SET FOREIGN_KEY_CHECKS = 0;"];
+  }
+  if (d === "sqlite") {
+    return ["PRAGMA foreign_keys = OFF;"];
+  }
+  return [];
+}
+
+/** The matching re-enable, emitted once every table and constraint is in. */
+function dumpPostamble(d: DBType): string[] {
+  if (d === "mariadb") return ["SET FOREIGN_KEY_CHECKS = 1;"];
+  if (d === "sqlite") return ["PRAGMA foreign_keys = ON;"];
+  return [];
+}
+
+/**
+ * Move a Postgres identity/serial sequence past the rows the dump just
+ * inserted, so the next application insert does not collide with them.
+ *
+ * `pg_get_serial_sequence` returns NULL for a column with no sequence and
+ * `setval` is strict, so a column that only looked auto-incrementing is a
+ * no-op rather than an error.
+ */
+function resetSequenceStmt(table: string, column: string): string {
+  const qTable = quoteTableIdent(table, "postgres");
+  const qCol = quoteIdent(column, "postgres");
+  return (
+    `SELECT setval(pg_get_serial_sequence(${sqlLiteral(qTable, "postgres")}, ${sqlLiteral(column, "postgres")}), ` +
+    `COALESCE((SELECT MAX(${qCol}) FROM ${qTable}), 0) + 1, false);`
+  );
+}
 
 class DumpManager {
   private isCancelled = false;
@@ -164,19 +218,44 @@ class DumpManager {
 
     const chunks: string[] = [];
 
+    // The dialect the dump is written in. Everything below -- quoting, DDL,
+    // literals, session flags -- is derived from this one value.
+    const dialect: DBType = toDialect(config.dbType);
+    const isSql = config.format === "sql";
+    const includeSchema = config.mode !== "data_only";
+    const includeData = config.mode !== "schema_only";
+
+    // SQLite cannot ALTER TABLE ... ADD CONSTRAINT, so its foreign keys stay
+    // inline in CREATE TABLE and the pragma covers the restore order. The other
+    // two defer them to the end of the file.
+    const deferForeignKeys = dialect !== "sqlite";
+    const pendingFks: { table: string; fk: ForeignKeyDraft }[] = [];
+    const pendingSequences: { table: string; column: string }[] = [];
+
     try {
-      if (config.format === "sql") {
+      if (isSql) {
         chunks.push(
           `-- =========================================================\n`,
         );
         chunks.push(`-- DODB Database Backup / Dump\n`);
         chunks.push(`-- Database: ${config.database}\n`);
+        // Read back by the import wizard to warn about a dialect mismatch.
+        chunks.push(`-- DODB-Dialect: ${dialect}\n`);
+        chunks.push(`-- Flavour: ${DIALECT_LABEL[dialect]}\n`);
         chunks.push(`-- Generated: ${new Date().toISOString()}\n`);
         chunks.push(`-- Total Tables: ${config.tables.length}\n`);
         chunks.push(
           `-- =========================================================\n\n`,
         );
-        chunks.push(`SET FOREIGN_KEY_CHECKS = 0;\n\n`);
+        const preamble = dumpPreamble(dialect);
+        if (preamble.length > 0) {
+          chunks.push(preamble.join("\n") + "\n\n");
+        } else if (deferForeignKeys && includeSchema) {
+          chunks.push(
+            `-- Foreign keys are added at the end of this file, so the order\n` +
+              `-- the tables are restored in does not matter.\n\n`,
+          );
+        }
       } else {
         chunks.push(
           `{\n  "database": "${config.database}",\n  "exportedAt": "${new Date().toISOString()}",\n  "tables": {\n`,
@@ -210,32 +289,52 @@ class DumpManager {
             config.database,
             table,
           );
-          cols = Array.isArray(colData) ? colData : [];
+          cols = Array.isArray(colData) ? colData : colData?.columns || [];
         } catch {
           cols = [];
         }
 
         // 2. Output Schema / DDL if mode is full or schema_only
-        if (config.format === "sql") {
-          chunks.push(
-            `-- ---------------------------------------------------------\n`,
-          );
-          chunks.push(`-- Table structure for: ${table}\n`);
-          chunks.push(
-            `-- ---------------------------------------------------------\n`,
-          );
+        if (isSql) {
+          if (includeSchema) {
+            chunks.push(
+              `-- ---------------------------------------------------------\n`,
+            );
+            chunks.push(`-- Table structure for: ${table}\n`);
+            chunks.push(
+              `-- ---------------------------------------------------------\n`,
+            );
+          }
 
-          if (config.mode !== "data_only" && cols.length > 0) {
-            chunks.push(`DROP TABLE IF EXISTS "${table}";\n`);
-            chunks.push(`CREATE TABLE "${table}" (\n`);
-            const colDefs = cols.map((col) => {
-              const nullable = col.nullable ? "" : " NOT NULL";
-              const pk = col.primaryKey ? " PRIMARY KEY" : "";
-              const defVal = col.default ? ` DEFAULT ${col.default}` : "";
-              return `  "${col.name}" ${col.type || "VARCHAR(255)"}${nullable}${pk}${defVal}`;
-            });
-            chunks.push(colDefs.join(",\n"));
-            chunks.push(`\n);\n\n`);
+          if (includeSchema && cols.length > 0) {
+            // Indexes and foreign keys, so the dump reproduces the real table
+            // and not just its columns. Best-effort: a database that will not
+            // report them still gets a usable CREATE TABLE.
+            let constraints: TableConstraints | null = null;
+            try {
+              constraints = (await apiClient.getTableConstraints(
+                config.profileId,
+                config.database,
+                table,
+              )) as TableConstraints;
+            } catch (cErr) {
+              console.warn(`Could not fetch constraints for ${table}:`, cErr);
+            }
+
+            const draft = draftFromSchema(table, cols, constraints);
+            if (deferForeignKeys) {
+              for (const fk of draft.foreignKeys) {
+                pendingFks.push({ table, fk });
+              }
+            }
+
+            chunks.push(buildDropTable(table, dialect, dialect === "postgres", true) + "\n");
+            chunks.push(
+              buildCreateTable(
+                { ...draft, foreignKeys: deferForeignKeys ? [] : draft.foreignKeys },
+                dialect,
+              ).join("\n") + "\n\n",
+            );
           }
         } else {
           // JSON header for table
@@ -243,12 +342,19 @@ class DumpManager {
         }
 
         // 3. Output Data in chunked batches if mode is full or data_only
-        if (config.mode !== "schema_only") {
+        if (includeData) {
+          if (dialect === "postgres") {
+            for (const col of cols) {
+              if (col.autoIncrement) {
+                pendingSequences.push({ table, column: col.name });
+              }
+            }
+          }
+
           let offset = 0;
           let hasMore = true;
-          let tableRowCount = 0;
 
-          if (config.format === "sql") {
+          if (isSql) {
             chunks.push(`-- Data for table: ${table}\n`);
           }
 
@@ -272,19 +378,11 @@ class DumpManager {
               break;
             }
 
-            tableRowCount += rows.length;
             totalRowsExported += rows.length;
             this.currentProgress.rowsExported = totalRowsExported;
             this.notify();
 
-            if (config.format === "sql") {
-              const dialect: DBType =
-                config.dbType === "mariadb" || config.dbType === "mysql"
-                  ? "mariadb"
-                  : config.dbType === "sqlite"
-                    ? "sqlite"
-                    : "postgres";
-
+            if (isSql) {
               // Generate SQL INSERT statements
               const colNames =
                 cols.length > 0
@@ -299,14 +397,7 @@ class DumpManager {
                   cols.length > 0
                     ? cols.map((c) => row[c.name])
                     : Object.values(row)
-                ).map((val) => {
-                  if (val === null || val === undefined) return "NULL";
-                  if (typeof val === "number" || typeof val === "boolean")
-                    return String(val);
-                  if (typeof val === "object")
-                    return `'${JSON.stringify(val).replace(/'/g, "''")}'`;
-                  return `'${String(val).replace(/'/g, "''")}'`;
-                });
+                ).map((val) => sqlLiteral(val, dialect));
                 valueLines.push(`  (${values.join(", ")})`);
               }
 
@@ -328,12 +419,12 @@ class DumpManager {
             await new Promise((resolve) => setTimeout(resolve, 5));
           }
 
-          if (config.format === "sql") {
+          if (isSql) {
             chunks.push(`\n`);
           } else {
             chunks.push(`\n    ]${i < config.tables.length - 1 ? "," : ""}\n`);
           }
-        } else if (config.format === "json") {
+        } else if (!isSql) {
           chunks.push(`    ]${i < config.tables.length - 1 ? "," : ""}\n`);
         }
       }
@@ -345,8 +436,41 @@ class DumpManager {
         return;
       }
 
-      if (config.format === "sql") {
-        chunks.push(`SET FOREIGN_KEY_CHECKS = 1;\n`);
+      if (isSql) {
+        if (pendingFks.length > 0) {
+          chunks.push(
+            `-- ---------------------------------------------------------\n`,
+          );
+          chunks.push(`-- Foreign keys\n`);
+          chunks.push(
+            `-- ---------------------------------------------------------\n`,
+          );
+          chunks.push(
+            pendingFks
+              .map(({ table, fk }) => buildAddForeignKey(table, fk, dialect))
+              .join("\n") + "\n\n",
+          );
+        }
+
+        if (pendingSequences.length > 0) {
+          chunks.push(
+            `-- ---------------------------------------------------------\n`,
+          );
+          chunks.push(`-- Sequences, moved past the rows restored above\n`);
+          chunks.push(
+            `-- ---------------------------------------------------------\n`,
+          );
+          chunks.push(
+            pendingSequences
+              .map(({ table, column }) => resetSequenceStmt(table, column))
+              .join("\n") + "\n\n",
+          );
+        }
+
+        const postamble = dumpPostamble(dialect);
+        if (postamble.length > 0) {
+          chunks.push(postamble.join("\n") + "\n");
+        }
         chunks.push(
           `-- Dump complete: ${totalRowsExported} rows exported across ${config.tables.length} tables.\n`,
         );
@@ -357,8 +481,7 @@ class DumpManager {
       clearInterval(timerInterval);
 
       // Create downloadable blob
-      const mimeType =
-        config.format === "sql" ? "application/sql" : "application/json";
+      const mimeType = isSql ? "application/sql" : "application/json";
       const blob = new Blob(chunks, { type: mimeType });
       // The dump text is kept, not a blob URL: the file is written by the
       // backend through a native save dialog, so there is nothing for the

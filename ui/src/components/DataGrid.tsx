@@ -40,7 +40,7 @@ import {
   Crosshair,
 } from "lucide-react";
 import { ColumnInfo, TableRowData, ConnectionProfile, ColumnFilter, FilterOperator, DBType } from "../types";
-import { quoteIdent, quoteTableIdent } from "../utils/ddlBuilder";
+import { quoteIdent, quoteTableIdent, sqlLiteral } from "../utils/ddlBuilder";
 import {
   isGeometryColumn,
   isCoordinateColumn,
@@ -366,14 +366,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
       const qTable = tableName ? quoteTableIdent(tableName, dialect) : "table_name";
       const lines = selRows
         .map((r) => {
-          const valList = columns
-            .map((c) => {
-              const v = r[c.name];
-              if (v === null || v === undefined) return "NULL";
-              if (typeof v === "number" || typeof v === "boolean") return String(v);
-              return `'${String(v).replace(/'/g, "''")}'`;
-            })
-            .join(", ");
+          const valList = columns.map((c) => sqlLiteral(r[c.name], dialect)).join(", ");
           return `INSERT INTO ${qTable} (${colList}) VALUES (${valList});`;
         })
         .join("\n");
@@ -966,13 +959,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
         const quotedCols = colNames.map((c) => quoteIdent(c, dialect)).join(", ");
         const qTable = tableName ? quoteTableIdent(tableName, dialect) : "table_name";
         const sqlStatements = allJsonRows.map((row) => {
-          const vals = colNames.map((c) => {
-            const val = row[c];
-            if (val === null || val === undefined) return "NULL";
-            if (typeof val === "number" || typeof val === "boolean") return String(val);
-            if (typeof val === "object") return `'${JSON.stringify(val).replace(/'/g, "''")}'`;
-            return `'${String(val).replace(/'/g, "''")}'`;
-          }).join(", ");
+          const vals = colNames.map((c) => sqlLiteral(row[c], dialect)).join(", ");
           return `INSERT INTO ${qTable} (${quotedCols}) VALUES (${vals});`;
         });
         const sqlText = `-- Table: ${tableName || "table_name"}\n-- Exported: ${new Date().toISOString()}\n-- Rows: ${allJsonRows.length}\n\n${sqlStatements.join("\n")}`;
@@ -2365,12 +2352,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                   const cols = Object.keys(contextMenu.row).filter((k) => contextMenu.row[k] !== undefined);
                   const colList = cols.map((c) => quoteIdent(c, dialect)).join(", ");
                   const qTable = tableName ? quoteTableIdent(tableName, dialect) : "table_name";
-                  const valList = cols.map((c) => {
-                    const v = contextMenu.row[c];
-                    if (v === null) return "NULL";
-                    if (typeof v === "number" || typeof v === "boolean") return String(v);
-                    return `'${String(v).replace(/'/g, "''")}'`;
-                  }).join(", ");
+                  const valList = cols.map((c) => sqlLiteral(contextMenu.row[c], dialect)).join(", ");
                   const sql = `INSERT INTO ${qTable} (${colList}) VALUES (${valList});`;
                   navigator.clipboard.writeText(sql);
                   setContextMenu(null);
@@ -2545,12 +2527,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                     const cols = Object.keys(inspectRowModal.row).filter((k) => inspectRowModal.row[k] !== undefined);
                     const colList = cols.map((c) => quoteIdent(c, dialect)).join(", ");
                     const qTable = tableName ? quoteTableIdent(tableName, dialect) : "table_name";
-                    const valList = cols.map((c) => {
-                      const v = inspectRowModal.row[c];
-                      if (v === null) return "NULL";
-                      if (typeof v === "number" || typeof v === "boolean") return String(v);
-                      return `'${String(v).replace(/'/g, "''")}'`;
-                    }).join(", ");
+                    const valList = cols.map((c) => sqlLiteral(inspectRowModal.row[c], dialect)).join(", ");
                     const sql = `INSERT INTO ${qTable} (${colList}) VALUES (${valList});`;
                     navigator.clipboard.writeText(sql);
                   }}

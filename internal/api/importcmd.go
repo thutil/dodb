@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -238,6 +239,9 @@ func readHead(path string, n int) ([]byte, error) {
 	return buf[:read], nil
 }
 
+// dodbDialectRe matches the header DODB's own SQL export writes.
+var dodbDialectRe = regexp.MustCompile(`(?im)^--\s*DODB-Dialect:\s*([A-Za-z0-9]+)\s*$`)
+
 // dialectHints fingerprints a dump so the UI can warn about a mismatch before
 // the user watches half a file fail.
 func dialectHints(text string) []string {
@@ -245,6 +249,11 @@ func dialectHints(text string) []string {
 	if len(head) > 8192 {
 		head = head[:8192]
 	}
+	// A dump DODB wrote says so outright; no need to guess.
+	if m := dodbDialectRe.FindStringSubmatch(head); m != nil {
+		return []string{strings.ToLower(m[1])}
+	}
+
 	upper := strings.ToUpper(head)
 	var hints []string
 

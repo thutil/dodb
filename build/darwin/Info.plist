@@ -28,9 +28,9 @@
     <string>6.0</string>
     <key>CFBundleSignature</key>
     <string>????</string>
-    <!-- Matches the Cask's `depends_on macos: ">= :big_sur"`. -->
+    <!-- Matches the Cask's `depends_on macos: ">= :sonoma"`. -->
     <key>LSMinimumSystemVersion</key>
-    <string>11.0</string>
+    <string>14.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <!-- The webview needs to reach map tiles and the Monaco CDN. Without this
