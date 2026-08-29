@@ -737,7 +737,6 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
             </div>
             {activeProfile && (
               <span className="active-conn-pill">
-                <span className="pulse-green-dot" />
                 Active: {activeProfile.name}
               </span>
             )}
@@ -1562,7 +1561,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           color: var(--accent-green);
           font-size: 10px;
           padding: 2px 7px;
-          border-radius: 12px;
+          border-radius: 5px;
           font-weight: 600;
         }
         .pulse-green-dot {
