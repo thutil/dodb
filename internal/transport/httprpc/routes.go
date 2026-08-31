@@ -252,14 +252,16 @@ func (h *Handler) buildRoutes() map[string]func(json.RawMessage) (any, error) {
 		},
 		"admin_create_database": func(raw json.RawMessage) (any, error) {
 			a, err := decode[struct {
-				ID       string `json:"id"`
-				Database string `json:"database"`
-				Name     string `json:"name"`
+				ID        string `json:"id"`
+				Database  string `json:"database"`
+				Name      string `json:"name"`
+				Charset   string `json:"charset"`
+				Collation string `json:"collation"`
 			}](raw)
 			if err != nil {
 				return nil, err
 			}
-			return ok(s.AdminCreateDatabase(a.ID, a.Database, a.Name))
+			return ok(s.AdminCreateDatabase(a.ID, a.Database, a.Name, a.Charset, a.Collation))
 		},
 		"admin_drop_database": func(raw json.RawMessage) (any, error) {
 			a, err := decode[struct {

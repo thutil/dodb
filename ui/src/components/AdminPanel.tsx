@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Database,
   Users,
@@ -34,6 +34,12 @@ import { ConnectionProfile } from "../types";
 import { apiClient } from "../utils/apiClient";
 import { dumpManager, DumpProgress } from "../utils/dumpManager";
 import { DIALECT_LABEL, toDialect } from "../utils/ddlBuilder";
+import { CreateDatabaseModal } from "./CreateDatabaseModal";
+import {
+  MYSQL_CHARSETS,
+  POSTGRES_ENCODINGS,
+  POSTGRES_COLLATIONS,
+} from "../utils/charsetUtils";
 
 interface AdminPanelProps {
   activeProfile: ConnectionProfile | null;
@@ -70,9 +76,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [subTab, setSubTab] = useState<"databases" | "users" | "processes" | "dump">("databases");
 
   // Database creation state
+  const isPostgres = activeProfile?.type === "postgres";
   const [newDbName, setNewDbName] = useState("");
+  const [newDbCharset, setNewDbCharset] = useState(isPostgres ? "UTF8" : "utf8mb4");
+  const [newDbCollation, setNewDbCollation] = useState(isPostgres ? "" : "utf8mb4_unicode_ci");
+  const [showCreateDbModal, setShowCreateDbModal] = useState(false);
   const [dbLoading, setDbLoading] = useState(false);
   const [dbMsg, setDbMsg] = useState<{ success: boolean; text: string } | null>(null);
+
+  const activeCharsetObj = useMemo(() => {
+    if (isPostgres) return undefined;
+    return MYSQL_CHARSETS.find((c) => c.charset === newDbCharset);
+  }, [isPostgres, newDbCharset]);
+
+  const handleCharsetChange = (cs: string) => {
+    setNewDbCharset(cs);
+    if (!isPostgres) {
+      const found = MYSQL_CHARSETS.find((c) => c.charset === cs);
+      if (found) {
+        setNewDbCollation(found.defaultCollation);
+      }
+    }
+  };
 
   // Dump & Export State
   const [dumpProgress, setDumpProgress] = useState<DumpProgress>(dumpManager.getProgress());
@@ -260,8 +285,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setDbLoading(true);
     setDbMsg(null);
     try {
-      await apiClient.adminCreateDatabase(activeProfile.id, currentDb, newDbName.trim());
-      setDbMsg({ success: true, text: `Database '${newDbName.trim()}' created successfully` });
+      await apiClient.adminCreateDatabase(
+        activeProfile.id,
+        currentDb,
+        newDbName.trim(),
+        newDbCharset || undefined,
+        newDbCollation || undefined
+      );
+      const details = [newDbCharset, newDbCollation].filter(Boolean).join(" / ");
+      setDbMsg({
+        success: true,
+        text: `Database '${newDbName.trim()}' created successfully${details ? ` (${details})` : ""}`,
+      });
       setNewDbName("");
       onRefreshDatabases();
     } catch (err: any) {
@@ -494,23 +529,85 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           <div className="tab-pane-grid">
             {/* Quick Action / Create Section */}
             <div className="pane-section create-card">
-              <div className="section-header">
-                <h4 className="section-heading">Create New Database</h4>
-                <span className="section-sub">Add a new database instance on this server</span>
+              <div className="section-top-row">
+                <div className="section-header">
+                  <h4 className="section-heading">Create New Database</h4>
+                  <span className="section-sub">Add a new database instance on this server</span>
+                </div>
               </div>
 
-              <form onSubmit={handleCreateDatabase} className="create-form">
-                <input
-                  type="text"
-                  className="input form-control font-mono db-name-input"
-                  placeholder="e.g. staging_ecommerce"
-                  value={newDbName}
-                  onChange={(e) => setNewDbName(e.target.value)}
-                />
-                <button className="btn btn-primary create-btn" type="submit" disabled={dbLoading || !newDbName.trim()}>
-                  <Plus size={13} />
-                  <span>Create Database</span>
-                </button>
+              <form onSubmit={handleCreateDatabase} className="create-db-inline-form">
+                <div className="db-inputs-row">
+                  <div className="db-input-field db-name-field">
+                    <label className="field-label">Database Name</label>
+                    <input
+                      type="text"
+                      className="input form-control font-mono"
+                      placeholder="e.g. staging_ecommerce"
+                      value={newDbName}
+                      onChange={(e) => setNewDbName(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="db-input-field">
+                    <label className="field-label">{isPostgres ? "Encoding" : "Charset"}</label>
+                    <select
+                      className="select form-control font-mono"
+                      value={newDbCharset}
+                      onChange={(e) => handleCharsetChange(e.target.value)}
+                    >
+                      {isPostgres ? (
+                        POSTGRES_ENCODINGS.map((enc) => (
+                          <option key={enc.encoding} value={enc.encoding}>
+                            {enc.label}
+                          </option>
+                        ))
+                      ) : (
+                        MYSQL_CHARSETS.map((cs) => (
+                          <option key={cs.charset} value={cs.charset}>
+                            {cs.label}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </div>
+
+                  <div className="db-input-field">
+                    <label className="field-label">Collation</label>
+                    <select
+                      className="select form-control font-mono"
+                      value={newDbCollation}
+                      onChange={(e) => setNewDbCollation(e.target.value)}
+                    >
+                      {isPostgres ? (
+                        POSTGRES_COLLATIONS.map((c) => (
+                          <option key={c.collation} value={c.collation}>
+                            {c.label}
+                          </option>
+                        ))
+                      ) : activeCharsetObj ? (
+                        activeCharsetObj.collations.map((col) => (
+                          <option key={col.collation} value={col.collation}>
+                            {col.label}
+                          </option>
+                        ))
+                      ) : (
+                        <option value="">Default Collation</option>
+                      )}
+                    </select>
+                  </div>
+
+                  <div className="db-btn-field">
+                    <button
+                      className="btn btn-primary create-btn"
+                      type="submit"
+                      disabled={dbLoading || !newDbName.trim()}
+                    >
+                      <Plus size={13} />
+                      <span>{dbLoading ? "Creating..." : "Create Database"}</span>
+                    </button>
+                  </div>
+                </div>
               </form>
 
               {dbMsg && (
@@ -1487,6 +1584,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         </div>
       )}
 
+      {showCreateDbModal && activeProfile && (
+        <CreateDatabaseModal
+          activeProfile={activeProfile}
+          currentDb={currentDb}
+          onClose={() => setShowCreateDbModal(false)}
+          onSuccess={(createdDb) => {
+            onRefreshDatabases();
+            setDbMsg({
+              success: true,
+              text: `Database '${createdDb}' created successfully`,
+            });
+          }}
+        />
+      )}
+
       <style jsx>{`
         .admin-container {
           flex: 1;
@@ -1626,10 +1738,42 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           color: var(--text-muted);
         }
 
-        .create-form {
+        .create-db-inline-form {
           display: flex;
-          align-items: center;
-          gap: 10px;
+          flex-direction: column;
+          gap: 8px;
+        }
+        .db-inputs-row {
+          display: flex;
+          align-items: flex-end;
+          gap: 12px;
+          flex-wrap: wrap;
+        }
+        .db-input-field {
+          display: flex;
+          flex-direction: column;
+          gap: 5px;
+          flex: 1;
+          min-width: 170px;
+        }
+        .db-name-field {
+          flex: 2;
+          min-width: 220px;
+        }
+        .field-label {
+          font-size: 11px;
+          font-weight: 500;
+          color: var(--text-muted);
+        }
+        .db-inputs-row .input,
+        .db-inputs-row .select,
+        .db-inputs-row .create-btn {
+          height: 34px;
+          box-sizing: border-box;
+        }
+        .db-btn-field {
+          display: flex;
+          align-items: flex-end;
         }
 
         .db-name-input {

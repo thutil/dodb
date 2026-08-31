@@ -633,3 +633,50 @@ export function extractColumnMappingsFromSql(querySql: string): Record<string, S
   return result;
 }
 
+export interface ParsedDbError {
+  summary: string;
+  sql?: string;
+  fieldHint?: string;
+}
+
+export function parseDbError(raw: string): ParsedDbError {
+  if (!raw) return { summary: "Unknown error" };
+
+  let summary = raw.trim();
+  let sql: string | undefined;
+
+  // Split on SQL: or \nSQL:
+  const sqlMatch = summary.match(/[\r\n\s]*SQL:\s*([\s\S]+)$/i);
+  if (sqlMatch) {
+    sql = sqlMatch[1].trim();
+    summary = summary.substring(0, sqlMatch.index).trim();
+  }
+
+  // Remove leading "Error: " prefix if present
+  summary = summary.replace(/^Error:\s*/i, "").trim();
+
+  // Extract hints for common missing/invalid column issues
+  let fieldHint: string | undefined;
+
+  // MySQL 1364: Field 'slug' doesn't have a default value
+  const mysqlMissingField = summary.match(/Field ['`]([^'`]+)['`] doesn't have a default value/i);
+  if (mysqlMissingField) {
+    fieldHint = `Field '${mysqlMissingField[1]}' is required and has no default value.`;
+  }
+
+  // Postgres: null value in column "slug" of relation "blogs" violates not-null constraint
+  const pgNotNull = summary.match(/null value in column ['"]([^'"]+)['"].*violates not-null constraint/i);
+  if (pgNotNull) {
+    fieldHint = `Column '${pgNotNull[1]}' violates NOT NULL constraint.`;
+  }
+
+  // SQLite: NOT NULL constraint failed: blogs.slug
+  const sqliteNotNull = summary.match(/NOT NULL constraint failed:\s*([^\s]+)/i);
+  if (sqliteNotNull) {
+    const col = sqliteNotNull[1].split(".").pop();
+    fieldHint = `Column '${col}' cannot be null.`;
+  }
+
+  return { summary, sql, fieldHint };
+}
+

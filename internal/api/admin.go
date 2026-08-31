@@ -124,8 +124,8 @@ func (s *Service) AdminGetProcesses(id, database string) ([]*orderedjson.Object,
 	return rows, nil
 }
 
-// AdminCreateDatabase creates a database.
-func (s *Service) AdminCreateDatabase(id, database, name string) error {
+// AdminCreateDatabase creates a database with optional charset and collation.
+func (s *Service) AdminCreateDatabase(id, database, name, charset, collation string) error {
 	profile, err := s.DB.ResolveProfile(id)
 	if err != nil {
 		return err
@@ -139,6 +139,9 @@ func (s *Service) AdminCreateDatabase(id, database, name string) error {
 		return nil
 	}
 
+	cleanCharset := strings.TrimSpace(charset)
+	cleanCollation := strings.TrimSpace(collation)
+
 	var stmt string
 	if profile.Type == model.Postgres {
 		maintenance := "postgres"
@@ -151,6 +154,12 @@ func (s *Service) AdminCreateDatabase(id, database, name string) error {
 			}
 		}
 		stmt = `CREATE DATABASE "` + strings.ReplaceAll(clean, `"`, `""`) + `"`
+		if cleanCharset != "" {
+			stmt += " ENCODING '" + strings.ReplaceAll(cleanCharset, "'", "''") + "'"
+		}
+		if cleanCollation != "" {
+			stmt += " LC_COLLATE '" + strings.ReplaceAll(cleanCollation, "'", "''") + "' LC_CTYPE '" + strings.ReplaceAll(cleanCollation, "'", "''") + "'"
+		}
 		if _, err := pool.Exec(ctx(), stmt); err != nil {
 			return err
 		}
@@ -163,6 +172,12 @@ func (s *Service) AdminCreateDatabase(id, database, name string) error {
 			}
 		}
 		stmt = "CREATE DATABASE `" + strings.ReplaceAll(clean, "`", "``") + "`"
+		if cleanCharset != "" {
+			stmt += " CHARACTER SET `" + strings.ReplaceAll(cleanCharset, "`", "") + "`"
+		}
+		if cleanCollation != "" {
+			stmt += " COLLATE `" + strings.ReplaceAll(cleanCollation, "`", "") + "`"
+		}
 		if _, err := pool.Exec(ctx(), stmt); err != nil {
 			return err
 		}

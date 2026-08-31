@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.8] - 2026-08-31
+
+### Added
+
+- **In-App Soft Reload (`⌘R` / `Ctrl+R` / `F5`)**:
+  - Intercepts reload shortcuts globally to prevent destructive full-page browser reloads that cause connection drops.
+  - Automatically triggers an in-app soft reload that refreshes active table data, table lists, and database lists while keeping the active connection completely intact.
+  - Displays a clean, non-intrusive feedback toast (`Data refreshed (⌘R)`). Hard reload remains accessible via `⌘ + Shift + R` / `Ctrl + Shift + R`.
+- **Persistent Connection & View Recovery Across Browser Reloads**:
+  - Automatically reconnects to the last active profile upon page refresh without disconnecting to a blank state.
+  - Restores both the active database and the active table seamlessly from local storage.
+  - Manual disconnect cleanly purges cached session keys to present the connection dialog when desired.
+- **Database Charset & Collation Configuration**:
+  - Added support for selecting Character Set / Encoding and Collation when creating new databases on MySQL, MariaDB, and PostgreSQL.
+  - Includes presets for MySQL/MariaDB (`utf8mb4` with `utf8mb4_unicode_ci`, `utf8mb4_0900_ai_ci`, `utf8mb4_thai_520_w2`, `utf8mb4_bin`, `utf8mb4_general_ci`, plus `utf8mb3`, `latin1`, `ascii`, `binary`) and PostgreSQL (`UTF8`, `LATIN1`, `SQL_ASCII`, `WIN1252`, `EUC_JP` with collation choices).
+  - Dedicated **Create Database Modal** featuring live DDL SQL preview, copy SQL button, and keyboard `Esc` closing.
+  - Quick `+` button directly in the sidebar database section header to launch database creation with auto-switch upon success.
+
+### Changed
+
+- **Minimalist Toast & Status Bar Redesign**:
+  - Removed loud green/red borders, glowing outlines, and reddish background cards from status messages and toasts in DataGrid and SQL Console.
+  - Adopted a clean, neutral card styling (`border: 1px solid var(--border-medium)`) with subtle status icons for a distraction-free, native look.
+- **Admin Panel Create Database Layout**:
+  - Streamlined the inline database creation form into a unified, balanced row (`Database Name` | `Charset/Encoding` | `Collation` | `Create Database`).
+  - Removed redundant action buttons to reduce visual noise.
+
+### Fixed
+
+- **Friendly MySQL / Database Add Row Error Reporting**:
+  - Replaced raw, screen-overflowing database error strings with clean, human-readable error summaries and a persistent Error Details modal so users can inspect and copy full error traces.
+  - Preserved pending draft rows and error contexts across table and view navigation so work is never lost.
+
+---
+
 ## [0.3.7] - 2026-08-29
 
 ### Added

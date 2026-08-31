@@ -21,7 +21,7 @@ import {
   isValidCoordinate,
 } from "../utils/gisUtils";
 import { GisMapViewer, GisFeatureRecord } from "./GisMapViewer";
-import { splitSqlStatements, getStatementAtLine, stripCommentsAndTrim, extractTableFromSql, extractColumnMappingsFromSql } from "../utils/sqlUtils";
+import { splitSqlStatements, getStatementAtLine, stripCommentsAndTrim, extractTableFromSql, extractColumnMappingsFromSql, parseDbError, ParsedDbError } from "../utils/sqlUtils";
 import { apiClient } from "../utils/apiClient";
 import { getSharedSql, setSharedSql, useSharedSql } from "../utils/queryWorkspaceStore";
 import { quoteIdent, quoteTableIdent, sqlLiteral, toDialect } from "../utils/ddlBuilder";
@@ -221,7 +221,11 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
   } | null>(null);
 
   // Status message for transactions
-  const [commitMsg, setCommitMsg] = useState<{ success: boolean; text: string } | null>(null);
+  const [commitMsg, setCommitMsg] = useState<{
+    success: boolean;
+    text: string;
+    parsed?: ParsedDbError;
+  } | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   // SQL Execution History Configuration & Limits
@@ -378,9 +382,9 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
     });
   }, [sqlHistory, historyScope, activeDatabase, historySearch]);
 
-  // Auto-dismiss commit/status toast after 3.5 seconds
+  // Auto-dismiss commit/status toast after 3.5 seconds ONLY on success
   useEffect(() => {
-    if (!commitMsg) return;
+    if (!commitMsg || !commitMsg.success) return;
     const timer = setTimeout(() => {
       setCommitMsg(null);
     }, 3500);
@@ -818,7 +822,11 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
       const sqlToRun = stmts.join("\n");
       const res = await onExecuteSqlRef.current(sqlToRun);
       if (res.error) {
-        setCommitMsg({ success: false, text: res.error });
+        setCommitMsg({
+          success: false,
+          text: res.error,
+          parsed: parseDbError(res.error),
+        });
       } else {
         // Apply changes to local result rows
         if (result?.rows) {
@@ -842,7 +850,11 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      setCommitMsg({ success: false, text: msg });
+      setCommitMsg({
+        success: false,
+        text: msg,
+        parsed: parseDbError(msg),
+      });
     } finally {
       setSubmitting(false);
     }
@@ -2070,8 +2082,47 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
 
         {commitMsg && (
           <div className={`status-bar-msg ${commitMsg.success ? "success" : "error"}`}>
-            {commitMsg.success ? <Check size={13} /> : <AlertCircle size={13} />}
-            <span>{commitMsg.text}</span>
+            <div className="status-bar-main">
+              {commitMsg.success ? (
+                <Check size={14} className="status-icon flex-shrink-0" />
+              ) : (
+                <AlertCircle size={14} className="status-icon flex-shrink-0" />
+              )}
+              <div className="status-text-wrap">
+                <span className="status-text font-mono" title={commitMsg.parsed?.summary || commitMsg.text}>
+                  {commitMsg.parsed?.summary || commitMsg.text}
+                </span>
+                {commitMsg.parsed?.fieldHint && (
+                  <span className="status-hint-pill" title={commitMsg.parsed.fieldHint}>
+                    {commitMsg.parsed.fieldHint}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="status-bar-actions">
+              {!commitMsg.success && (
+                <button
+                  type="button"
+                  className="status-action-btn"
+                  onClick={() => {
+                    navigator.clipboard.writeText(commitMsg.text);
+                  }}
+                  title="Copy error message"
+                >
+                  <Copy size={12} />
+                  <span>Copy</span>
+                </button>
+              )}
+              <button
+                type="button"
+                className="status-close-btn"
+                onClick={() => setCommitMsg(null)}
+                title="Dismiss"
+              >
+                <X size={13} />
+              </button>
+            </div>
           </div>
         )}
 
@@ -3278,26 +3329,101 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
           z-index: 1000;
           display: flex;
           align-items: center;
-          gap: 8px;
-          padding: 8px 18px;
+          justify-content: space-between;
+          gap: 12px;
+          padding: 8px 14px;
           font-size: 12px;
           font-weight: 500;
-          border-radius: 9999px;
+          border-radius: var(--radius-md, 8px);
           background: var(--bg-card);
           backdrop-filter: blur(16px);
           -webkit-backdrop-filter: blur(16px);
-          border: 1px solid var(--border-light);
-          box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.45);
+          border: 1px solid var(--border-medium);
+          box-shadow: var(--shadow-popup, 0 12px 32px -4px rgba(0, 0, 0, 0.5));
           animation: floatDockIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-          white-space: nowrap;
           pointer-events: auto;
-          max-width: calc(100vw - 32px);
+          max-width: min(840px, calc(100vw - 32px));
+          box-sizing: border-box;
+          color: var(--text-main);
         }
-        .status-bar-msg.success {
-          color: #34d399;
+        .status-bar-msg.success .status-icon {
+          color: var(--accent-green, #10b981);
         }
-        .status-bar-msg.error {
-          color: #f87171;
+        .status-bar-msg.error .status-icon {
+          color: var(--accent-red, #ef4444);
+        }
+        .status-bar-main {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          min-width: 0;
+          overflow: hidden;
+          flex: 1;
+        }
+        .status-text-wrap {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          min-width: 0;
+          overflow: hidden;
+        }
+        .status-text {
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          font-size: 12px;
+          color: var(--text-main);
+        }
+        .status-hint-pill {
+          background: var(--bg-tertiary);
+          color: var(--text-sub);
+          padding: 2px 7px;
+          border-radius: 4px;
+          font-size: 11px;
+          white-space: nowrap;
+          flex-shrink: 0;
+          border: 1px solid var(--border-light);
+        }
+        .status-bar-actions {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          flex-shrink: 0;
+        }
+        .status-action-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-light);
+          color: var(--text-main);
+          padding: 3px 8px;
+          border-radius: 4px;
+          font-size: 11px;
+          cursor: pointer;
+          transition: all 0.12s ease;
+          font-weight: 500;
+        }
+        .status-action-btn:hover {
+          background: var(--bg-hover);
+          border-color: var(--border-medium);
+          color: #fff;
+        }
+        .status-close-btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          background: transparent;
+          border: none;
+          color: var(--text-muted);
+          padding: 4px;
+          border-radius: 4px;
+          cursor: pointer;
+          transition: all 0.12s ease;
+        }
+        .status-close-btn:hover {
+          color: var(--text-main);
+          background: var(--bg-hover);
         }
 
         @keyframes floatDockIn {

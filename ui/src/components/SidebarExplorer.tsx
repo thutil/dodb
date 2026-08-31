@@ -40,6 +40,7 @@ interface SidebarExplorerProps {
   onDropTables?: (tables: string[]) => void;
   onImportIntoDatabase?: () => void;
   onImportIntoTable?: (table: string) => void;
+  onCreateDatabase?: () => void;
   onRefresh: () => void;
   loading: boolean;
   isConnecting?: boolean;
@@ -70,6 +71,7 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
   onDropTables,
   onImportIntoDatabase,
   onImportIntoTable,
+  onCreateDatabase,
   onRefresh,
   loading,
   isConnecting = false,
@@ -434,6 +436,16 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
             <span>{t("sidebarDatabase", language)}</span>
           </div>
           <div className="group-header-right">
+            {dbType !== "sqlite" && onCreateDatabase && (
+              <button
+                className="icon-action-btn"
+                onClick={onCreateDatabase}
+                disabled={isConnecting}
+                data-tooltip={language === "th" ? "สร้างฐานข้อมูลใหม่ (+ New DB)" : "Create New Database"}
+              >
+                <Plus size={12} />
+              </button>
+            )}
             <button
               className="icon-action-btn"
               onClick={onRefresh}

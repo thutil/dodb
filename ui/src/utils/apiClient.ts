@@ -281,8 +281,14 @@ export const apiClient = {
   adminGetProcesses: async (id: string, database: string) => {
     return await invoke("admin_get_processes", { id, database });
   },
-  adminCreateDatabase: async (id: string, database: string, name: string) => {
-    return await invoke("admin_create_database", { id, database, name });
+  adminCreateDatabase: async (
+    id: string,
+    database: string,
+    name: string,
+    charset?: string,
+    collation?: string,
+  ) => {
+    return await invoke("admin_create_database", { id, database, name, charset, collation });
   },
   adminDropDatabase: async (id: string, database: string, name: string) => {
     return await invoke("admin_drop_database", { id, database, name });

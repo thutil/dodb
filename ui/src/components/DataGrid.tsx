@@ -57,6 +57,7 @@ import {
 import { GisMapViewer, GisFeatureRecord } from "./GisMapViewer";
 import { Language, t } from "../utils/i18n";
 import { saveTextFileAsync } from "../utils/saveFile";
+import { parseDbError, ParsedDbError } from "../utils/sqlUtils";
 
 
 export interface PendingChanges {
@@ -396,19 +397,34 @@ export const DataGrid: React.FC<DataGridProps> = ({
   };
 
   // Status message for transactions
-  const [commitMsg, setCommitMsg] = useState<{ success: boolean; text: string } | null>(null);
+  const [commitMsg, setCommitMsg] = useState<{
+    success: boolean;
+    text: string;
+    parsed?: ParsedDbError;
+  } | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [errorDetailsModal, setErrorDetailsModal] = useState<{
+    summary: string;
+    sql?: string;
+    fieldHint?: string;
+    raw: string;
+  } | null>(null);
+  const [confirmPendingNav, setConfirmPendingNav] = useState<{
+    action: () => void;
+    title: string;
+    message: string;
+  } | null>(null);
 
-  // Auto-dismiss commit/status toast after 3.5 seconds
+  // Auto-dismiss commit/status toast after 3.5 seconds ONLY for success
   useEffect(() => {
-    if (!commitMsg) return;
+    if (!commitMsg || !commitMsg.success) return;
     const timer = setTimeout(() => {
       setCommitMsg(null);
     }, 3500);
     return () => clearTimeout(timer);
   }, [commitMsg]);
 
-  // Reset local transaction draft on table, database, or page/sort change
+  // Reset local transaction draft when switching tables or databases
   useEffect(() => {
     setNewRows([]);
     setEditedCells({});
@@ -421,7 +437,44 @@ export const DataGrid: React.FC<DataGridProps> = ({
     setInspectRowModal(null);
     setSelectedRowIndices(new Set());
     setLastSelectedRowIdx(null);
-  }, [tableName, activeDatabase, page, sortColumn, sortOrder, searchQuery, filtersKey]);
+    setErrorDetailsModal(null);
+    setConfirmPendingNav(null);
+  }, [tableName, activeDatabase]);
+
+  // Reset active selections on page / filter / sort change without clearing uncommitted rows
+  useEffect(() => {
+    setEditingCell(null);
+    setRowEditModal(null);
+    setConfirmDeleteRow(null);
+    setContextMenu(null);
+    setInspectRowModal(null);
+    setSelectedRowIndices(new Set());
+    setLastSelectedRowIdx(null);
+  }, [page, sortColumn, sortOrder, searchQuery, filtersKey]);
+
+  // Guard navigation or destructive actions when there are pending uncommitted changes
+  const guardPendingChanges = (action: () => void, navDesc?: string) => {
+    if (totalPending > 0) {
+      setConfirmPendingNav({
+        action,
+        title: "Uncommitted Changes",
+        message: `You have ${totalPending} uncommitted change(s) (${numInserts > 0 ? `${numInserts} new row(s), ` : ""}${numUpdates > 0 ? `${numUpdates} edit(s), ` : ""}${numDeletes > 0 ? `${numDeletes} delete(s)` : ""}). ${navDesc || "Navigating"} will discard these changes. Discard and continue?`,
+      });
+    } else {
+      action();
+    }
+  };
+
+  const handleConfirmDiscardNav = () => {
+    if (confirmPendingNav) {
+      setNewRows([]);
+      setEditedCells({});
+      setDeletedRowKeys(new Set());
+      setCommitMsg(null);
+      confirmPendingNav.action();
+      setConfirmPendingNav(null);
+    }
+  };
 
   // Handle ESC key to dismiss sub-modals or clear selection; Cmd+A to select all rows
   useEffect(() => {
@@ -434,7 +487,9 @@ export const DataGrid: React.FC<DataGridProps> = ({
       }
 
       if (e.key === "Escape") {
-        if (contextMenu) setContextMenu(null);
+        if (confirmPendingNav) setConfirmPendingNav(null);
+        else if (errorDetailsModal) setErrorDetailsModal(null);
+        else if (contextMenu) setContextMenu(null);
         else if (gisModalData) setGisModalData(null);
         else if (inspectRowModal) setInspectRowModal(null);
         else if (confirmDeleteRow) setConfirmDeleteRow(null);
@@ -444,9 +499,10 @@ export const DataGrid: React.FC<DataGridProps> = ({
         else if (selectedRowIndices.size > 0) setSelectedRowIndices(new Set());
       }
     };
+
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [contextMenu, gisModalData, inspectRowModal, confirmDeleteRow, rowEditModal, selectedCell, editingCell, rows, selectedRowIndices]);
+  }, [confirmPendingNav, errorDetailsModal, contextMenu, gisModalData, inspectRowModal, confirmDeleteRow, rowEditModal, selectedCell, editingCell, rows, selectedRowIndices]);
 
   if (!activeProfile) {
     return (
@@ -743,6 +799,8 @@ export const DataGrid: React.FC<DataGridProps> = ({
     columns.forEach((c) => {
       if (c.autoIncrement || (c.primaryKey && c.type.toLowerCase().includes("int"))) {
         blank[c.name] = "__AUTO__";
+      } else if (c.nullable && (c.default === null || c.default === undefined)) {
+        blank[c.name] = null;
       } else {
         blank[c.name] = "";
       }
@@ -807,7 +865,31 @@ export const DataGrid: React.FC<DataGridProps> = ({
     setSubmitting(true);
     setCommitMsg(null);
 
-    // Prepare inserts: omit __AUTO__ or undefined columns so DB creates auto-increment ID
+    // Validate required fields in newly inserted rows before sending transaction
+    for (let rIdx = 0; rIdx < newRows.length; rIdx++) {
+      const row = newRows[rIdx];
+      for (const c of columns) {
+        const isRequired = !c.nullable && !c.autoIncrement && (c.default === null || c.default === undefined);
+        if (isRequired) {
+          const val = row[c.name];
+          if (val === undefined || val === null || val === "") {
+            const errSummary = `Field '${c.name}' is required and has no default value (Row #${rIdx + 1}).`;
+            setCommitMsg({
+              success: false,
+              text: errSummary,
+              parsed: {
+                summary: errSummary,
+                fieldHint: `Column '${c.name}' is NOT NULL and has no default value. Please enter a value before committing.`,
+              },
+            });
+            setSubmitting(false);
+            return;
+          }
+        }
+      }
+    }
+
+    // Prepare inserts: omit __AUTO__ or undefined columns so DB creates auto-increment ID or default
     const insertsToSubmit = newRows.map((r) => {
       const cleanRow: TableRowData = {};
       columns.forEach((c) => {
@@ -816,7 +898,22 @@ export const DataGrid: React.FC<DataGridProps> = ({
           // Omit column so DB generates auto-increment value
         } else if (val === null) {
           cleanRow[c.name] = null;
-        } else if (val !== "") {
+        } else if (val === "") {
+          // If column has default value, omit so DB applies default
+          if (c.default !== null && c.default !== undefined) {
+            // Omit so DB default is used
+          } else if (c.nullable) {
+            // For text/char/varchar, preserve empty string; for numeric/date, send null
+            const isText = c.type.toLowerCase().includes("char") || c.type.toLowerCase().includes("text");
+            if (isText) {
+              cleanRow[c.name] = "";
+            } else {
+              cleanRow[c.name] = null;
+            }
+          } else {
+            cleanRow[c.name] = "";
+          }
+        } else {
           cleanRow[c.name] = val;
         }
       });
@@ -851,9 +948,11 @@ export const DataGrid: React.FC<DataGridProps> = ({
     });
 
     if (stalePending > 0) {
+      const text = `${stalePending} pending change(s) no longer match any loaded row. Refresh the table and edit again - nothing was committed.`;
       setCommitMsg({
         success: false,
-        text: `${stalePending} pending change(s) no longer match any loaded row. Refresh the table and edit again - nothing was committed.`,
+        text,
+        parsed: parseDbError(text),
       });
       setSubmitting(false);
       return;
@@ -884,11 +983,20 @@ export const DataGrid: React.FC<DataGridProps> = ({
         // Perform silent background refresh so the entire table does NOT flicker or reset
         onRefresh(true);
       } else {
-        setCommitMsg({ success: false, text: res.error || "Commit failed, transaction rolled back" });
+        const errText = res.error || "Commit failed, transaction rolled back";
+        setCommitMsg({
+          success: false,
+          text: errText,
+          parsed: parseDbError(errText),
+        });
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      setCommitMsg({ success: false, text: msg });
+      setCommitMsg({
+        success: false,
+        text: msg,
+        parsed: parseDbError(msg),
+      });
     } finally {
       setSubmitting(false);
     }
@@ -1015,15 +1123,17 @@ export const DataGrid: React.FC<DataGridProps> = ({
   };
 
   const handleHeaderClick = (colName: string) => {
-    if (!onSortChange) return;
-    if (sortColumn !== colName) {
-      onSortChange(colName, "ASC");
-    } else if (sortOrder === "ASC") {
-      onSortChange(colName, "DESC");
-    } else {
-      onSortChange(null, "ASC");
-    }
-    onPageChange(0);
+    guardPendingChanges(() => {
+      if (!onSortChange) return;
+      if (sortColumn !== colName) {
+        onSortChange(colName, "ASC");
+      } else if (sortOrder === "ASC") {
+        onSortChange(colName, "DESC");
+      } else {
+        onSortChange(null, "ASC");
+      }
+      onPageChange(0);
+    }, "Sorting columns");
   };
 
   const totalPages = Math.ceil(totalRows / pageSize) || 1;
@@ -1400,8 +1510,65 @@ export const DataGrid: React.FC<DataGridProps> = ({
 
       {commitMsg && (
         <div className={`status-bar-msg ${commitMsg.success ? "success" : "error"}`}>
-          {commitMsg.success ? <Check size={13} /> : <AlertCircle size={13} />}
-          <span>{commitMsg.text}</span>
+          <div className="status-bar-main">
+            {commitMsg.success ? (
+              <Check size={14} className="status-icon flex-shrink-0" />
+            ) : (
+              <AlertCircle size={14} className="status-icon flex-shrink-0" />
+            )}
+            <div className="status-text-wrap">
+              <span className="status-text font-mono" title={commitMsg.parsed?.summary || commitMsg.text}>
+                {commitMsg.parsed?.summary || commitMsg.text}
+              </span>
+              {commitMsg.parsed?.fieldHint && (
+                <span className="status-hint-pill" title={commitMsg.parsed.fieldHint}>
+                  {commitMsg.parsed.fieldHint}
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="status-bar-actions">
+            {!commitMsg.success && (commitMsg.parsed?.sql || commitMsg.text.length > 50) && (
+              <button
+                type="button"
+                className="status-action-btn"
+                onClick={() => {
+                  setErrorDetailsModal({
+                    summary: commitMsg.parsed?.summary || commitMsg.text,
+                    sql: commitMsg.parsed?.sql,
+                    fieldHint: commitMsg.parsed?.fieldHint,
+                    raw: commitMsg.text,
+                  });
+                }}
+                title="View error details and SQL"
+              >
+                <Eye size={12} />
+                <span>View Details</span>
+              </button>
+            )}
+            {!commitMsg.success && (
+              <button
+                type="button"
+                className="status-action-btn"
+                onClick={() => {
+                  navigator.clipboard.writeText(commitMsg.text);
+                }}
+                title="Copy error message"
+              >
+                <Copy size={12} />
+                <span>Copy</span>
+              </button>
+            )}
+            <button
+              type="button"
+              className="status-close-btn"
+              onClick={() => setCommitMsg(null)}
+              title="Dismiss"
+            >
+              <X size={13} />
+            </button>
+          </div>
         </div>
       )}
 
@@ -1471,6 +1638,9 @@ export const DataGrid: React.FC<DataGridProps> = ({
                             </span>
                           )}
                           <span className="col-name">{c.name}</span>
+                          {!c.nullable && !c.autoIncrement && (c.default === null || c.default === undefined) && (
+                            <span className="col-required-star" title="Required (NOT NULL, No Default)">*</span>
+                          )}
                           <span className="col-type">{c.type}</span>
                         </div>
                         <span className="sort-icon-wrap">
@@ -1817,7 +1987,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
         <div className="page-nav-btns">
           <button
             className="btn btn-secondary btn-sm"
-            onClick={() => onPageChange(Math.max(0, page - 1))}
+            onClick={() => guardPendingChanges(() => onPageChange(Math.max(0, page - 1)), "Changing page")}
             disabled={page === 0}
             title={page === 0 ? "Already on first page" : `Go to page ${page}`}
           >
@@ -1826,7 +1996,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
           </button>
           <button
             className="btn btn-secondary btn-sm"
-            onClick={() => onPageChange(page + 1)}
+            onClick={() => guardPendingChanges(() => onPageChange(page + 1), "Changing page")}
             disabled={(page + 1) * pageSize >= totalRows}
             title={(page + 1) * pageSize >= totalRows ? "Already on last page" : `Go to page ${page + 2}`}
           >
@@ -1884,6 +2054,16 @@ export const DataGrid: React.FC<DataGridProps> = ({
                         {col.autoIncrement && (
                           <span className="field-auto-badge">
                             <Zap size={10} /> Auto-Increment
+                          </span>
+                        )}
+                        {!col.nullable && !col.autoIncrement && (col.default === null || col.default === undefined) && (
+                          <span className="field-required-badge" title="Required (NOT NULL, No Default)">
+                            * Required
+                          </span>
+                        )}
+                        {col.default !== null && col.default !== undefined && (
+                          <span className="field-default-badge font-mono" title={`Default: ${col.default}`}>
+                            default: {String(col.default)}
                           </span>
                         )}
                       </div>
@@ -2188,6 +2368,102 @@ export const DataGrid: React.FC<DataGridProps> = ({
               <button className="btn btn-danger" onClick={handleConfirmMarkDelete}>
                 <Trash2 size={12} />
                 <span>Confirm</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Error Details Modal Dialog */}
+      {errorDetailsModal && (
+        <div className="cell-overlay" onClick={() => setErrorDetailsModal(null)}>
+          <div className="cell-card error-details-modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="cell-card-hdr danger-hdr">
+              <div className="hdr-left">
+                <AlertCircle size={15} className="danger-icon" />
+                <span>Database Error Details</span>
+              </div>
+              <button className="icon-close-btn" onClick={() => setErrorDetailsModal(null)}>
+                <X size={14} />
+              </button>
+            </div>
+            <div className="error-details-body">
+              <div className="error-summary-box font-mono">
+                {errorDetailsModal.summary}
+              </div>
+
+              {errorDetailsModal.fieldHint && (
+                <div className="error-hint-banner">
+                  <span className="hint-label">💡 Note:</span>
+                  <span>{errorDetailsModal.fieldHint}</span>
+                </div>
+              )}
+
+              {errorDetailsModal.sql && (
+                <div className="error-sql-section">
+                  <div className="error-sql-hdr">
+                    <span className="sql-title">Executed SQL Statement</span>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => {
+                        if (errorDetailsModal.sql) {
+                          navigator.clipboard.writeText(errorDetailsModal.sql);
+                        }
+                      }}
+                    >
+                      <Copy size={11} />
+                      <span>Copy SQL</span>
+                    </button>
+                  </div>
+                  <pre className="error-sql-code font-mono">
+                    {errorDetailsModal.sql}
+                  </pre>
+                </div>
+              )}
+            </div>
+            <div className="cell-actions error-modal-footer">
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => {
+                  navigator.clipboard.writeText(errorDetailsModal.raw);
+                }}
+              >
+                <Copy size={12} />
+                <span>Copy Full Error</span>
+              </button>
+              <button type="button" className="btn btn-primary btn-sm" onClick={() => setErrorDetailsModal(null)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm Discard Pending Changes on Navigation Modal */}
+      {confirmPendingNav && (
+        <div className="cell-overlay" onClick={() => setConfirmPendingNav(null)}>
+          <div className="cell-card delete-confirm-card" onClick={(e) => e.stopPropagation()}>
+            <div className="cell-card-hdr" style={{ color: "#f59e0b" }}>
+              <div className="hdr-left" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                <AlertCircle size={15} color="#f59e0b" />
+                <span>{confirmPendingNav.title}</span>
+              </div>
+              <button className="icon-close-btn" onClick={() => setConfirmPendingNav(null)}>
+                <X size={14} />
+              </button>
+            </div>
+            <div className="delete-modal-content">
+              <p className="delete-modal-notice">{confirmPendingNav.message}</p>
+            </div>
+            <div className="cell-actions delete-modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setConfirmPendingNav(null)}>
+                Cancel
+              </button>
+              <button type="button" className="btn btn-danger" onClick={handleConfirmDiscardNav}>
+                <Trash2 size={12} />
+                <span>Discard & Proceed</span>
               </button>
             </div>
           </div>
@@ -2823,26 +3099,221 @@ export const DataGrid: React.FC<DataGridProps> = ({
           z-index: 1000;
           display: flex;
           align-items: center;
-          gap: 8px;
-          padding: 8px 18px;
+          justify-content: space-between;
+          gap: 12px;
+          padding: 8px 14px;
           font-size: 12px;
           font-weight: 500;
-          border-radius: 9999px;
+          border-radius: var(--radius-md, 8px);
           background: var(--bg-card);
           backdrop-filter: blur(16px);
           -webkit-backdrop-filter: blur(16px);
-          border: 1px solid var(--border-light);
-          box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.45);
+          border: 1px solid var(--border-medium);
+          box-shadow: var(--shadow-popup, 0 12px 32px -4px rgba(0, 0, 0, 0.5));
           animation: floatDockIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-          white-space: nowrap;
           pointer-events: auto;
-          max-width: calc(100vw - 32px);
+          max-width: min(840px, calc(100vw - 32px));
+          box-sizing: border-box;
+          color: var(--text-main);
         }
-        .status-bar-msg.success {
-          color: #34d399;
+        .status-bar-msg.success .status-icon {
+          color: var(--accent-green, #10b981);
         }
-        .status-bar-msg.error {
+        .status-bar-msg.error .status-icon {
+          color: var(--accent-red, #ef4444);
+        }
+        .status-bar-main {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          min-width: 0;
+          overflow: hidden;
+          flex: 1;
+        }
+        .status-text-wrap {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          min-width: 0;
+          overflow: hidden;
+        }
+        .status-text {
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          font-size: 12px;
+          color: var(--text-main);
+        }
+        .status-hint-pill {
+          background: var(--bg-tertiary);
+          color: var(--text-sub);
+          padding: 2px 7px;
+          border-radius: 4px;
+          font-size: 11px;
+          white-space: nowrap;
+          flex-shrink: 0;
+          border: 1px solid var(--border-light);
+        }
+        .status-bar-actions {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          flex-shrink: 0;
+        }
+        .status-action-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-light);
+          color: var(--text-main);
+          padding: 3px 8px;
+          border-radius: 4px;
+          font-size: 11px;
+          cursor: pointer;
+          transition: all 0.12s ease;
+          font-weight: 500;
+        }
+        .status-action-btn:hover {
+          background: var(--bg-hover);
+          border-color: var(--border-medium);
+          color: #fff;
+        }
+        .status-close-btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          background: transparent;
+          border: none;
+          color: var(--text-muted);
+          padding: 4px;
+          border-radius: 4px;
+          cursor: pointer;
+          transition: all 0.12s ease;
+        }
+        .status-close-btn:hover {
+          color: var(--text-main);
+          background: var(--bg-hover);
+        }
+
+        .col-required-star {
+          color: var(--accent-red, #ef4444);
+          font-weight: 700;
+          font-size: 13px;
+          margin-left: 2px;
+          margin-right: 2px;
+          cursor: help;
+        }
+        .field-required-badge {
+          display: inline-flex;
+          align-items: center;
+          font-size: 9.5px;
+          font-weight: 600;
           color: #f87171;
+          background: rgba(239, 68, 68, 0.12);
+          border: 1px solid rgba(239, 68, 68, 0.3);
+          padding: 1px 5px;
+          border-radius: 3px;
+          text-transform: uppercase;
+          letter-spacing: 0.2px;
+        }
+        .field-default-badge {
+          display: inline-flex;
+          align-items: center;
+          font-size: 9px;
+          color: var(--text-muted);
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-light);
+          padding: 1px 5px;
+          border-radius: 3px;
+          max-width: 140px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .error-details-modal-card {
+          width: 640px;
+          max-width: calc(100vw - 40px);
+          display: flex;
+          flex-direction: column;
+          gap: 14px;
+          background: var(--bg-card);
+          border: 1px solid var(--border-medium);
+          border-radius: var(--radius-md);
+          padding: 16px;
+          box-shadow: var(--shadow-popup);
+          z-index: 1001;
+        }
+        .error-details-body {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+          max-height: 60vh;
+          overflow-y: auto;
+        }
+        .error-summary-box {
+          background: rgba(239, 68, 68, 0.1);
+          border: 1px solid rgba(239, 68, 68, 0.3);
+          color: #fca5a5;
+          padding: 10px 12px;
+          border-radius: 6px;
+          font-size: 12px;
+          line-height: 1.5;
+          word-break: break-word;
+        }
+        .error-hint-banner {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          background: rgba(245, 158, 11, 0.12);
+          border: 1px solid rgba(245, 158, 11, 0.35);
+          color: #fbbf24;
+          padding: 8px 12px;
+          border-radius: 6px;
+          font-size: 11.5px;
+        }
+        .hint-label {
+          font-weight: 600;
+          flex-shrink: 0;
+        }
+        .error-sql-section {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+        }
+        .error-sql-hdr {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+        }
+        .sql-title {
+          font-size: 11px;
+          font-weight: 600;
+          color: var(--text-sub);
+          text-transform: uppercase;
+          letter-spacing: 0.3px;
+        }
+        .error-sql-code {
+          background: var(--bg-primary, #0f1117);
+          border: 1px solid var(--border-light);
+          border-radius: 6px;
+          padding: 10px 12px;
+          font-size: 11px;
+          color: var(--text-main);
+          overflow-x: auto;
+          white-space: pre-wrap;
+          word-break: break-all;
+          max-height: 200px;
+          margin: 0;
+        }
+        .error-modal-footer {
+          display: flex;
+          align-items: center;
+          justify-content: flex-end;
+          gap: 8px;
+          padding-top: 8px;
+          border-top: 1px solid var(--border-light);
         }
 
         @keyframes floatDockIn {

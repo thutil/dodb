@@ -6,6 +6,7 @@ import { ConnectionModal } from "../components/ConnectionModal";
 import { AuditLogDrawer } from "../components/AuditLogDrawer";
 import { TableStructureModal } from "../components/TableStructureModal";
 import { CreateTableModal } from "../components/CreateTableModal";
+import { CreateDatabaseModal } from "../components/CreateDatabaseModal";
 import { EditTableModal } from "../components/EditTableModal";
 import { ConfirmDdlModal, ConfirmDdlRequest } from "../components/ConfirmDdlModal";
 import { DataGrid, PendingChanges, CommitResult } from "../components/DataGrid";
@@ -70,6 +71,7 @@ import { importManager, ImportProgress, ImportReport } from "../utils/importMana
 const DEFAULT_APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION || "0.0.0-dev";
 const SESSION_ID_PREFIX = "session-";
 const LAST_PROFILE_KEY = "dodb_last_active_profile";
+const LAST_DATABASE_KEY = "dodb_last_active_database";
 const RECONNECT_DELAYS_MS = [1000, 2000, 5000, 10000];
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:5820/api";
@@ -175,6 +177,7 @@ export default function Home() {
   }, []);
   const [structureModalTable, setStructureModalTable] = useState<string | null>(null);
   const [isCreateTableOpen, setIsCreateTableOpen] = useState(false);
+  const [isCreateDbOpen, setIsCreateDbOpen] = useState(false);
   const [editTableModalTable, setEditTableModalTable] = useState<string | null>(null);
   const [confirmDdlRequest, setConfirmDdlRequest] = useState<ConfirmDdlRequest | null>(null);
   const [databases, setDatabases] = useState<string[]>([]);
@@ -201,6 +204,7 @@ export default function Home() {
   const reconnectingRef = React.useRef(false);
   const reconnectExhaustedRef = React.useRef<Set<string>>(new Set());
   const bootstrappedRef = React.useRef(false);
+  const softReloadRef = React.useRef<() => void>(() => {});
 
   // Auto-detect OS Theme on mount and load saved language & UI scale
   useEffect(() => {
@@ -306,7 +310,16 @@ export default function Home() {
         (key === "i" || key === "j" || key === "c" || code === "KeyI" || code === "KeyJ" || code === "KeyC");
       const isViewSource = isCmdOrCtrl && (key === "u" || code === "KeyU");
 
-      if (isReload || isF12 || isInspect || isViewSource) {
+      if (isReload) {
+        if (!e.shiftKey) {
+          e.preventDefault();
+          e.stopPropagation();
+          softReloadRef.current?.();
+          return;
+        }
+      }
+
+      if (isF12 || isInspect || isViewSource) {
         e.preventDefault();
         e.stopPropagation();
       }
@@ -358,6 +371,16 @@ export default function Home() {
         e.stopPropagation();
         toggleTheme();
         return;
+      }
+
+      // In-app Soft Reload (⌘R / Ctrl+R / F5)
+      if ((isCmdOrCtrl && key === "r") || key === "f5") {
+        if (!e.shiftKey) {
+          e.preventDefault();
+          e.stopPropagation();
+          softReloadRef.current?.();
+          return;
+        }
       }
 
       // Navigation & Action Shortcuts (when not focused in inputs)
@@ -453,6 +476,11 @@ export default function Home() {
     } catch (err) {
       console.warn("Disconnect backend warning", err);
     }
+    try {
+      localStorage.removeItem(LAST_PROFILE_KEY);
+      localStorage.removeItem(LAST_DATABASE_KEY);
+      sessionStorage.removeItem("dodb_last_active_table");
+    } catch {}
     setActiveProfile(null);
     setActiveDatabase("");
     setDatabases([]);
@@ -475,6 +503,11 @@ export default function Home() {
     if (dbList.length > 0) {
       setActiveDatabase((prev) => {
         if (prev && dbList.includes(prev)) return prev;
+        let savedDb: string | null = null;
+        try {
+          savedDb = localStorage.getItem(LAST_DATABASE_KEY);
+        } catch {}
+        if (savedDb && dbList.includes(savedDb)) return savedDb;
         if (profile.database && dbList.includes(profile.database)) return profile.database;
         return dbList[0];
       });
@@ -544,7 +577,15 @@ export default function Home() {
       const newTables: string[] = data.tables || [];
       setTables(newTables);
       if (newTables.length > 0) {
-        setActiveTable(newTables[0]);
+        let savedTable: string | null = null;
+        try {
+          savedTable = sessionStorage.getItem("dodb_last_active_table");
+        } catch {}
+        setActiveTable((curr) => {
+          if (curr && newTables.includes(curr)) return curr;
+          if (savedTable && newTables.includes(savedTable)) return savedTable;
+          return newTables[0];
+        });
       } else {
         setActiveTable(null);
       }
@@ -638,6 +679,65 @@ export default function Home() {
       fetchTableData();
     }
   }, [activeDatabase, activeTable, page, sortColumn, sortOrder, searchQuery, filters, fetchTableData]);
+
+  // Save active database and active table to storage for seamless page reload recovery
+  useEffect(() => {
+    if (activeDatabase) {
+      try {
+        localStorage.setItem(LAST_DATABASE_KEY, activeDatabase);
+      } catch {}
+    }
+  }, [activeDatabase]);
+
+  useEffect(() => {
+    if (activeTable) {
+      try {
+        sessionStorage.setItem("dodb_last_active_table", activeTable);
+      } catch {}
+    }
+  }, [activeTable]);
+
+  // In-app soft reload handler (triggered by Cmd+R / Ctrl+R / F5 or UI reload button)
+  const handleSoftReload = useCallback(async () => {
+    if (!activeProfile) {
+      await fetchProfiles();
+      showToast({
+        title: language === "th" ? "รีเฟรชรายชื่อการเชื่อมต่อแล้ว" : "Connection profiles refreshed",
+        type: "success",
+        duration: 1500,
+      });
+      return;
+    }
+
+    try {
+      fetchSeqRef.current += 1;
+      if (activeDatabase) {
+        if (activeTable) {
+          await fetchTableData(true);
+        }
+        await fetchTables();
+      }
+      await fetchDatabases();
+
+      showToast({
+        title: language === "th" ? "รีเฟรชข้อมูลเรียบร้อย (⌘R)" : "Data refreshed (⌘R)",
+        type: "success",
+        duration: 1800,
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast({
+        title: language === "th" ? "รีเฟรชข้อมูลไม่สำเร็จ" : "Refresh failed",
+        sub: msg,
+        type: "error",
+        duration: 3000,
+      });
+    }
+  }, [activeProfile, activeDatabase, activeTable, fetchTableData, fetchTables, fetchDatabases, fetchProfiles, language, showToast]);
+
+  useEffect(() => {
+    softReloadRef.current = handleSoftReload;
+  }, [handleSoftReload]);
 
   // Real-time Database Ping Heartbeat (measures actual round-trip latency).
   // It doubles as the keep-alive: the ping itself keeps the pool warm, and a
@@ -813,7 +913,7 @@ export default function Home() {
       return;
     }
     const target = lastId ? profiles.find((p) => p.id === lastId) : undefined;
-    if (!target || !target.keepAlive) return;
+    if (!target) return;
 
     if (target.savePassword === false && target.type !== "sqlite") {
       setAutoUnlockProfileId(target.id);
@@ -1305,6 +1405,7 @@ export default function Home() {
               }}
               onViewStructure={(tbl) => setStructureModalTable(tbl)}
               onCreateTable={() => setIsCreateTableOpen(true)}
+              onCreateDatabase={() => setIsCreateDbOpen(true)}
               onEditStructure={(tbl) => setEditTableModalTable(tbl)}
               onTruncateTable={(tbl) => handleRequestTruncate(tbl)}
               onDropTable={(tbl) => handleRequestDrop(tbl)}
@@ -1491,6 +1592,25 @@ export default function Home() {
             setActiveView("explorer");
           }}
         />
+
+        {isCreateDbOpen && activeProfile && (
+          <CreateDatabaseModal
+            activeProfile={activeProfile}
+            currentDb={activeDatabase}
+            onClose={() => setIsCreateDbOpen(false)}
+            onSuccess={(newDb) => {
+              fetchDatabases();
+              setActiveDatabase(newDb);
+              setActiveTable(null);
+              setRows([]);
+              setColumns([]);
+              showToast({
+                title: `Database '${newDb}' created successfully`,
+                type: "success",
+              });
+            }}
+          />
+        )}
 
         <CreateTableModal
           isOpen={isCreateTableOpen}
@@ -1802,7 +1922,7 @@ export default function Home() {
           right: 20px;
           background: var(--bg-card);
           border: 1px solid var(--border-medium);
-          box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(16, 185, 129, 0.3);
+          box-shadow: var(--shadow-popup, 0 12px 32px rgba(0, 0, 0, 0.45));
           border-radius: var(--radius-md);
           padding: 10px 14px;
           display: flex;
@@ -1817,7 +1937,7 @@ export default function Home() {
           gap: 10px;
         }
         .global-dump-toast.failure {
-          box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(239, 68, 68, 0.35);
+          box-shadow: var(--shadow-popup, 0 12px 32px rgba(0, 0, 0, 0.45));
         }
         .toast-icon.success {
           color: var(--accent-green);
