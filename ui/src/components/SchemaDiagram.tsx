@@ -867,6 +867,7 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
         nodes={nodes}
         edges={edges}
         theme={theme}
+        language={language}
       />
 
       <style jsx>{`

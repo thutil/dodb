@@ -24,6 +24,7 @@ import {
   downloadDiagramImage,
   printDiagram,
 } from "../utils/diagramExport";
+import { Language, t } from "../utils/i18n";
 
 interface ErdExportModalProps {
   isOpen: boolean;
@@ -36,6 +37,7 @@ interface ErdExportModalProps {
   nodes?: Array<any>;
   edges?: Array<any>;
   theme?: "dark" | "light";
+  language?: Language;
 }
 
 export const ErdExportModal: React.FC<ErdExportModalProps> = ({
@@ -49,7 +51,16 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
   nodes,
   edges,
   theme = "dark",
+  language = "en",
 }) => {
+  const activeLanguage = useMemo<Language>(() => {
+    if (language) return language;
+    if (typeof window !== "undefined") {
+      return (localStorage.getItem("dodb_language") as Language) || "en";
+    }
+    return "en";
+  }, [language]);
+
   const [format, setFormat] = useState<ExportFormat>("print");
   const [reportType, setReportType] = useState<ReportType>("full_report");
   const [paperSize, setPaperSize] = useState<PaperSize>("A4");
@@ -96,7 +107,7 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
     try {
       if (format === "print") {
         await printDiagram(flowContainerRef.current, options, selectedTableIds);
-        setExportSuccess("Print dialog opened");
+        setExportSuccess(activeLanguage === "th" ? "เปิดหน้าต่างพิมพ์แล้ว" : "Print dialog opened");
         setTimeout(() => {
           onClose();
         }, 800);
@@ -104,7 +115,7 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
         const savedPath = await downloadDiagramImage(flowContainerRef.current, options, selectedTableIds);
         if (savedPath) {
           const fileName = savedPath.split("/").pop() || savedPath;
-          setExportSuccess(`Saved: ${fileName}`);
+          setExportSuccess(activeLanguage === "th" ? `บันทึกแล้ว: ${fileName}` : `Saved: ${fileName}`);
           setTimeout(() => {
             onClose();
           }, 1200);
@@ -115,7 +126,7 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
       }
     } catch (err: any) {
       console.error("Export diagram failed:", err);
-      setExportError(err?.message || "Failed to export diagram. Please try again.");
+      setExportError(err?.message || (activeLanguage === "th" ? "ไม่สามารถส่งออกแผนภาพได้ กรุณาลองใหม่อีกครั้ง" : "Failed to export diagram. Please try again."));
       setIsExporting(false);
     }
   }, [
@@ -167,7 +178,7 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
               {format === "print" ? <Printer size={15} /> : <FileImage size={15} />}
             </div>
             <div>
-              <h3 className="modal-title">Export &amp; Print Schema</h3>
+              <h3 className="modal-title">{t("erdExportTitle", activeLanguage)}</h3>
               <p className="modal-sub font-mono">{databaseName}</p>
             </div>
           </div>
@@ -187,8 +198,8 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
             }}
           >
             <Printer size={13} />
-            <span className="tab-text">Print / PDF Report</span>
-            <span className="tab-pill">Document</span>
+            <span className="tab-text">{t("erdExportTabPrint", activeLanguage)}</span>
+            <span className="tab-pill">{t("erdExportPillDocument", activeLanguage)}</span>
           </button>
           <button
             type="button"
@@ -199,8 +210,8 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
             }}
           >
             <FileImage size={13} />
-            <span className="tab-text">PNG Image</span>
-            <span className="tab-pill">Lossless</span>
+            <span className="tab-text">{t("erdExportTabPng", activeLanguage)}</span>
+            <span className="tab-pill">{t("erdExportPillLossless", activeLanguage)}</span>
           </button>
           <button
             type="button"
@@ -211,8 +222,8 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
             }}
           >
             <FileImage size={13} />
-            <span className="tab-text">JPG Image</span>
-            <span className="tab-pill">Compact</span>
+            <span className="tab-text">{t("erdExportTabJpg", activeLanguage)}</span>
+            <span className="tab-pill">{t("erdExportPillCompact", activeLanguage)}</span>
           </button>
         </div>
 
@@ -225,7 +236,7 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
               <>
                 {/* 1. Report Mode Selection */}
                 <div className="option-section">
-                  <label className="section-label">Report Content</label>
+                  <label className="section-label">{t("erdExportContentLabel", activeLanguage)}</label>
                   <div className="report-types-grid">
                     <div
                       className={`report-card ${reportType === "full_report" ? "is-selected" : ""}`}
@@ -233,10 +244,10 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
                     >
                       <div className="report-card-top">
                         <BookOpen size={13} className="report-icon" />
-                        <span className="report-badge">Recommended</span>
+                        <span className="report-badge">{t("erdExportRecommended", activeLanguage)}</span>
                       </div>
-                      <span className="report-card-title">2-Page Full Report</span>
-                      <span className="report-card-desc">Page 1: ERD &bull; Page 2: Dictionary</span>
+                      <span className="report-card-title">{t("erdExportFullReport", activeLanguage)}</span>
+                      <span className="report-card-desc">{t("erdExportFullReportDesc", activeLanguage)}</span>
                     </div>
 
                     <div
@@ -246,8 +257,8 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
                       <div className="report-card-top">
                         <FileImage size={13} className="report-icon" />
                       </div>
-                      <span className="report-card-title">ERD Diagram Only</span>
-                      <span className="report-card-desc">Visual schema diagram</span>
+                      <span className="report-card-title">{t("erdExportDiagramOnly", activeLanguage)}</span>
+                      <span className="report-card-desc">{t("erdExportDiagramOnlyDesc", activeLanguage)}</span>
                     </div>
 
                     <div
@@ -257,8 +268,8 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
                       <div className="report-card-top">
                         <FileText size={13} className="report-icon" />
                       </div>
-                      <span className="report-card-title">Data Dictionary Only</span>
-                      <span className="report-card-desc">Tables &amp; foreign keys</span>
+                      <span className="report-card-title">{t("erdExportDictionaryOnly", activeLanguage)}</span>
+                      <span className="report-card-desc">{t("erdExportDictionaryOnlyDesc", activeLanguage)}</span>
                     </div>
                   </div>
                 </div>
@@ -266,7 +277,7 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
                 {/* 2. Paper Size & Orientation */}
                 <div className="form-grid-row">
                   <div className="option-section flex-1">
-                    <label className="section-label">Paper Size</label>
+                    <label className="section-label">{t("erdExportPaperSize", activeLanguage)}</label>
                     <select
                       value={paperSize}
                       onChange={(e) => setPaperSize(e.target.value as PaperSize)}
@@ -275,12 +286,12 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
                       <option value="A4">A4 (210 × 297 mm)</option>
                       <option value="A3">A3 (297 × 420 mm)</option>
                       <option value="Letter">US Letter (8.5 × 11 in)</option>
-                      <option value="Fit">Fit to Content (Auto)</option>
+                      <option value="Fit">{activeLanguage === "th" ? "พอดีกับเนื้อหา (อัตโนมัติ)" : "Fit to Content (Auto)"}</option>
                     </select>
                   </div>
 
                   <div className="option-section flex-1">
-                    <label className="section-label">Orientation</label>
+                    <label className="section-label">{t("erdExportOrientation", activeLanguage)}</label>
                     <div className="segmented-control">
                       <button
                         type="button"
@@ -288,7 +299,7 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
                         onClick={() => setOrientation("landscape")}
                       >
                         <Layout size={13} />
-                        <span>Landscape</span>
+                        <span>{t("erdExportLandscape", activeLanguage)}</span>
                       </button>
                       <button
                         type="button"
@@ -296,7 +307,7 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
                         onClick={() => setOrientation("portrait")}
                       >
                         <Layout size={13} className="rotate-90" />
-                        <span>Portrait</span>
+                        <span>{t("erdExportPortrait", activeLanguage)}</span>
                       </button>
                     </div>
                   </div>
@@ -304,7 +315,7 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
 
                 {/* 3. Diagram Scope Selection */}
                 <div className="option-section">
-                  <label className="section-label">Diagram Scope</label>
+                  <label className="section-label">{t("erdExportScope", activeLanguage)}</label>
                   <div className="scope-cards-grid">
                     <div
                       className={`scope-card ${scope === "all" ? "is-selected" : ""}`}
@@ -314,8 +325,8 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
                         <div className="radio-dot" />
                       </div>
                       <div className="scope-info">
-                        <span className="scope-title">All Tables</span>
-                        <span className="scope-desc font-mono">{totalTablesCount} tables</span>
+                        <span className="scope-title">{t("erdExportAllTables", activeLanguage)}</span>
+                        <span className="scope-desc font-mono">{totalTablesCount} {activeLanguage === "th" ? "ตาราง" : "tables"}</span>
                       </div>
                     </div>
 
@@ -328,7 +339,7 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
                       }}
                       title={
                         selectedTablesCount === 0
-                          ? "Select tables on canvas (Click / Shift+Click) or sidebar"
+                          ? t("erdExportSelectHint", activeLanguage)
                           : ""
                       }
                     >
@@ -336,11 +347,11 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
                         <div className="radio-dot" />
                       </div>
                       <div className="scope-info">
-                        <span className="scope-title">Selected Only</span>
+                        <span className="scope-title">{t("erdExportSelectedOnly", activeLanguage)}</span>
                         <span className="scope-desc font-mono">
                           {selectedTablesCount > 0
-                            ? `${selectedTablesCount} selected`
-                            : "0 selected"}
+                            ? (activeLanguage === "th" ? `เลือกอยู่ ${selectedTablesCount} ตาราง` : `${selectedTablesCount} selected`)
+                            : (activeLanguage === "th" ? "ยังไม่ได้เลือก" : "0 selected")}
                         </span>
                       </div>
                     </div>
@@ -353,8 +364,8 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
                         <div className="radio-dot" />
                       </div>
                       <div className="scope-info">
-                        <span className="scope-title">Current Viewport</span>
-                        <span className="scope-desc font-mono">Visible area</span>
+                        <span className="scope-title">{t("erdExportViewport", activeLanguage)}</span>
+                        <span className="scope-desc font-mono">{t("erdExportVisibleArea", activeLanguage)}</span>
                       </div>
                     </div>
                   </div>
@@ -365,7 +376,7 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
               <>
                 {/* 1. Diagram Scope Selection */}
                 <div className="option-section">
-                  <label className="section-label">Diagram Scope</label>
+                  <label className="section-label">{t("erdExportScope", activeLanguage)}</label>
                   <div className="scope-cards-grid">
                     <div
                       className={`scope-card ${scope === "all" ? "is-selected" : ""}`}
@@ -375,8 +386,8 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
                         <div className="radio-dot" />
                       </div>
                       <div className="scope-info">
-                        <span className="scope-title">All Tables</span>
-                        <span className="scope-desc font-mono">{totalTablesCount} tables</span>
+                        <span className="scope-title">{t("erdExportAllTables", activeLanguage)}</span>
+                        <span className="scope-desc font-mono">{totalTablesCount} {activeLanguage === "th" ? "ตาราง" : "tables"}</span>
                       </div>
                     </div>
 
@@ -389,7 +400,7 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
                       }}
                       title={
                         selectedTablesCount === 0
-                          ? "Select tables on canvas (Click / Shift+Click) or sidebar"
+                          ? t("erdExportSelectHint", activeLanguage)
                           : ""
                       }
                     >
@@ -397,11 +408,11 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
                         <div className="radio-dot" />
                       </div>
                       <div className="scope-info">
-                        <span className="scope-title">Selected Only</span>
+                        <span className="scope-title">{t("erdExportSelectedOnly", activeLanguage)}</span>
                         <span className="scope-desc font-mono">
                           {selectedTablesCount > 0
-                            ? `${selectedTablesCount} selected`
-                            : "0 selected"}
+                            ? (activeLanguage === "th" ? `เลือกอยู่ ${selectedTablesCount} ตาราง` : `${selectedTablesCount} selected`)
+                            : (activeLanguage === "th" ? "ยังไม่ได้เลือก" : "0 selected")}
                         </span>
                       </div>
                     </div>
@@ -414,8 +425,8 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
                         <div className="radio-dot" />
                       </div>
                       <div className="scope-info">
-                        <span className="scope-title">Current Viewport</span>
-                        <span className="scope-desc font-mono">Visible area</span>
+                        <span className="scope-title">{t("erdExportViewport", activeLanguage)}</span>
+                        <span className="scope-desc font-mono">{t("erdExportVisibleArea", activeLanguage)}</span>
                       </div>
                     </div>
                   </div>
@@ -423,14 +434,14 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
 
                 {/* 2. Resolution Scale */}
                 <div className="option-section">
-                  <label className="section-label">Resolution Scale</label>
+                  <label className="section-label">{t("erdExportResolution", activeLanguage)}</label>
                   <div className="segmented-control">
                     <button
                       type="button"
                       className={`segment-btn ${scale === 1 ? "active" : ""}`}
                       onClick={() => setScale(1)}
                     >
-                      <span>1x (96 DPI)</span>
+                      <span>1x ({activeLanguage === "th" ? "มาตรฐาน" : "96 DPI"})</span>
                     </button>
                     <button
                       type="button"
@@ -438,14 +449,14 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
                       onClick={() => setScale(2)}
                     >
                       <Sparkles size={11} />
-                      <span>2x (High DPI)</span>
+                      <span>2x ({activeLanguage === "th" ? "คมชัดสูง" : "High DPI"})</span>
                     </button>
                     <button
                       type="button"
                       className={`segment-btn ${scale === 3 ? "active" : ""}`}
                       onClick={() => setScale(3)}
                     >
-                      <span>3x (Ultra Crisp)</span>
+                      <span>3x ({activeLanguage === "th" ? "ละเอียดพิเศษ" : "Ultra Crisp"})</span>
                     </button>
                   </div>
                 </div>
@@ -453,14 +464,14 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
                 {/* 3. Background Style (PNG Only) */}
                 {format === "png" ? (
                   <div className="option-section">
-                    <label className="section-label">Background Style</label>
+                    <label className="section-label">{t("erdExportBackground", activeLanguage)}</label>
                     <div className="segmented-control">
                       <button
                         type="button"
                         className={`segment-btn ${!isTransparent ? "active" : ""}`}
                         onClick={() => setIsTransparent(false)}
                       >
-                        <span>Solid Theme</span>
+                        <span>{t("erdExportSolidTheme", activeLanguage)}</span>
                       </button>
                       <button
                         type="button"
@@ -468,16 +479,16 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
                         onClick={() => setIsTransparent(true)}
                       >
                         <Sparkles size={11} />
-                        <span>Transparent Asset</span>
+                        <span>{t("erdExportTransparent", activeLanguage)}</span>
                       </button>
                     </div>
                   </div>
                 ) : (
                   <div className="option-section">
-                    <label className="section-label">Quality &amp; Compression</label>
+                    <label className="section-label">{t("erdExportQualityCompression", activeLanguage)}</label>
                     <div className="info-banner">
                       <Info size={13} className="info-icon" />
-                      <span>JPG uses 92% high-quality compression with solid canvas background.</span>
+                      <span>{t("erdExportJpgTip", activeLanguage)}</span>
                     </div>
                   </div>
                 )}
@@ -486,11 +497,11 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
                 <div className="asset-tip-card font-mono">
                   {format === "png" && isTransparent ? (
                     <span>
-                      ✓ Clean transparent asset: Background grid, banner, and watermarks removed. Perfect for slides and docs.
+                      {t("erdExportPngTransTip", activeLanguage)}
                     </span>
                   ) : (
                     <span>
-                      ✓ Full canvas render: Includes theme colors ({theme} mode), relationship connectors, and table schema layout.
+                      {t("erdExportPngSolidTip", activeLanguage, { theme })}
                     </span>
                   )}
                 </div>
@@ -503,7 +514,7 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
           {/* Right Column: Live Responsive Visual Preview */}
           <div className="preview-column">
             <div className="preview-header">
-              <label className="section-label">Live Preview</label>
+              <label className="section-label">{t("erdExportLivePreview", activeLanguage)}</label>
               <span className="preview-badge font-mono">
                 {format === "print"
                   ? `${paperSize} • ${orientation.toUpperCase()}`
@@ -531,7 +542,7 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
                       <div className="diagram-sketch-box" />
                       <div className="diagram-sketch-box" />
                     </div>
-                    <div className="paper-label-pill font-mono">Page 1 &bull; ERD Diagram</div>
+                    <div className="paper-label-pill font-mono">{t("erdExportPage1Label", activeLanguage)}</div>
                   </div>
 
                   {/* Page 2: Data Dictionary */}
@@ -551,7 +562,7 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
                       <div className="sketch-tbl-row" />
                       <div className="sketch-tbl-row" />
                     </div>
-                    <div className="paper-label-pill font-mono">Page 2 &bull; Data Dictionary</div>
+                    <div className="paper-label-pill font-mono">{t("erdExportPage2Label", activeLanguage)}</div>
                   </div>
                 </div>
               ) : format === "print" ? (
@@ -581,7 +592,9 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
                     </div>
                   )}
                   <div className="paper-label-pill font-mono">
-                    {reportType === "diagram_only" ? "ERD DIAGRAM" : "DATA DICTIONARY"}
+                    {reportType === "diagram_only"
+                      ? (activeLanguage === "th" ? "แผนภาพ ERD" : "ERD DIAGRAM")
+                      : (activeLanguage === "th" ? "พจนานุกรมข้อมูล" : "DATA DICTIONARY")}
                   </div>
                 </div>
               ) : (
@@ -603,8 +616,8 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
                   </div>
                   <div className="paper-label-pill font-mono">
                     {isTransparent && format === "png"
-                      ? "TRANSPARENT PNG"
-                      : `${format.toUpperCase()} IMAGE (${scale}x)`}
+                      ? (activeLanguage === "th" ? "PNG โปร่งใส" : "TRANSPARENT PNG")
+                      : `${format.toUpperCase()} (${scale}x)`}
                   </div>
                 </div>
               )}
@@ -613,18 +626,18 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
             {/* Live Specifications Footer in Preview */}
             <div className="preview-spec-card font-mono">
               <div className="spec-item">
-                <span className="spec-key">DATABASE</span>
+                <span className="spec-key">{activeLanguage === "th" ? "ฐานข้อมูล" : "DATABASE"}</span>
                 <span className="spec-val" title={databaseName}>{databaseName}</span>
               </div>
               <div className="spec-item">
-                <span className="spec-key">SCOPE</span>
+                <span className="spec-key">{activeLanguage === "th" ? "ขอบเขต" : "SCOPE"}</span>
                 <span className="spec-val">
                   <Layers size={10} />
-                  {activeCount} {activeCount === 1 ? "table" : "tables"}
+                  {activeCount} {activeLanguage === "th" ? "ตาราง" : activeCount === 1 ? "table" : "tables"}
                 </span>
               </div>
               <div className="spec-item">
-                <span className="spec-key">OUTPUT</span>
+                <span className="spec-key">{activeLanguage === "th" ? "ผลลัพธ์" : "OUTPUT"}</span>
                 <span className="spec-val">
                   {format === "print"
                     ? `${paperSize} ${orientation}`
@@ -643,7 +656,7 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
             onClick={onClose}
             disabled={isExporting}
           >
-            Cancel
+            {t("erdExportCancel", activeLanguage)}
           </button>
           <button
             type="button"
@@ -654,7 +667,7 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
             {isExporting ? (
               <>
                 <RefreshCw size={13} className="spin" />
-                <span>{format === "print" ? "Preparing Print Sheet..." : "Saving File..."}</span>
+                <span>{format === "print" ? t("erdExportPreparingPrint", activeLanguage) : t("erdExportSavingFile", activeLanguage)}</span>
               </>
             ) : exportSuccess ? (
               <>
@@ -664,12 +677,12 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
             ) : format === "print" ? (
               <>
                 <Printer size={13} />
-                <span>Open Print / PDF ({activeCount} tables)</span>
+                <span>{t("erdExportOpenPrint", activeLanguage, { count: activeCount })}</span>
               </>
             ) : (
               <>
                 <Download size={13} />
-                <span>Save {format.toUpperCase()} ({activeCount} tables)</span>
+                <span>{t("erdExportSaveImage", activeLanguage, { format: format.toUpperCase(), count: activeCount })}</span>
               </>
             )}
           </button>

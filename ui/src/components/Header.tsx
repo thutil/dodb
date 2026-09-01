@@ -1002,7 +1002,6 @@ export const Header: React.FC<HeaderProps> = ({
           justify-content: center;
           gap: 6px;
           flex: 0 1 200px;
-          min-width: 50px;
           max-width: 260px;
           -webkit-app-region: no-drag;
         }
