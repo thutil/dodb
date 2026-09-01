@@ -53,6 +53,7 @@ import {
   GripHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
+  FileText,
 } from "lucide-react";
 import {
   ConnectionProfile,
@@ -77,6 +78,8 @@ import { extractColumnMappingsFromSql } from "../utils/sqlUtils";
 import { setSharedSql, useSharedSql } from "../utils/queryWorkspaceStore";
 import { PendingChanges, CommitResult } from "./DataGrid";
 import { saveTextFileAsync } from "../utils/saveFile";
+import { ContentEditorModal, ContentEditorData } from "./ContentEditorModal";
+import { getContentInfo } from "../utils/contentDetection";
 
 interface VisualQueryBuilderProps {
   activeProfile: ConnectionProfile | null;
@@ -926,6 +929,7 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
   const [editValue, setEditValue] = useState<string>("");
   const [isSubmittingChanges, setIsSubmittingChanges] = useState<boolean>(false);
   const [commitMessage, setCommitMessage] = useState<{ success: boolean; text: string } | null>(null);
+  const [contentEditorModal, setContentEditorModal] = useState<ContentEditorData | null>(null);
 
   const editInputRef = useRef<HTMLInputElement>(null);
   const { fitView } = useReactFlow();
@@ -1923,6 +1927,42 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
     window.addEventListener("mousemove", handleMouseMove);
     window.addEventListener("mouseup", handleMouseUp);
   };
+
+  // Helper to lookup column type from schemas
+  const findColType = useCallback((fieldName: string): string | undefined => {
+    const colOnly = fieldName.includes(".") ? fieldName.split(".").pop()! : fieldName;
+    for (const tbl of Object.keys(tableSchemas)) {
+      const matched = tableSchemas[tbl]?.find((c) => c.name === colOnly || c.name === fieldName);
+      if (matched?.type) return matched.type;
+    }
+    return undefined;
+  }, [tableSchemas]);
+
+  // Open Content / Rich Text Editor Modal for cell in Visual Query Builder
+  const openContentEditor = useCallback((
+    rIdx: number,
+    colName: string,
+    currentVal: unknown,
+    colType?: string
+  ) => {
+    setContentEditorModal({
+      title: `Query Result — ${colName}`,
+      subtitle: `Row #${rIdx + 1}`,
+      colName,
+      colType: colType || findColType(colName),
+      value: currentVal,
+      onSave: (newVal) => {
+        setEditedCells((prev) => ({
+          ...prev,
+          [rIdx]: {
+            ...(prev[rIdx] || {}),
+            [colName]: newVal,
+          },
+        }));
+      },
+      onClose: () => setContentEditorModal(null),
+    });
+  }, [findColType]);
 
   // Start inline editing
   const startEditing = (rowIdx: number, colName: string, currentVal: unknown) => {
@@ -3049,7 +3089,7 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
                         <thead>
                           <tr>
                             <th className="th-idx">#</th>
-                            <th className="th-actions">Actions</th>
+                            <th className="th-actions" style={{ width: "60px" }}>Actions</th>
                             {(queryResult.fields || Object.keys(queryResult.rows[0] || {})).map(
                               (f) => (
                                 <th key={f}>{f}</th>
@@ -3081,14 +3121,29 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
                                 </td>
 
                                 <td className="td-actions">
-                                  <button
-                                    type="button"
-                                    className={`row-action-btn ${isDeleted ? "is-active-del" : ""}`}
-                                    onClick={() => toggleDeleteRow(idx)}
-                                    title={isDeleted ? "Undo delete row" : "Mark row for deletion"}
-                                  >
-                                    {isDeleted ? <RotateCcw size={11} /> : <Trash2 size={11} />}
-                                  </button>
+                                  <div style={{ display: "inline-flex", alignItems: "center", gap: "2px" }}>
+                                    <button
+                                      type="button"
+                                      className="row-action-btn"
+                                      onClick={() => {
+                                        const targetField = fields.find((fld) => getContentInfo(row[fld], fld, findColType(fld))) || fields[0];
+                                        if (targetField) {
+                                          openContentEditor(idx, targetField, (editedCells[idx] || {})[targetField] ?? row[targetField], findColType(targetField));
+                                        }
+                                      }}
+                                      title="Open row content in Text Editor"
+                                    >
+                                      <FileText size={11} />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className={`row-action-btn ${isDeleted ? "is-active-del" : ""}`}
+                                      onClick={() => toggleDeleteRow(idx)}
+                                      title={isDeleted ? "Undo delete row" : "Mark row for deletion"}
+                                    >
+                                      {isDeleted ? <RotateCcw size={11} /> : <Trash2 size={11} />}
+                                    </button>
+                                  </div>
                                 </td>
 
                                 {fields.map((f) => {
@@ -3097,6 +3152,8 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
                                   const isNull = cellVal === null || cellVal === undefined;
                                   const isCurrentlyEditing =
                                     editingCell?.rowIdx === idx && editingCell?.colName === f;
+                                  const colType = findColType(f);
+                                  const cInfo = !isNull ? getContentInfo(cellVal, f, colType) : null;
 
                                   if (isCurrentlyEditing) {
                                     return (
@@ -3125,13 +3182,44 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
                                     <td
                                       key={f}
                                       className={`result-cell ${isNull ? "is-null" : ""} ${isCellEdited ? "is-edited" : ""}`}
-                                      onDoubleClick={() => startEditing(idx, f, cellVal)}
-                                      title="Double-click to edit cell"
+                                      onDoubleClick={() => {
+                                        if (isDeleted) return;
+                                        if (cInfo) {
+                                          openContentEditor(idx, f, cellVal, colType);
+                                        } else {
+                                          startEditing(idx, f, cellVal);
+                                        }
+                                      }}
+                                      title={
+                                        cInfo
+                                          ? `${cInfo.titleSnippet || cInfo.label} (Double-click or click badge to open Text Editor)`
+                                          : "Double-click to edit cell"
+                                      }
                                     >
                                       <div className="cell-content-box">
-                                        <span className="cell-value-text">
-                                          {isNull ? "NULL" : String(cellVal)}
-                                        </span>
+                                        {cInfo ? (
+                                          <div className="content-cell-content">
+                                            <span className="content-cell-text font-mono">
+                                              {typeof cellVal === "object" ? JSON.stringify(cellVal) : String(cellVal)}
+                                            </span>
+                                            <button
+                                              type="button"
+                                              className={`content-editor-pill ${cInfo.badgeClass}`}
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                openContentEditor(idx, f, cellVal, colType);
+                                              }}
+                                              title={cInfo.titleSnippet ? `${cInfo.titleSnippet} (Click to open Text Editor)` : `Open Text Editor (${cInfo.label})`}
+                                            >
+                                              <FileText size={10} />
+                                              <span>{cInfo.label}</span>
+                                            </button>
+                                          </div>
+                                        ) : (
+                                          <span className="cell-value-text font-mono">
+                                            {isNull ? "NULL" : String(cellVal)}
+                                          </span>
+                                        )}
                                         {isCellEdited && <span className="edited-dot" />}
                                       </div>
                                     </td>
@@ -3746,6 +3834,13 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
           </div>
         )}
       </div>
+
+      {contentEditorModal && (
+        <ContentEditorModal
+          data={contentEditorModal}
+          theme={theme}
+        />
+      )}
 
       <style jsx>{`
         .visual-query-container {

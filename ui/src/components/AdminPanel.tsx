@@ -29,6 +29,8 @@ import {
   Sparkles,
   Archive,
   Search,
+  Table as TableIcon,
+  Terminal,
 } from "lucide-react";
 import { ConnectionProfile } from "../types";
 import { apiClient } from "../utils/apiClient";
@@ -726,9 +728,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </div>
 
               <form onSubmit={handleCreateUser} className="create-user-form">
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>Username</label>
+                <div className="user-inputs-row">
+                  <div className="user-input-field">
+                    <label className="field-label">Username</label>
                     <input
                       type="text"
                       className="input form-control font-mono"
@@ -737,8 +739,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       onChange={(e) => setNewUsername(e.target.value)}
                     />
                   </div>
-                  <div className="form-group">
-                    <label>Password</label>
+
+                  <div className="user-input-field">
+                    <label className="field-label">Password</label>
                     <input
                       type="password"
                       className="input form-control font-mono"
@@ -747,26 +750,30 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       onChange={(e) => setNewUserPass(e.target.value)}
                     />
                   </div>
-                </div>
 
-                <div className="form-options">
-                  <label className="checkbox-label" title="Grant superuser administrative rights">
-                    <input
-                      type="checkbox"
-                      checked={isSuperuser}
-                      onChange={(e) => setIsSuperuser(e.target.checked)}
-                    />
-                    <span>Grant Superuser / Admin Privileges</span>
-                  </label>
+                  <div className="user-option-field">
+                    <label className="checkbox-label" title="Grant superuser administrative rights">
+                      <input
+                        type="checkbox"
+                        checked={isSuperuser}
+                        onChange={(e) => setIsSuperuser(e.target.checked)}
+                      />
+                      <span>Grant Superuser / Admin Privileges</span>
+                    </label>
+                  </div>
 
-                  <button
-                    className="btn btn-primary"
-                    type="submit"
-                    disabled={!newUsername.trim() || !newUserPass.trim()}
-                  >
-                    <Plus size={13} />
-                    <span>Create User</span>
-                  </button>
+                  <div className="user-btn-field">
+                    <button
+                      className="btn btn-primary create-btn"
+                      type="submit"
+                      disabled={!newUsername.trim() || !newUserPass.trim()}
+                      data-tooltip="Create new database user"
+                      data-tooltip-pos="bottom"
+                    >
+                      <Plus size={13} />
+                      <span>Create User</span>
+                    </button>
+                  </div>
                 </div>
               </form>
 
@@ -798,7 +805,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <h4 className="section-heading">Database Users ({users.length})</h4>
                   <span className="section-sub">Accounts registered on this database server</span>
                 </div>
-                <button className="btn btn-secondary" onClick={fetchUsers} disabled={usersLoading}>
+                <button
+                  className="btn btn-secondary"
+                  onClick={fetchUsers}
+                  disabled={usersLoading}
+                  data-tooltip="Refresh database users"
+                  data-tooltip-pos="bottom"
+                >
                   <RefreshCw size={12} className={usersLoading ? "spin" : ""} />
                   <span>Refresh Users</span>
                 </button>
@@ -824,7 +837,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       </tr>
                     ) : (
                       users.map((u, idx) => (
-                        <tr key={`${u.username}-${u.host || ""}`}>
+                        <tr key={`${u.username}-${u.host || "%"}-${idx}`}>
                           <td className="row-num font-mono">{idx + 1}</td>
                           <td className="font-mono user-name-col">
                             <div className="user-name-wrap">
@@ -844,7 +857,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                             <button
                               className="btn btn-danger icon-only-btn"
                               onClick={() => setUserToDrop(u)}
-                              title={`Drop user '${u.username}'`}
+                              data-tooltip={`Drop user '${u.username}'@'${u.host || "%"}'`}
+                              data-tooltip-pos="left"
                             >
                               <Trash2 size={13} />
                             </button>
@@ -1190,6 +1204,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                                 checked={checked}
                                 onChange={() => handleToggleTable(tbl)}
                               />
+                              <TableIcon size={12} className="tbl-row-icon" />
                               <span className="font-mono tbl-name">{tbl}</span>
                             </label>
                           );
@@ -1339,6 +1354,55 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       <span>{dumpProgress.error}</span>
                     </div>
                   )}
+                </div>
+
+                {/* Live Console / Job Log Stream */}
+                <div className="dump-log-console">
+                  <div className="dump-log-header">
+                    <div className="log-title-wrap">
+                      <Terminal size={12} className="log-icon" />
+                      <span>Live Export Stream</span>
+                    </div>
+                    <span className={`log-badge font-mono ${dumpProgress.status}`}>
+                      {dumpProgress.status.toUpperCase()}
+                    </span>
+                  </div>
+                  <div className="dump-log-content font-mono">
+                    <div className="log-line">
+                      <span className="log-tag">[TARGET]</span> {activeProfile.name} · DB &quot;{currentDb}&quot; ({activeProfile.type})
+                    </div>
+                    <div className="log-line">
+                      <span className="log-tag">[CONFIG]</span> Mode: {dumpMode === "full" ? "Schema + Data" : dumpMode === "schema_only" ? "Schema Only (DDL)" : "Data Only"} · .{dumpFormat.toUpperCase()} · {dumpBatchSize} rows/chunk
+                    </div>
+                    <div className="log-line">
+                      <span className="log-tag">[TABLES]</span> {dumpSelectedTables.length} of {availableTables.length} table(s) selected
+                    </div>
+                    {dumpProgress.status === "running" && (
+                      <div className="log-line active-line">
+                        <span className="log-tag">[STREAM]</span> Exporting table &quot;{dumpProgress.currentTable}&quot; ({dumpProgress.currentTableIndex}/{dumpProgress.totalTables})... {dumpProgress.rowsExported.toLocaleString()} rows
+                      </div>
+                    )}
+                    {dumpProgress.status === "completed" && (
+                      <div className="log-line success-line">
+                        <span className="log-tag">[DONE]</span> Dump completed in {dumpProgress.elapsedSeconds}s · File: {dumpProgress.fileName} ({((dumpProgress.fileSizeBytes || 0) / (1024 * 1024)).toFixed(2)} MB)
+                      </div>
+                    )}
+                    {dumpProgress.status === "error" && (
+                      <div className="log-line error-line">
+                        <span className="log-tag">[ERROR]</span> {dumpProgress.error}
+                      </div>
+                    )}
+                    {dumpProgress.status === "paused" && (
+                      <div className="log-line warn-line">
+                        <span className="log-tag">[PAUSED]</span> Job execution suspended by user.
+                      </div>
+                    )}
+                    {dumpProgress.status === "idle" && (
+                      <div className="log-line text-sub">
+                        <span className="log-tag">[READY]</span> Ready. Click &quot;Start Background Export&quot; to begin streaming.
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Feature Info Callout */}
@@ -1680,6 +1744,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           padding: 18px 20px;
           width: 100%;
           box-sizing: border-box;
+          display: flex;
+          flex-direction: column;
         }
 
         .tab-pane-grid {
@@ -1687,6 +1753,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           flex-direction: column;
           gap: 18px;
           width: 100%;
+          flex: 1;
         }
 
         .pane-section {
@@ -1789,23 +1856,53 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         }
 
         .create-user-form {
+          width: 100%;
+        }
+
+        .user-inputs-row {
           display: flex;
-          align-items: center;
+          align-items: flex-end;
           gap: 12px;
           flex-wrap: wrap;
+          width: 100%;
         }
 
-        .user-form-inputs {
+        .user-input-field {
+          display: flex;
+          flex-direction: column;
+          gap: 5px;
+          flex: 1;
+          min-width: 180px;
+          max-width: 260px;
+        }
+
+        .user-input-field .field-label {
+          font-size: 11px;
+          font-weight: 500;
+          color: var(--text-muted);
+        }
+
+        .user-input-field .input {
+          height: 34px;
+          box-sizing: border-box;
+          width: 100%;
+        }
+
+        .user-option-field {
           display: flex;
           align-items: center;
-          gap: 10px;
-          flex: 1;
-          flex-wrap: wrap;
+          height: 34px;
+          padding: 0 4px;
         }
 
-        .user-form-inputs .input {
-          width: 220px;
+        .user-btn-field {
+          display: flex;
+          align-items: flex-end;
+        }
+
+        .user-btn-field .create-btn {
           height: 34px;
+          box-sizing: border-box;
         }
 
         .checkbox-label {
@@ -1886,10 +1983,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           align-items: center;
           gap: 8px;
         }
-        .tbl-db-icon { color: var(--accent-blue); flex-shrink: 0; }
         .db-name-col, .user-name-col { font-weight: 600; color: var(--text-main); }
-        .user-name-col { display: flex; align-items: center; gap: 7px; }
-        .user-icon { color: var(--accent-blue); flex-shrink: 0; }
+        .user-name-wrap {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .tbl-user-icon { color: var(--accent-blue); flex-shrink: 0; }
         .host-cell { color: var(--text-sub); }
 
         .active-tag {
@@ -2340,11 +2440,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           display: grid;
           grid-template-columns: 1.15fr 0.85fr;
           gap: 16px;
-          align-items: start;
+          flex: 1;
+          min-height: calc(100vh - 120px);
+          align-items: stretch;
         }
         @media (max-width: 1080px) {
           .dump-grid {
             grid-template-columns: 1fr;
+            min-height: auto;
           }
         }
 
@@ -2352,7 +2455,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           background: var(--bg-card);
           border: 1px solid var(--border-light);
           border-radius: var(--radius-md);
-          padding: 16px;
+          padding: 18px;
+          display: flex;
+          flex-direction: column;
+          height: 100%;
+          box-sizing: border-box;
         }
 
         .dump-form-body {
@@ -2360,6 +2467,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           flex-direction: column;
           gap: 14px;
           margin-top: 14px;
+          flex: 1;
         }
 
         .dump-field-group {
@@ -2497,28 +2605,38 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           font-size: 11px;
         }
 
+        .table-selection-group {
+          margin-top: 4px;
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          min-height: 200px;
+        }
+
         .dump-tables-list {
-          max-height: 180px;
+          flex: 1;
+          min-height: 180px;
+          max-height: none;
           overflow-y: auto;
           border: 1px solid var(--border-light);
           border-radius: var(--radius-sm);
           background: var(--bg-tertiary);
-          padding: 4px;
+          padding: 6px;
           display: flex;
           flex-direction: column;
-          gap: 2px;
+          gap: 3px;
           margin-top: 6px;
         }
         .dump-table-row {
           display: flex;
           align-items: center;
           gap: 8px;
-          padding: 5px 8px;
+          padding: 6px 10px;
           border-radius: 4px;
           font-size: 11.5px;
           color: var(--text-sub);
           cursor: pointer;
-          transition: background 0.1s ease;
+          transition: all 0.1s ease;
           user-select: none;
         }
         .dump-table-row:hover {
@@ -2526,25 +2644,31 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           color: var(--text-main);
         }
         .dump-table-row.checked {
+          background: rgba(59, 130, 246, 0.08);
           color: var(--text-main);
           font-weight: 500;
+        }
+        .tbl-row-icon {
+          color: var(--accent-blue);
+          flex-shrink: 0;
+          opacity: 0.8;
         }
         .tbl-name {
           flex: 1;
         }
         .dump-tables-empty {
-          padding: 16px;
+          padding: 24px;
           text-align: center;
           font-size: 11px;
           color: var(--text-muted);
         }
 
         .dump-submit-row {
-          margin-top: 6px;
+          margin-top: 8px;
         }
         .dump-start-btn {
           width: 100%;
-          height: 36px;
+          height: 38px;
           font-size: 12.5px;
           gap: 8px;
           font-weight: 600;
@@ -2555,6 +2679,99 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           flex-direction: column;
           gap: 14px;
           margin-top: 14px;
+          flex: 1;
+        }
+
+        /* Dump Console Terminal */
+        .dump-log-console {
+          flex: 1;
+          min-height: 160px;
+          background: var(--bg-primary);
+          border: 1px solid var(--border-light);
+          border-radius: var(--radius-sm);
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+        }
+        .dump-log-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 8px 12px;
+          background: var(--bg-tertiary);
+          border-bottom: 1px solid var(--border-light);
+        }
+        .log-title-wrap {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 11px;
+          font-weight: 600;
+          color: var(--text-sub);
+        }
+        .log-icon { color: var(--accent-blue); }
+        .log-badge {
+          font-size: 9.5px;
+          padding: 1px 6px;
+          border-radius: 3px;
+          background: var(--bg-card);
+          border: 1px solid var(--border-light);
+          color: var(--text-muted);
+          letter-spacing: 0.5px;
+        }
+        .log-badge.running {
+          background: rgba(16, 185, 129, 0.15);
+          color: var(--accent-green);
+          border-color: rgba(16, 185, 129, 0.3);
+        }
+        .log-badge.completed {
+          background: rgba(59, 130, 246, 0.15);
+          color: var(--accent-blue);
+          border-color: rgba(59, 130, 246, 0.3);
+        }
+        .log-badge.error {
+          background: rgba(239, 68, 68, 0.15);
+          color: var(--accent-red);
+          border-color: rgba(239, 68, 68, 0.3);
+        }
+        .dump-log-content {
+          padding: 10px 12px;
+          overflow-y: auto;
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          font-size: 11px;
+          line-height: 1.5;
+        }
+        .log-line {
+          display: flex;
+          align-items: baseline;
+          gap: 6px;
+          color: var(--text-sub);
+          word-break: break-all;
+        }
+        .log-tag {
+          color: var(--accent-blue);
+          font-size: 10px;
+          font-weight: 700;
+          flex-shrink: 0;
+        }
+        .log-line.active-line {
+          color: var(--accent-green);
+        }
+        .log-line.active-line .log-tag {
+          color: var(--accent-green);
+        }
+        .log-line.success-line {
+          color: var(--accent-green);
+          font-weight: 600;
+        }
+        .log-line.error-line {
+          color: var(--accent-red);
+        }
+        .log-line.warn-line {
+          color: #f59e0b;
         }
 
         .monitor-status-box {
