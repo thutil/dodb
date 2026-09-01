@@ -216,13 +216,22 @@ export const ContentEditorModal: React.FC<ContentEditorModalProps> = ({
   if (!mounted) return null;
 
   const modalContent = (
-    <div className="content-modal-overlay" onClick={onClose}>
+    <div
+      className={`content-modal-overlay ${isFullScreen ? "is-fullscreen" : ""}`}
+      onClick={onClose}
+    >
       <div
         className={`content-modal-card ${isFullScreen ? "is-fullscreen" : ""}`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header - Clean, Minimal & Theme-Native */}
-        <div className="content-modal-header">
+        <div
+          className="content-modal-header"
+          onDoubleClick={(e) => {
+            if ((e.target as HTMLElement).closest("button, input, select, textarea, a")) return;
+            setIsFullScreen((prev) => !prev);
+          }}
+        >
           <div className="header-left">
             <FileText size={15} className="header-icon" />
             <div className="header-title-group">
@@ -488,6 +497,13 @@ export const ContentEditorModal: React.FC<ContentEditorModalProps> = ({
           align-items: center;
           justify-content: center;
           padding: 24px;
+          transition: background 0.15s ease, padding 0.15s ease;
+        }
+
+        .content-modal-overlay.is-fullscreen {
+          padding: 0;
+          background: var(--bg-card);
+          backdrop-filter: none;
         }
 
         .content-modal-card {
@@ -506,15 +522,16 @@ export const ContentEditorModal: React.FC<ContentEditorModalProps> = ({
         }
 
         .content-modal-card.is-fullscreen {
-          position: fixed;
-          inset: 0;
-          width: 100vw !important;
-          max-width: 100vw !important;
-          height: 100vh !important;
-          max-height: 100vh !important;
+          position: relative;
+          inset: auto;
+          width: 100% !important;
+          max-width: 100% !important;
+          height: 100% !important;
+          max-height: 100% !important;
           border-radius: 0;
           border: none;
-          z-index: 100000;
+          box-shadow: none;
+          z-index: 1;
         }
 
         .content-modal-header {
@@ -526,6 +543,10 @@ export const ContentEditorModal: React.FC<ContentEditorModalProps> = ({
           border-bottom: 1px solid var(--border-light);
           gap: 12px;
           flex-shrink: 0;
+          min-width: 0;
+          width: 100%;
+          box-sizing: border-box;
+          user-select: none;
         }
 
         .header-left {
@@ -533,6 +554,7 @@ export const ContentEditorModal: React.FC<ContentEditorModalProps> = ({
           align-items: center;
           gap: 8px;
           min-width: 0;
+          flex-shrink: 1;
         }
 
         .header-icon {
@@ -554,6 +576,9 @@ export const ContentEditorModal: React.FC<ContentEditorModalProps> = ({
           font-weight: 600;
           font-size: 13px;
           color: var(--text-main);
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
         }
 
         .col-type-tag {
@@ -563,6 +588,7 @@ export const ContentEditorModal: React.FC<ContentEditorModalProps> = ({
           background: var(--bg-tertiary);
           color: var(--text-muted);
           border: 1px solid var(--border-light);
+          flex-shrink: 0;
         }
 
         .content-badge-tag {
@@ -571,6 +597,7 @@ export const ContentEditorModal: React.FC<ContentEditorModalProps> = ({
           padding: 0 5px;
           border-radius: var(--radius-xs);
           text-transform: uppercase;
+          flex-shrink: 0;
         }
 
         .subtitle-hint {
@@ -579,6 +606,7 @@ export const ContentEditorModal: React.FC<ContentEditorModalProps> = ({
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
+          min-width: 0;
         }
 
         .header-center {
@@ -628,6 +656,7 @@ export const ContentEditorModal: React.FC<ContentEditorModalProps> = ({
           align-items: center;
           gap: 4px;
           flex-shrink: 0;
+          margin-left: auto;
         }
 
         .view-mode-group {
@@ -900,6 +929,9 @@ export const ContentEditorModal: React.FC<ContentEditorModalProps> = ({
           background: var(--bg-header);
           border-top: 1px solid var(--border-light);
           flex-shrink: 0;
+          min-width: 0;
+          width: 100%;
+          box-sizing: border-box;
         }
 
         .footer-stats {
@@ -908,6 +940,10 @@ export const ContentEditorModal: React.FC<ContentEditorModalProps> = ({
           gap: 6px;
           font-size: 11px;
           color: var(--text-muted);
+          min-width: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
         }
 
         .stat-separator {
@@ -926,6 +962,7 @@ export const ContentEditorModal: React.FC<ContentEditorModalProps> = ({
           display: flex;
           align-items: center;
           gap: 8px;
+          flex-shrink: 0;
         }
 
         .shortcut-badge {
