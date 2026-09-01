@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.4.1] - 2026-09-02
+
+### Added
+
+- **Comprehensive Internationalization for ERD Export & Print Modal**:
+  - Added full bilingual support (Thai & English) for the entire **Export & Print Schema Modal** (`ErdExportModal`).
+  - Localized report content choices (Full 2-Page Report, Diagram Only, Data Dictionary Only), paper size, orientation, scope selector, resolution scales, background styles, and all action triggers.
+- **Security Utilities & Safe HTML Rendering**:
+  - Added dedicated security module (`ui/src/utils/security.ts`) featuring `escapeHtml`, `sanitizeUrl`, and `sanitizeHtmlForPreview`.
+  - Enforced strict iframe sandboxing (`sandbox=""`) and Content-Security-Policy (`default-src 'none'`) in the Content Editor HTML preview to prevent unauthorized script execution and same-origin access.
+  - Sanitized Markdown preview links to strictly block dangerous URL schemes (`javascript:`, `data:`).
+  - Replaced dynamic database string injection in GIS Map Viewer popups with safe DOM nodes and `textContent`.
+  - Sanitized and escaped all table, column, and schema identifiers in ERD Data Dictionary print exports.
+
+### Changed
+
+- **Constrained Table Column Max-Width & Truncation**:
+  - Implemented a consistent `320px` maximum column width across both **SQL Console** and **Visual Query Builder** results tables to prevent long text (e.g. descriptions, slugs, JSON) from stretching horizontally across the screen.
+  - Applied clean text truncation with ellipsis (`...`) and `min-width: 0` flexbox constraints.
+  - Added full value tooltip previews on cell hover, while retaining instant double-click and badge click shortcuts to open the full Monaco text editor.
+- **Visual Query Builder Styling & UX Overhaul**:
+  - Refined table node cards, badge pills, and connection handles with professional, low-fatigue contrast.
+  - Upgraded floating canvas toolbox to a frosted glass pill with blur backdrop.
+  - Enhanced steps navigation guide and bottom result DataGrid zebra striping.
+
+### Fixed
+
+- **Browser & Webview Window Zoom Prevention**:
+  - Prevented window-level zoom commands (`Cmd/Ctrl +`, `Cmd/Ctrl -`, `Cmd/Ctrl 0`, and Numpad keys) that distorted application layout, fixed headers, and canvas coordinates.
+  - Blocked trackpad pinch-to-zoom, Ctrl+mousewheel zoom, and macOS WebKit gestures, preserving user-configured UI scale settings.
+  - Added `user-scalable=no` and `maximum-scale=1.0` viewport restrictions.
+- **React Flow Fast Refresh Warning Suppression**:
+  - Memoized node and edge type configurations and added an error filter for React Flow warning code `#002` across `VisualQueryBuilder`, `SchemaDiagram`, and `ForeignKeysEditor`, silencing console warning spam during Next.js Turbopack HMR.
+
 ## [0.4.0] - 2026-09-01
 
 ### Added
