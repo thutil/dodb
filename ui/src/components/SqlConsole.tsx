@@ -2324,9 +2324,9 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                                         : pairCoords
                                           ? `Coordinate: ${pairCoords.lat}, ${pairCoords.lng} (Click pin to view on map)`
                                           : cInfo
-                                            ? `Rich Content (${cInfo.label}): Click button or double-click to open in Editor`
-                                            : isBoolCol
-                                              ? "Double-click to change boolean value"
+                                            ? `${typeof val === "object" ? JSON.stringify(val) : String(val)}\n\n(${cInfo.label}: Click badge or double-click to open in Editor)`
+                                            : val !== null && val !== undefined
+                                              ? String(val)
                                               : "Double-click to edit cell"
                                   }
                                 >
@@ -3790,6 +3790,10 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
           border-right: 1px solid var(--border-light);
           font-weight: 600;
           z-index: 2;
+          max-width: 320px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
         }
 
         .sql-table td {
@@ -3799,6 +3803,9 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
           border-right: 1px solid var(--border-light);
           white-space: nowrap;
           cursor: default;
+          max-width: 320px;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
 
         .cell-text-flow {
@@ -3806,6 +3813,8 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
           overflow: hidden;
           text-overflow: ellipsis;
           line-height: inherit;
+          max-width: 100%;
+          min-width: 0;
         }
         .cell-hidden-flow {
           visibility: hidden !important;

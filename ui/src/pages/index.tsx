@@ -1302,7 +1302,7 @@ export default function Home() {
       <Head>
         <title>DODB - Database Manager</title>
         <meta name="description" content="Simple, fast macOS Native Database Manager for Postgres, MySQL, MariaDB & SQLite" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
         <link rel="icon" href="/favicon.ico" />
         <link rel="apple-touch-icon" href="/icon.png" />
       </Head>

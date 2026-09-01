@@ -3211,8 +3211,10 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
                                       }}
                                       title={
                                         cInfo
-                                          ? `${cInfo.titleSnippet || cInfo.label} (Double-click or click badge to open Text Editor)`
-                                          : "Double-click to edit cell"
+                                          ? `${typeof cellVal === "object" ? JSON.stringify(cellVal) : String(cellVal)}\n\n(${cInfo.label}: Double-click or click badge to open Text Editor)`
+                                          : !isNull
+                                            ? String(cellVal)
+                                            : "Double-click to edit cell"
                                       }
                                     >
                                       <div className="cell-content-box">
@@ -5070,6 +5072,9 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
           white-space: nowrap;
           z-index: 2;
           letter-spacing: 0.2px;
+          max-width: 320px;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
 
         .results-table td {
@@ -5078,6 +5083,9 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
           white-space: nowrap;
           color: var(--text-main);
           position: relative;
+          max-width: 320px;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
 
         .result-data-row {

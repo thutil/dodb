@@ -564,6 +564,7 @@ html, body, #__next {
   gap: 6px;
   width: 100%;
   max-width: 100%;
+  min-width: 0;
 }
 
 .content-cell-text {
@@ -571,6 +572,7 @@ html, body, #__next {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
 }
 
 .content-editor-pill {
