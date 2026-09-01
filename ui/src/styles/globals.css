@@ -530,11 +530,11 @@ html, body, #__next {
 .bool-badge-pill {
   display: inline-flex;
   align-items: center;
-  padding: 1px 7px;
-  border-radius: 4px;
+  padding: 1px 6px;
+  border-radius: var(--radius-xs, 4px);
   font-size: 11px;
   font-family: var(--font-mono, monospace);
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.3;
   cursor: pointer;
   user-select: none;
@@ -542,20 +542,19 @@ html, body, #__next {
 }
 
 .bool-badge-pill.is-true {
-  background: rgba(16, 185, 129, 0.14);
-  color: #10b981;
-  border: 1px solid rgba(16, 185, 129, 0.3);
+  background: rgba(16, 185, 129, 0.12);
+  color: var(--accent-green);
+  border: 1px solid rgba(16, 185, 129, 0.25);
 }
 
 .bool-badge-pill.is-false {
-  background: rgba(148, 163, 184, 0.14);
-  color: #94a3b8;
-  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: var(--bg-hover);
+  color: var(--text-muted);
+  border: 1px solid var(--border-light);
 }
 
 .bool-badge-pill:hover {
-  filter: brightness(1.15);
-  transform: translateY(-1px);
+  filter: brightness(1.1);
 }
 
 .content-cell-content {
@@ -578,44 +577,47 @@ html, body, #__next {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  padding: 1px 6px;
-  border-radius: 4px;
+  padding: 1px 5px;
+  border-radius: var(--radius-xs, 4px);
   font-size: 10px;
   font-weight: 600;
   cursor: pointer;
-  border: 1px solid transparent;
-  transition: all 0.15s ease;
+  border: 1px solid var(--border-light);
+  background: var(--bg-tertiary);
+  color: var(--text-sub);
+  transition: all 0.12s ease;
   flex-shrink: 0;
   line-height: 1.2;
 }
 
 .content-editor-pill.badge-json {
-  background: rgba(16, 185, 129, 0.14);
-  color: #34d399;
-  border-color: rgba(16, 185, 129, 0.3);
+  color: var(--accent-green);
+  background: rgba(16, 185, 129, 0.08);
+  border-color: rgba(16, 185, 129, 0.2);
 }
 
 .content-editor-pill.badge-markdown {
-  background: rgba(56, 189, 248, 0.14);
-  color: #38bdf8;
-  border-color: rgba(56, 189, 248, 0.3);
+  color: var(--accent-blue);
+  background: rgba(59, 130, 246, 0.08);
+  border-color: rgba(59, 130, 246, 0.2);
 }
 
 .content-editor-pill.badge-html {
-  background: rgba(249, 115, 22, 0.14);
-  color: #fb923c;
-  border-color: rgba(249, 115, 22, 0.3);
+  color: var(--accent-amber);
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.2);
 }
 
 .content-editor-pill.badge-txt {
-  background: rgba(148, 163, 184, 0.14);
-  color: #94a3b8;
-  border-color: rgba(148, 163, 184, 0.3);
+  color: var(--text-sub);
+  background: var(--bg-tertiary);
+  border-color: var(--border-light);
 }
 
 .content-editor-pill:hover {
-  filter: brightness(1.2);
-  transform: translateY(-1px);
+  color: var(--text-main);
+  background: var(--bg-hover);
+  border-color: var(--border-medium);
 }
 
 /* ==========================================================================

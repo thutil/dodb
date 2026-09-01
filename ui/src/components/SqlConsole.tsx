@@ -5,7 +5,7 @@ import {
   Play, Clock, Database, CheckCircle2, AlertCircle, FileCode, Sparkles,
   Layers, Table2, Code2, Copy, Check, Download, WrapText, Globe, MapPin,
   Edit2, Edit3, Trash2, RotateCcw, Eye, Search, X, Plus, Key, Zap,
-  GripHorizontal, ListFilter, History, FileText
+  GripHorizontal, ListFilter, History, FileText, Maximize2
 } from "lucide-react";
 import { QueryExecutionResult, ColumnInfo, ConnectionProfile, DBType } from "../types";
 import { PendingChanges, CommitResult, isBooleanColumn } from "./DataGrid";
@@ -2789,6 +2789,36 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                       </div>
 
                       <div className="field-toggles-right">
+                        {(columns.find((c) => c.name === colName)?.type?.toLowerCase().includes("text") || columns.find((c) => c.name === colName)?.type?.toLowerCase().includes("json") || isRichContentColumn(colName, columns.find((c) => c.name === colName)?.type)) && val !== null && (
+                          <button
+                            type="button"
+                            className="toggle-chip-btn"
+                            onClick={() => {
+                              const cDef = columns.find((c) => c.name === colName);
+                              setContentEditorModal({
+                                title: `Record #${rowEditModal.rowIdx + 1} — ${colName}`,
+                                subtitle: "Full Row Editor",
+                                colName,
+                                colType: cDef?.type,
+                                value: val,
+                                onSave: (newVal) => {
+                                  setRowEditModal((prev) => {
+                                    if (!prev) return null;
+                                    return {
+                                      ...prev,
+                                      data: { ...prev.data, [colName]: newVal },
+                                    };
+                                  });
+                                },
+                                onClose: () => setContentEditorModal(null),
+                              });
+                            }}
+                            title="Open in Text Editor"
+                          >
+                            <Maximize2 size={10} />
+                            <span>Editor</span>
+                          </button>
+                        )}
                         <button
                           type="button"
                           className={`toggle-chip-btn ${val === null ? "active-null-chip" : ""}`}
@@ -2862,47 +2892,17 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                         <option value="false">false</option>
                       </select>
                     ) : (columns.find((c) => c.name === colName)?.type?.toLowerCase().includes("text") || columns.find((c) => c.name === colName)?.type?.toLowerCase().includes("json") || isRichContentColumn(colName, columns.find((c) => c.name === colName)?.type)) ? (
-                      <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                        <textarea
-                          rows={3}
-                          className="input font-mono"
-                          value={typeof val === "object" ? JSON.stringify(val, null, 2) : String(val)}
-                          onChange={(e) => {
-                            setRowEditModal({
-                              ...rowEditModal,
-                              data: { ...rowEditModal.data, [colName]: e.target.value },
-                            });
-                          }}
-                        />
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-sm"
-                          style={{ alignSelf: "flex-start" }}
-                          onClick={() => {
-                            const cDef = columns.find((c) => c.name === colName);
-                            setContentEditorModal({
-                              title: `Record #${rowEditModal.rowIdx + 1} — ${colName}`,
-                              subtitle: "Full Row Editor",
-                              colName,
-                              colType: cDef?.type,
-                              value: val,
-                              onSave: (newVal) => {
-                                setRowEditModal((prev) => {
-                                  if (!prev) return null;
-                                  return {
-                                    ...prev,
-                                    data: { ...prev.data, [colName]: newVal },
-                                  };
-                                });
-                              },
-                              onClose: () => setContentEditorModal(null),
-                            });
-                          }}
-                        >
-                          <FileText size={11} />
-                          <span>Open in Fullscreen Text Editor</span>
-                        </button>
-                      </div>
+                      <textarea
+                        rows={3}
+                        className="input font-mono"
+                        value={typeof val === "object" ? JSON.stringify(val, null, 2) : String(val)}
+                        onChange={(e) => {
+                          setRowEditModal({
+                            ...rowEditModal,
+                            data: { ...rowEditModal.data, [colName]: e.target.value },
+                          });
+                        }}
+                      />
                     ) : (
                       <input
                         type="text"
