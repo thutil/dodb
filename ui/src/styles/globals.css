@@ -525,6 +525,102 @@ html, body, #__next {
 }
 
 /* ==========================================================================
+   Boolean Tag & Rich Content Editor Badge Pill
+   ========================================================================== */
+.bool-badge-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: var(--radius-xs, 4px);
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  font-weight: 500;
+  line-height: 1.3;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.12s ease;
+}
+
+.bool-badge-pill.is-true {
+  background: rgba(16, 185, 129, 0.12);
+  color: var(--accent-green);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.bool-badge-pill.is-false {
+  background: var(--bg-hover);
+  color: var(--text-muted);
+  border: 1px solid var(--border-light);
+}
+
+.bool-badge-pill:hover {
+  filter: brightness(1.1);
+}
+
+.content-cell-content {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+  max-width: 100%;
+}
+
+.content-cell-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.content-editor-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 5px;
+  border-radius: var(--radius-xs, 4px);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--border-light);
+  background: var(--bg-tertiary);
+  color: var(--text-sub);
+  transition: all 0.12s ease;
+  flex-shrink: 0;
+  line-height: 1.2;
+}
+
+.content-editor-pill.badge-json {
+  color: var(--accent-green);
+  background: rgba(16, 185, 129, 0.08);
+  border-color: rgba(16, 185, 129, 0.2);
+}
+
+.content-editor-pill.badge-markdown {
+  color: var(--accent-blue);
+  background: rgba(59, 130, 246, 0.08);
+  border-color: rgba(59, 130, 246, 0.2);
+}
+
+.content-editor-pill.badge-html {
+  color: var(--accent-amber);
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.2);
+}
+
+.content-editor-pill.badge-txt {
+  color: var(--text-sub);
+  background: var(--bg-tertiary);
+  border-color: var(--border-light);
+}
+
+.content-editor-pill:hover {
+  color: var(--text-main);
+  background: var(--bg-hover);
+  border-color: var(--border-medium);
+}
+
+/* ==========================================================================
    Column Chip Picker (Table Designer - Indexes & Foreign Keys)
    ========================================================================== */
 .col-picker {

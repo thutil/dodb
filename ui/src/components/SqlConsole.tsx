@@ -5,10 +5,10 @@ import {
   Play, Clock, Database, CheckCircle2, AlertCircle, FileCode, Sparkles,
   Layers, Table2, Code2, Copy, Check, Download, WrapText, Globe, MapPin,
   Edit2, Edit3, Trash2, RotateCcw, Eye, Search, X, Plus, Key, Zap,
-  GripHorizontal, ListFilter, History
+  GripHorizontal, ListFilter, History, FileText, Maximize2
 } from "lucide-react";
 import { QueryExecutionResult, ColumnInfo, ConnectionProfile, DBType } from "../types";
-import { PendingChanges, CommitResult } from "./DataGrid";
+import { PendingChanges, CommitResult, isBooleanColumn } from "./DataGrid";
 import {
   isGeometryColumn,
   isCoordinateColumn,
@@ -21,6 +21,8 @@ import {
   isValidCoordinate,
 } from "../utils/gisUtils";
 import { GisMapViewer, GisFeatureRecord } from "./GisMapViewer";
+import { ContentEditorModal, ContentEditorData } from "./ContentEditorModal";
+import { getContentInfo, isRichContentColumn } from "../utils/contentDetection";
 import { splitSqlStatements, getStatementAtLine, stripCommentsAndTrim, extractTableFromSql, extractColumnMappingsFromSql, parseDbError, ParsedDbError } from "../utils/sqlUtils";
 import { apiClient } from "../utils/apiClient";
 import { getSharedSql, setSharedSql, useSharedSql } from "../utils/queryWorkspaceStore";
@@ -196,6 +198,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
     y: number;
     rowIdx: number;
     row: Record<string, unknown>;
+    colName?: string;
   } | null>(null);
 
   // Searchable Row Inspector Modal State
@@ -204,6 +207,9 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
     row: Record<string, unknown>;
   } | null>(null);
   const [inspectSearchTerm, setInspectSearchTerm] = useState<string>("");
+
+  // Content / Rich Text Editor Modal State
+  const [contentEditorModal, setContentEditorModal] = useState<ContentEditorData | null>(null);
 
   // Full Row Edit Modal State
   const [rowEditModal, setRowEditModal] = useState<{
@@ -567,11 +573,12 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
     return () => window.removeEventListener("click", handleOutside);
   }, [contextMenu]);
 
-  // Handle ESC key to dismiss sub-modals (Inspector, Row Modal, GIS, Inline Edit)
+  // Handle ESC key to dismiss sub-modals (Inspector, Row Modal, GIS, Inline Edit, Content Editor)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        if (contextMenu) setContextMenu(null);
+        if (contentEditorModal) setContentEditorModal(null);
+        else if (contextMenu) setContextMenu(null);
         else if (gisModalData) setGisModalData(null);
         else if (inspectRowModal) setInspectRowModal(null);
         else if (rowEditModal) setRowEditModal(null);
@@ -580,22 +587,66 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [contextMenu, gisModalData, inspectRowModal, rowEditModal, editingCell]);
+  }, [contentEditorModal, contextMenu, gisModalData, inspectRowModal, rowEditModal, editingCell]);
+
+  // Open Content / Rich Text Editor Modal for cell in SQL Console
+  const openContentEditor = (
+    rIdx: number,
+    colName: string,
+    currentVal: unknown,
+    colType?: string
+  ) => {
+    setContentEditorModal({
+      title: `Query Result — ${colName}`,
+      subtitle: `Row #${rIdx + 1}`,
+      colName,
+      colType,
+      value: currentVal,
+      onSave: (newVal) => {
+        setEditedCells((prev) => ({
+          ...prev,
+          [rIdx]: {
+            ...(prev[rIdx] || {}),
+            [colName]: newVal,
+          },
+        }));
+      },
+      onClose: () => setContentEditorModal(null),
+    });
+  };
 
   // Start inline editing
   const startEditing = (rowIdx: number, colName: string, currentVal: unknown) => {
     setEditingCell({ rowIdx, colName, originalVal: currentVal });
-    setEditValue(currentVal === null || currentVal === undefined ? "" : String(currentVal));
+    const colDef = columns.find((c) => c.name === colName);
+    const isBool = isBooleanColumn(colDef, currentVal);
+    if (isBool) {
+      const bVal = currentVal === true || String(currentVal).toLowerCase() === "true" || String(currentVal) === "1";
+      setEditValue(bVal ? "true" : "false");
+    } else {
+      setEditValue(currentVal === null || currentVal === undefined ? "" : String(currentVal));
+    }
   };
 
   // Coerce value based on column definition or raw type
   const coerceVal = (colName: string, rawStr: string, origVal: unknown): unknown => {
     if (rawStr === "" && origVal === null) return null;
+    if (typeof rawStr === "boolean") return rawStr;
+    const trimmed = rawStr.trim();
+    const vLower = trimmed.toLowerCase();
+
     const colDef = columns.find((c) => c.name === colName);
+    const isBool = isBooleanColumn(colDef, origVal);
+
+    // 1. Boolean check priority (checked BEFORE numeric integer regex so tinyint(1) and boolean values are coerced properly)
+    if (isBool || vLower === "true" || vLower === "false") {
+      if (["true", "t", "1", "yes"].includes(vLower)) return true;
+      if (["false", "f", "0", "no"].includes(vLower)) return false;
+    }
+
     if (colDef) {
       const type = colDef.type.toLowerCase();
-      const trimmed = rawStr.trim();
-      if (/(int|serial)/.test(type) && /^-?\d+$/.test(trimmed)) {
+      if (/(int|serial)/.test(type) && !isBool && /^-?\d+$/.test(trimmed)) {
         const n = Number(trimmed);
         return Number.isSafeInteger(n) ? n : trimmed;
       }
@@ -603,18 +654,10 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
         const n = Number(trimmed);
         return Number.isFinite(n) ? n : rawStr;
       }
-      if (/bool/.test(type)) {
-        const v = trimmed.toLowerCase();
-        if (["true", "t", "1", "yes"].includes(v)) return true;
-        if (["false", "f", "0", "no"].includes(v)) return false;
-      }
     } else {
       if (typeof origVal === "number") {
         const n = Number(rawStr);
         if (!isNaN(n)) return n;
-      } else if (typeof origVal === "boolean") {
-        if (rawStr === "true") return true;
-        if (rawStr === "false") return false;
       }
     }
     return rawStr;
@@ -774,7 +817,12 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
         }
         const realCol = mapping?.realColumn || colKey;
         const qCol = quoteIdent(realCol, dialect);
-        const v = edits[colKey];
+        let v = edits[colKey];
+        const colDef = columns.find((c) => c.name === realCol || c.name === colKey);
+        if (isBooleanColumn(colDef, v) || v === "true" || v === "false") {
+          if (v === "true" || v === true) v = true;
+          else if (v === "false" || v === false) v = false;
+        }
         setParts.push(`${qCol} = ${sqlLiteral(v, dialect)}`);
       });
 
@@ -786,7 +834,12 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
         const mapping = colMappings[colKey];
         const realCol = mapping?.realColumn || colKey;
         const qCol = quoteIdent(realCol, dialect);
-        const v = orig[colKey];
+        let v = orig[colKey];
+        const colDef = columns.find((c) => c.name === realCol || c.name === colKey);
+        if (isBooleanColumn(colDef, v) || v === "true" || v === "false") {
+          if (v === "true" || v === true) v = true;
+          else if (v === "false" || v === false) v = false;
+        }
         if (v === null || v === undefined) whereParts.push(`${qCol} IS NULL`);
         else whereParts.push(`${qCol} = ${sqlLiteral(v, dialect)}`);
       });
@@ -2209,6 +2262,9 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                               const isModified = rowEdits[col] !== undefined;
                               const isEditing = editingCell?.rowIdx === rIdx && editingCell?.colName === col;
                               const isNull = val === null || val === undefined;
+                              const colDef = columns.find((c) => c.name === col);
+                              const isBoolCol = isBooleanColumn(colDef, val);
+                              const cInfo = !isNull ? getContentInfo(val, col, colDef?.type) : null;
                               const isGeom = !isNull && (isGeometryColumn("", col) || isGisData(val));
                               const gisSummary = isGeom ? formatGisSummary(val) : null;
 
@@ -2231,7 +2287,25 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                                 <td
                                   key={col}
                                   className={`cell-data ${isModified ? "cell-modified" : ""} ${isNull ? "cell-null" : ""} ${isEditing ? "cell-editing" : ""}`}
-                                  onDoubleClick={() => !isDeleted && startEditing(rIdx, col, val)}
+                                  onDoubleClick={() => {
+                                    if (isDeleted) return;
+                                    if (cInfo) {
+                                      openContentEditor(rIdx, col, val, colDef?.type);
+                                    } else {
+                                      startEditing(rIdx, col, val);
+                                    }
+                                  }}
+                                  onContextMenu={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setContextMenu({
+                                      x: e.clientX,
+                                      y: e.clientY,
+                                      rowIdx: rIdx,
+                                      row: effectiveRow,
+                                      colName: col,
+                                    });
+                                  }}
                                   title={
                                     isDeleted
                                       ? "Row marked for deletion"
@@ -2239,23 +2313,44 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                                         ? "Click badge to view on GIS map; double-click to edit cell"
                                         : pairCoords
                                           ? `Coordinate: ${pairCoords.lat}, ${pairCoords.lng} (Click pin to view on map)`
-                                          : "Double-click to edit cell (ดับเบิลคลิกเพื่อแก้ไข)"
+                                          : cInfo
+                                            ? `Rich Content (${cInfo.label}): Click button or double-click to open in Editor`
+                                            : isBoolCol
+                                              ? "Double-click to change boolean value"
+                                              : "Double-click to edit cell"
                                   }
                                 >
                                   {isEditing && (
                                     <div className="inline-edit-wrap">
-                                      <input
-                                        autoFocus
-                                        type="text"
-                                        className="cell-edit-input"
-                                        value={editValue}
-                                        onChange={(e) => setEditValue(e.target.value)}
-                                        onBlur={saveCellEdit}
-                                        onKeyDown={(e) => {
-                                          if (e.key === "Enter") saveCellEdit();
-                                          if (e.key === "Escape") setEditingCell(null);
-                                        }}
-                                      />
+                                      {isBoolCol ? (
+                                        <select
+                                          autoFocus
+                                          className="cell-edit-input font-mono"
+                                          value={val === true || String(editValue).toLowerCase() === "true" || String(editValue) === "1" ? "true" : "false"}
+                                          onChange={(e) => setEditValue(e.target.value)}
+                                          onBlur={saveCellEdit}
+                                          onKeyDown={(e) => {
+                                            if (e.key === "Enter") saveCellEdit();
+                                            if (e.key === "Escape") setEditingCell(null);
+                                          }}
+                                        >
+                                          <option value="true">true</option>
+                                          <option value="false">false</option>
+                                        </select>
+                                      ) : (
+                                        <input
+                                          autoFocus
+                                          type="text"
+                                          className="cell-edit-input"
+                                          value={editValue}
+                                          onChange={(e) => setEditValue(e.target.value)}
+                                          onBlur={saveCellEdit}
+                                          onKeyDown={(e) => {
+                                            if (e.key === "Enter") saveCellEdit();
+                                            if (e.key === "Escape") setEditingCell(null);
+                                          }}
+                                        />
+                                      )}
                                     </div>
                                   )}
                                   <div className={`cell-text-flow ${isEditing ? "cell-hidden-flow" : ""}`}>
@@ -2296,6 +2391,32 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                                           <MapPin size={10} />
                                         </button>
                                       </div>
+                                    ) : cInfo ? (
+                                      <div className="content-cell-content">
+                                        <span className="content-cell-text font-mono">
+                                          {typeof val === "object" ? JSON.stringify(val) : String(val)}
+                                        </span>
+                                        <button
+                                          type="button"
+                                          className={`content-editor-pill ${cInfo.badgeClass}`}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            openContentEditor(rIdx, col, val, colDef?.type);
+                                          }}
+                                          title={cInfo.titleSnippet ? `${cInfo.titleSnippet} (Click to open Text Editor)` : `Open Text Editor (${cInfo.label})`}
+                                        >
+                                          <FileText size={10} />
+                                          <span>{cInfo.label}</span>
+                                        </button>
+                                      </div>
+                                    ) : isBoolCol || typeof val === "boolean" ? (
+                                      <span
+                                        className={`bool-badge-pill ${val === true || String(val).toLowerCase() === "true" || String(val) === "1" ? "is-true" : "is-false"}`}
+                                        onClick={() => !isDeleted && startEditing(rIdx, col, val)}
+                                        title="Double-click to change boolean value"
+                                      >
+                                        {val === true || String(val).toLowerCase() === "true" || String(val) === "1" ? "true" : "false"}
+                                      </span>
                                     ) : typeof val === "object" ? (
                                       JSON.stringify(val)
                                     ) : (
@@ -2351,6 +2472,26 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
             <Edit3 size={13} />
             <span>Edit Record (แก้ไขข้อมูล)</span>
           </button>
+          {(() => {
+            const targetCol = contextMenu.colName
+              ? columns.find((c) => c.name === contextMenu.colName)
+              : columns.find((c) => isRichContentColumn(c.name, c.type));
+            const targetColName = targetCol ? targetCol.name : contextMenu.colName;
+            if (!targetColName) return null;
+            const cellVal = contextMenu.row[targetColName];
+            return (
+              <button
+                className="context-menu-item"
+                onClick={() => {
+                  openContentEditor(contextMenu.rowIdx, targetColName, cellVal, targetCol?.type);
+                  setContextMenu(null);
+                }}
+              >
+                <FileText size={13} style={{ color: "var(--accent-blue)" }} />
+                <span>Open in Text Editor ({targetColName})</span>
+              </button>
+            );
+          })()}
           {(() => {
             const rowPoints = extractPointFromRow(contextMenu.row, queryColumns, queryCoordinatePairs);
             const gCol = Object.keys(contextMenu.row).find((k) => isGisData(contextMenu.row[k]));
@@ -2477,6 +2618,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                   const valStr = isNull ? "NULL" : typeof val === "object" ? JSON.stringify(val, null, 2) : String(val);
                   const isMatch = inspectSearchTerm.trim().length > 0;
                   const colDef = columns.find((c) => c.name === colName);
+                  const cInfo = !isNull ? getContentInfo(val, colName, colDef?.type) : null;
 
                   return (
                     <div key={colName} className={`row-detail-field-card ${isMatch ? "highlighted" : ""}`}>
@@ -2492,6 +2634,11 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                           {isGeom && (
                             <span className="gis-badge-pill" style={{ pointerEvents: "none" }}>
                               <Globe size={9} /> GIS
+                            </span>
+                          )}
+                          {cInfo && (
+                            <span className={`content-editor-pill ${cInfo.badgeClass}`} style={{ pointerEvents: "none", margin: 0 }}>
+                              {cInfo.label}
                             </span>
                           )}
                         </div>
@@ -2511,6 +2658,18 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                             >
                               <Globe size={11} />
                               <span>Map</span>
+                            </button>
+                          )}
+                          {cInfo && !isNull && (
+                            <button
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => {
+                                openContentEditor(inspectRowModal.rowIdx, colName, val, colDef?.type);
+                              }}
+                              title="Open in Text Editor"
+                            >
+                              <FileText size={11} />
+                              <span>Edit</span>
                             </button>
                           )}
                           <button
@@ -2630,6 +2789,36 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                       </div>
 
                       <div className="field-toggles-right">
+                        {(columns.find((c) => c.name === colName)?.type?.toLowerCase().includes("text") || columns.find((c) => c.name === colName)?.type?.toLowerCase().includes("json") || isRichContentColumn(colName, columns.find((c) => c.name === colName)?.type)) && val !== null && (
+                          <button
+                            type="button"
+                            className="toggle-chip-btn"
+                            onClick={() => {
+                              const cDef = columns.find((c) => c.name === colName);
+                              setContentEditorModal({
+                                title: `Record #${rowEditModal.rowIdx + 1} — ${colName}`,
+                                subtitle: "Full Row Editor",
+                                colName,
+                                colType: cDef?.type,
+                                value: val,
+                                onSave: (newVal) => {
+                                  setRowEditModal((prev) => {
+                                    if (!prev) return null;
+                                    return {
+                                      ...prev,
+                                      data: { ...prev.data, [colName]: newVal },
+                                    };
+                                  });
+                                },
+                                onClose: () => setContentEditorModal(null),
+                              });
+                            }}
+                            title="Open in Text Editor"
+                          >
+                            <Maximize2 size={10} />
+                            <span>Editor</span>
+                          </button>
+                        )}
                         <button
                           type="button"
                           className={`toggle-chip-btn ${val === null ? "active-null-chip" : ""}`}
@@ -2688,6 +2877,32 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                           <span>Map Picker</span>
                         </button>
                       </div>
+                    ) : isBooleanColumn(columns.find((c) => c.name === colName), val) ? (
+                      <select
+                        className="select form-select font-mono"
+                        value={val === true || String(val).toLowerCase() === "true" || String(val) === "1" ? "true" : "false"}
+                        onChange={(e) => {
+                          setRowEditModal({
+                            ...rowEditModal,
+                            data: { ...rowEditModal.data, [colName]: e.target.value === "true" },
+                          });
+                        }}
+                      >
+                        <option value="true">true</option>
+                        <option value="false">false</option>
+                      </select>
+                    ) : (columns.find((c) => c.name === colName)?.type?.toLowerCase().includes("text") || columns.find((c) => c.name === colName)?.type?.toLowerCase().includes("json") || isRichContentColumn(colName, columns.find((c) => c.name === colName)?.type)) ? (
+                      <textarea
+                        rows={3}
+                        className="input font-mono"
+                        value={typeof val === "object" ? JSON.stringify(val, null, 2) : String(val)}
+                        onChange={(e) => {
+                          setRowEditModal({
+                            ...rowEditModal,
+                            data: { ...rowEditModal.data, [colName]: e.target.value },
+                          });
+                        }}
+                      />
                     ) : (
                       <input
                         type="text"
@@ -2713,24 +2928,25 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
               <button
                 className="btn btn-primary"
                 onClick={() => {
-                  const rIdx = rowEditModal.rowIdx;
-                  const originalRow = result?.rows?.[rIdx] || {};
-                  const changesObj: Record<string, unknown> = {};
-
-                  Object.keys(rowEditModal.data).forEach((col) => {
-                    const newVal = coerceVal(col, String(rowEditModal.data[col] ?? ""), originalRow[col]);
-                    const oldVal = originalRow[col];
-                    if (newVal !== oldVal) {
-                      changesObj[col] = rowEditModal.data[col] === null ? null : newVal;
+                  if (rowEditModal && result?.rows) {
+                    const originalRow = result.rows[rowEditModal.rowIdx];
+                    if (!originalRow) {
+                      setRowEditModal(null);
+                      return;
                     }
-                  });
-
-                  if (Object.keys(changesObj).length > 0) {
+                    const diff: Record<string, unknown> = {};
+                    Object.keys(rowEditModal.data).forEach((colName) => {
+                      const edited = rowEditModal.data[colName];
+                      const orig = originalRow[colName];
+                      if (edited !== orig) {
+                        diff[colName] = edited;
+                      }
+                    });
                     setEditedCells((prev) => ({
                       ...prev,
-                      [rIdx]: {
-                        ...(prev[rIdx] || {}),
-                        ...changesObj,
+                      [rowEditModal.rowIdx]: {
+                        ...(prev[rowEditModal.rowIdx] || {}),
+                        ...diff,
                       },
                     }));
                   }
@@ -2754,6 +2970,14 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
           pickerMode={gisModalData.pickerMode}
           onPickCoordinates={gisModalData.onPick}
           onClose={() => setGisModalData(null)}
+        />
+      )}
+
+      {/* Rich Content Text Editor Modal */}
+      {contentEditorModal && (
+        <ContentEditorModal
+          data={contentEditorModal}
+          theme={theme}
         />
       )}
       {/* SQL History Drawer */}

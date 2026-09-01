@@ -38,6 +38,7 @@ import {
   Compass,
   Eye,
   Crosshair,
+  Maximize2,
 } from "lucide-react";
 import { ColumnInfo, TableRowData, ConnectionProfile, ColumnFilter, FilterOperator, DBType } from "../types";
 import { quoteIdent, quoteTableIdent, sqlLiteral } from "../utils/ddlBuilder";
@@ -58,6 +59,8 @@ import { GisMapViewer, GisFeatureRecord } from "./GisMapViewer";
 import { Language, t } from "../utils/i18n";
 import { saveTextFileAsync } from "../utils/saveFile";
 import { parseDbError, ParsedDbError } from "../utils/sqlUtils";
+import { ContentEditorModal, ContentEditorData } from "./ContentEditorModal";
+import { getContentInfo, isRichContentColumn } from "../utils/contentDetection";
 
 
 export interface PendingChanges {
@@ -75,27 +78,47 @@ export interface CommitResult {
   totalAffected?: number;
 }
 
+// Detect boolean column by type name or existing boolean values
+export const isBooleanColumn = (col?: ColumnInfo, origVal?: unknown): boolean => {
+  if (typeof origVal === "boolean") return true;
+  if (!col || !col.type) return false;
+  const t = col.type.toLowerCase();
+  return t.includes("bool") || t === "tinyint(1)" || t === "bit" || t === "bit(1)";
+};
+
 // Values typed into the grid arrive as strings. Convert the ones whose column is
 // clearly numeric or boolean so the generated SQL carries a properly typed literal
 // instead of relying on the server's implicit cast. Anything wider than a safe
 // integer stays a string so no precision is lost.
-const coerceCellValue = (col: ColumnInfo | undefined, raw: unknown): unknown => {
-  if (!col || typeof raw !== "string" || raw === "" || raw === "__AUTO__") return raw;
+const coerceCellValue = (col: ColumnInfo | undefined, raw: unknown, origVal?: unknown): unknown => {
+  if (!col || raw === "__AUTO__") return raw;
+  if (raw === null || raw === undefined || raw === "") return raw;
+  if (typeof raw === "boolean") return raw;
+  if (typeof raw !== "string") return raw;
+
   const type = col.type.toLowerCase();
   const trimmed = raw.trim();
-  if (/(int|serial)/.test(type) && /^-?\d+$/.test(trimmed)) {
+  const vLower = trimmed.toLowerCase();
+
+  // 1. Boolean check (checked BEFORE numeric integer regex so tinyint(1) and boolean values are coerced properly)
+  const isBool = isBooleanColumn(col, origVal);
+  if (isBool || vLower === "true" || vLower === "false") {
+    if (["true", "t", "1", "yes"].includes(vLower)) return true;
+    if (["false", "f", "0", "no"].includes(vLower)) return false;
+  }
+
+  // 2. Integers (excluding tinyint(1) when treated as boolean)
+  if (/(int|serial)/.test(type) && !isBool && /^-?\d+$/.test(trimmed)) {
     const n = Number(trimmed);
     return Number.isSafeInteger(n) ? n : trimmed;
   }
-  if (/(double|real|float)/.test(type)) {
+
+  // 3. Floats
+  if (/(double|real|float|numeric|decimal)/.test(type)) {
     const n = Number(trimmed);
     return Number.isFinite(n) ? n : raw;
   }
-  if (/bool/.test(type)) {
-    const v = trimmed.toLowerCase();
-    if (["true", "t", "1", "yes"].includes(v)) return true;
-    if (["false", "f", "0", "no"].includes(v)) return false;
-  }
+
   return raw;
 };
 
@@ -193,6 +216,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
     rowIdx: number;
     row: TableRowData;
     pkKey: string;
+    colName?: string;
   } | null>(null);
 
   // Detailed Searchable Row Inspector State
@@ -211,6 +235,9 @@ export const DataGrid: React.FC<DataGridProps> = ({
     pickerMode?: boolean;
     onPick?: (coords: { lng: number; lat: number; wkt: string }) => void;
   } | null>(null);
+
+  // Content / Rich Text Editor Modal State
+  const [contentEditorModal, setContentEditorModal] = useState<ContentEditorData | null>(null);
 
   // Pending Transaction Edits keyed by Primary Key Value (or row key)
   const [editedCells, setEditedCells] = useState<{ [pkKey: string]: TableRowData }>({});
@@ -487,7 +514,8 @@ export const DataGrid: React.FC<DataGridProps> = ({
       }
 
       if (e.key === "Escape") {
-        if (confirmPendingNav) setConfirmPendingNav(null);
+        if (contentEditorModal) setContentEditorModal(null);
+        else if (confirmPendingNav) setConfirmPendingNav(null);
         else if (errorDetailsModal) setErrorDetailsModal(null);
         else if (contextMenu) setContextMenu(null);
         else if (gisModalData) setGisModalData(null);
@@ -502,7 +530,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [confirmPendingNav, errorDetailsModal, contextMenu, gisModalData, inspectRowModal, confirmDeleteRow, rowEditModal, selectedCell, editingCell, rows, selectedRowIndices]);
+  }, [contentEditorModal, confirmPendingNav, errorDetailsModal, contextMenu, gisModalData, inspectRowModal, confirmDeleteRow, rowEditModal, selectedCell, editingCell, rows, selectedRowIndices]);
 
   if (!activeProfile) {
     return (
@@ -713,7 +741,14 @@ export const DataGrid: React.FC<DataGridProps> = ({
   // Handle Cell Double Click to start inline editing
   const startEditing = (pkKey: string, isNew: boolean, nIdx: number | undefined, colName: string, currentVal: unknown) => {
     setEditingCell({ pkKey, isNew, nIdx, colName, originalVal: currentVal });
-    setEditValue(currentVal === null || currentVal === undefined || currentVal === "__AUTO__" ? "" : String(currentVal));
+    const colDef = columns.find((c) => c.name === colName);
+    const isBool = isBooleanColumn(colDef, currentVal);
+    if (isBool) {
+      const bVal = currentVal === true || String(currentVal).toLowerCase() === "true" || String(currentVal) === "1";
+      setEditValue(bVal ? "true" : "false");
+    } else {
+      setEditValue(currentVal === null || currentVal === undefined || currentVal === "__AUTO__" ? "" : String(currentVal));
+    }
   };
 
   // Save inline cell edit
@@ -724,7 +759,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
     // A NULL cell is shown as an empty box; leaving it empty must keep it NULL
     // rather than writing an empty string over it.
     const wasNullAndStillEmpty = originalVal === null && editValue === "";
-    const value = wasNullAndStillEmpty ? null : coerceCellValue(columns.find((c) => c.name === colName), editValue);
+    const value = wasNullAndStillEmpty ? null : coerceCellValue(columns.find((c) => c.name === colName), editValue, originalVal);
 
     if (!isNew && value === originalVal) {
       // Nothing actually changed - don't queue a pending update for it.
@@ -750,6 +785,65 @@ export const DataGrid: React.FC<DataGridProps> = ({
     setEditingCell(null);
   };
 
+  // Open Content / Rich Text Editor Modal for table cell
+  const openContentEditor = (
+    pkKey: string,
+    isNew: boolean,
+    nIdx: number | undefined,
+    colName: string,
+    colType: string | undefined,
+    currentVal: unknown,
+    recordNum?: number
+  ) => {
+    setContentEditorModal({
+      title: `${tableName || "Table"} — ${colName}`,
+      subtitle: recordNum ? `Record #${recordNum}` : undefined,
+      colName,
+      colType,
+      value: currentVal,
+      onSave: (newVal) => {
+        if (isNew && nIdx !== undefined) {
+          setNewRows((prev) => {
+            const updated = [...prev];
+            updated[nIdx] = { ...updated[nIdx], [colName]: newVal };
+            return updated;
+          });
+        } else {
+          setEditedCells((prev) => ({
+            ...prev,
+            [pkKey]: {
+              ...(prev[pkKey] || {}),
+              [colName]: newVal,
+            },
+          }));
+        }
+      },
+      onClose: () => setContentEditorModal(null),
+    });
+  };
+
+  // Open Content / Rich Text Editor Modal from Row Edit Modal field
+  const openContentEditorForModalField = (colName: string, colType?: string, currentVal?: unknown) => {
+    if (!rowEditModal) return;
+    setContentEditorModal({
+      title: `${tableName || "Table"} — ${colName}`,
+      subtitle: rowEditModal.isNew ? "Insert New Record" : `Record #${page * pageSize + rowEditModal.rowIdx + 1}`,
+      colName,
+      colType,
+      value: currentVal,
+      onSave: (newVal) => {
+        setRowEditModal((prev) => {
+          if (!prev) return null;
+          return {
+            ...prev,
+            data: { ...prev.data, [colName]: newVal },
+          };
+        });
+      },
+      onClose: () => setContentEditorModal(null),
+    });
+  };
+
   // Open Full Row Edit Modal
   const openRowModal = (rowIdx: number, row: TableRowData, isNew?: boolean) => {
     const pkKey = isNew ? `new_${rowIdx}` : getRowKey(row, rowIdx);
@@ -766,14 +860,23 @@ export const DataGrid: React.FC<DataGridProps> = ({
     if (isNew) {
       setNewRows((prev) => {
         const updated = [...prev];
-        updated[rowIdx] = { ...data };
+        const coercedRow: TableRowData = {};
+        columns.forEach((col) => {
+          const raw = data[col.name];
+          if (raw === "__AUTO__") {
+            coercedRow[col.name] = "__AUTO__";
+          } else {
+            coercedRow[col.name] = coerceCellValue(col, raw, undefined);
+          }
+        });
+        updated[rowIdx] = coercedRow;
         return updated;
       });
     } else {
       const originalRow = rows[rowIdx] || {};
       const changesObj: TableRowData = {};
       columns.forEach((col) => {
-        const newVal = coerceCellValue(col, data[col.name]);
+        const newVal = coerceCellValue(col, data[col.name], originalRow[col.name]);
         const oldVal = originalRow[col.name];
         if (newVal !== oldVal) {
           changesObj[col.name] = newVal;
@@ -801,6 +904,8 @@ export const DataGrid: React.FC<DataGridProps> = ({
         blank[c.name] = "__AUTO__";
       } else if (c.nullable && (c.default === null || c.default === undefined)) {
         blank[c.name] = null;
+      } else if (isBooleanColumn(c, undefined)) {
+        blank[c.name] = false;
       } else {
         blank[c.name] = "";
       }
@@ -1666,36 +1771,139 @@ export const DataGrid: React.FC<DataGridProps> = ({
                 <tr key={`new-${nIdx}`} className="row-new-draft">
                   <td className="row-index new-badge">NEW</td>
                   <td className="action-cell">
-                    <button
-                      className="icon-del-btn is-deleted"
-                      onClick={() => setNewRows((prev) => prev.filter((_, i) => i !== nIdx))}
-                      title="Discard drafted row"
-                    >
-                      <Trash2 size={11} />
-                    </button>
+                    <div className="act-group">
+                      <button
+                        className="icon-edit-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openRowModal(nIdx, nr, true);
+                        }}
+                        title="Edit Entire Draft Row Modal"
+                      >
+                        <Edit3 size={11} />
+                      </button>
+                      <button
+                        className="icon-del-btn is-deleted"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setNewRows((prev) => prev.filter((_, i) => i !== nIdx));
+                        }}
+                        title="Discard drafted row"
+                      >
+                        <Trash2 size={11} />
+                      </button>
+                    </div>
                   </td>
                   {columns.map((c) => {
                     const val = nr[c.name];
                     const isAuto =
                       val === "__AUTO__" ||
                       (c.autoIncrement && (val === undefined || val === "__AUTO__"));
+                    const isNull = val === null;
+                    const isEditing = editingCell?.isNew && editingCell?.nIdx === nIdx && editingCell.colName === c.name;
+                    const isBoolCol = isBooleanColumn(c, val);
+                    const isDateCol = isDateTimeColumn(c.type);
+                    const cInfo = !isNull && !isAuto && val !== undefined && val !== "" ? getContentInfo(val, c.name, c.type) : null;
 
                     return (
                       <td
                         key={c.name}
-                        className="cell-draft cell-editable"
-                        onClick={() => openRowModal(nIdx, nr, true)}
-                        title="Click to edit drafted values"
+                        className={`cell-draft cell-editable ${isEditing ? "cell-editing" : ""} ${isNull ? "cell-null" : ""}`}
+                        onDoubleClick={() => {
+                          if (isAuto) return;
+                          if (cInfo) {
+                            openContentEditor(`new_${nIdx}`, true, nIdx, c.name, c.type, val, nIdx + 1);
+                          } else {
+                            startEditing(`new_${nIdx}`, true, nIdx, c.name, val);
+                          }
+                        }}
+                        title={
+                          isAuto
+                            ? "Auto-generated by database"
+                            : isBoolCol
+                              ? "Double-click to change boolean value"
+                              : cInfo
+                                ? `Rich Content (${cInfo.label}): Click button or double-click to open in Editor`
+                                : "Double-click to edit cell"
+                        }
                       >
-                        {isAuto ? (
-                          <span className="auto-pill">
-                            <Zap size={10} /> AUTO
-                          </span>
-                        ) : val !== undefined && val !== null && val !== "" ? (
-                          String(val)
-                        ) : (
-                          <span className="placeholder-text">Click to edit</span>
+                        {isEditing && (
+                          <div className="inline-edit-wrap">
+                            {isBoolCol ? (
+                              <select
+                                autoFocus
+                                className="cell-edit-input font-mono"
+                                value={val === true || String(editValue).toLowerCase() === "true" || String(editValue) === "1" ? "true" : "false"}
+                                onChange={(e) => setEditValue(e.target.value)}
+                                onBlur={() => saveCellEdit()}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") saveCellEdit();
+                                  if (e.key === "Escape") setEditingCell(null);
+                                }}
+                              >
+                                <option value="true">true</option>
+                                <option value="false">false</option>
+                              </select>
+                            ) : (
+                              <input
+                                autoFocus
+                                type={isDateCol ? (c.type.toLowerCase().includes("timestamp") || c.type.toLowerCase().includes("datetime") ? "datetime-local" : "date") : "text"}
+                                className="cell-edit-input"
+                                value={editValue}
+                                onChange={(e) => setEditValue(e.target.value)}
+                                onBlur={() => saveCellEdit()}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") saveCellEdit();
+                                  if (e.key === "Escape") setEditingCell(null);
+                                }}
+                              />
+                            )}
+                          </div>
                         )}
+                        <div className={`cell-text-flow ${isEditing ? "cell-hidden-flow" : ""}`}>
+                          {isAuto ? (
+                            <span className="auto-pill">
+                              <Zap size={10} /> AUTO
+                            </span>
+                          ) : isNull ? (
+                            <span className="null-tag">NULL</span>
+                          ) : cInfo ? (
+                            <div className="content-cell-content">
+                              <span className="content-cell-text font-mono">
+                                {typeof val === "object" ? JSON.stringify(val) : String(val)}
+                              </span>
+                              <button
+                                type="button"
+                                className={`content-editor-pill ${cInfo.badgeClass}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openContentEditor(`new_${nIdx}`, true, nIdx, c.name, c.type, val, nIdx + 1);
+                                }}
+                                title="Open in Text Editor"
+                              >
+                                <FileText size={10} />
+                                <span>{cInfo.label}</span>
+                              </button>
+                            </div>
+                          ) : isBoolCol || typeof val === "boolean" ? (
+                            <span
+                              className={`bool-badge-pill ${val === true || String(val).toLowerCase() === "true" || String(val) === "1" ? "is-true" : "is-false"}`}
+                              onClick={() => startEditing(`new_${nIdx}`, true, nIdx, c.name, val)}
+                              title="Double-click to change boolean"
+                            >
+                              {val === true || String(val).toLowerCase() === "true" || String(val) === "1" ? "true" : "false"}
+                            </span>
+                          ) : val !== undefined && val !== "" ? (
+                            typeof val === "object" ? JSON.stringify(val) : String(val)
+                          ) : (
+                            <span
+                              className="placeholder-text"
+                              onClick={() => startEditing(`new_${nIdx}`, true, nIdx, c.name, val)}
+                            >
+                              Click to edit
+                            </span>
+                          )}
+                        </div>
                       </td>
                     );
                   })}
@@ -1818,6 +2026,8 @@ export const DataGrid: React.FC<DataGridProps> = ({
                         const isNull = val === null || val === undefined;
                         const isEditing = !editingCell?.isNew && editingCell?.pkKey === pkKey && editingCell.colName === col.name;
                         const isDateCol = isDateTimeColumn(col.type);
+                        const isBoolCol = isBooleanColumn(col, val);
+                        const cInfo = !isNull ? getContentInfo(val, col.name, col.type) : null;
                         const isGeomCol = isGeometryColumn(col.type, col.name) || (!isNull && isGisData(val));
                         const gisSummary = isGeomCol && !isNull ? formatGisSummary(val) : null;
 
@@ -1840,23 +2050,60 @@ export const DataGrid: React.FC<DataGridProps> = ({
                           <td
                             key={col.name}
                             className={`cell-data ${isNull ? "cell-null" : ""} ${isEdited ? "cell-modified" : ""} ${isEditing ? "cell-editing" : ""}`}
-                            onDoubleClick={() => startEditing(pkKey, false, undefined, col.name, val)}
-                            title={gisSummary ? "Click badge to view on GIS map; double-click to edit" : pairCoords ? `Coordinate: ${pairCoords.lat}, ${pairCoords.lng} (Click pin to view on map)` : "Double-click to edit cell"}
+                            onDoubleClick={() => {
+                              if (cInfo) {
+                                openContentEditor(pkKey, false, undefined, col.name, col.type, val, page * pageSize + idx + 1);
+                              } else {
+                                startEditing(pkKey, false, undefined, col.name, val);
+                              }
+                            }}
+                            onContextMenu={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setSelectedRowIndices(new Set([idx]));
+                              setLastSelectedRowIdx(idx);
+                              setContextMenu({
+                                x: e.clientX,
+                                y: e.clientY,
+                                rowIdx: idx,
+                                row,
+                                pkKey,
+                                colName: col.name,
+                              });
+                            }}
+                            title={gisSummary ? "Click badge to view on GIS map; double-click to edit" : pairCoords ? `Coordinate: ${pairCoords.lat}, ${pairCoords.lng} (Click pin to view on map)` : cInfo ? `Rich Content (${cInfo.label}): Click button or double-click to open in Editor` : isBoolCol ? "Double-click to change boolean value" : "Double-click to edit cell"}
                           >
                             {isEditing && (
                               <div className="inline-edit-wrap">
-                                <input
-                                  autoFocus
-                                  type={isDateCol ? (col.type.toLowerCase().includes("timestamp") || col.type.toLowerCase().includes("datetime") ? "datetime-local" : "date") : "text"}
-                                  className="cell-edit-input"
-                                  value={editValue}
-                                  onChange={(e) => setEditValue(e.target.value)}
-                                  onBlur={() => saveCellEdit()}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") saveCellEdit();
-                                    if (e.key === "Escape") setEditingCell(null);
-                                  }}
-                                />
+                                {isBoolCol ? (
+                                  <select
+                                    autoFocus
+                                    className="cell-edit-input font-mono"
+                                    value={val === true || String(editValue).toLowerCase() === "true" || String(editValue) === "1" ? "true" : "false"}
+                                    onChange={(e) => setEditValue(e.target.value)}
+                                    onBlur={() => saveCellEdit()}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") saveCellEdit();
+                                      if (e.key === "Escape") setEditingCell(null);
+                                    }}
+                                  >
+                                    <option value="true">true</option>
+                                    <option value="false">false</option>
+                                  </select>
+                                ) : (
+                                  <input
+                                    autoFocus
+                                    type={isDateCol ? (col.type.toLowerCase().includes("timestamp") || col.type.toLowerCase().includes("datetime") ? "datetime-local" : "date") : "text"}
+                                    className="cell-edit-input"
+                                    value={editValue}
+                                    onChange={(e) => setEditValue(e.target.value)}
+                                    onBlur={() => saveCellEdit()}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") saveCellEdit();
+                                      if (e.key === "Escape") setEditingCell(null);
+                                    }}
+                                  />
+                                )}
                               </div>
                             )}
                             <div className={`cell-text-flow ${isEditing ? "cell-hidden-flow" : ""}`}>
@@ -1897,6 +2144,32 @@ export const DataGrid: React.FC<DataGridProps> = ({
                                     <MapPin size={10} />
                                   </button>
                                 </div>
+                              ) : cInfo ? (
+                                <div className="content-cell-content">
+                                  <span className="content-cell-text font-mono">
+                                    {typeof val === "object" ? JSON.stringify(val) : String(val)}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className={`content-editor-pill ${cInfo.badgeClass}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openContentEditor(pkKey, false, undefined, col.name, col.type, val, page * pageSize + idx + 1);
+                                    }}
+                                    title={cInfo.titleSnippet ? `${cInfo.titleSnippet} (Click to open Text Editor)` : `Open Text Editor (${cInfo.label})`}
+                                  >
+                                    <FileText size={10} />
+                                    <span>{cInfo.label}</span>
+                                  </button>
+                                </div>
+                              ) : isBoolCol || typeof val === "boolean" ? (
+                                <span
+                                  className={`bool-badge-pill ${val === true || String(val).toLowerCase() === "true" || String(val) === "1" ? "is-true" : "is-false"}`}
+                                  onClick={() => startEditing(pkKey, false, undefined, col.name, val)}
+                                  title="Double-click to change boolean value"
+                                >
+                                  {val === true || String(val).toLowerCase() === "true" || String(val) === "1" ? "true" : "false"}
+                                </span>
                               ) : typeof val === "object" ? (
                                 JSON.stringify(val)
                               ) : (
@@ -2037,8 +2310,8 @@ export const DataGrid: React.FC<DataGridProps> = ({
                 const isAuto = val === "__AUTO__" || (rowEditModal.isNew && (col.autoIncrement || (col.primaryKey && col.type.toLowerCase().includes("int"))) && val === "__AUTO__");
                 const isNull = val === null;
                 const isDateCol = isDateTimeColumn(col.type);
-                const isBoolCol = col.type.toLowerCase().includes("bool") || col.type.toLowerCase() === "tinyint(1)";
-                const isLongText = col.type.toLowerCase().includes("text") || col.type.toLowerCase().includes("json");
+                const isBoolCol = isBooleanColumn(col, val);
+                const isLongText = col.type.toLowerCase().includes("text") || col.type.toLowerCase().includes("json") || isRichContentColumn(col.name, col.type);
 
                 return (
                   <div key={col.name} className={`field-record-card ${col.primaryKey ? "is-pk-record" : ""}`}>
@@ -2107,6 +2380,18 @@ export const DataGrid: React.FC<DataGridProps> = ({
                             <span>NULL</span>
                           </button>
                         )}
+
+                        {isLongText && !isNull && !isAuto && (
+                          <button
+                            type="button"
+                            className="toggle-chip-btn"
+                            onClick={() => openContentEditorForModalField(col.name, col.type, val)}
+                            title="Open Fullscreen Text Editor"
+                          >
+                            <Maximize2 size={10} />
+                            <span>Editor</span>
+                          </button>
+                        )}
                       </div>
                     </div>
 
@@ -2156,16 +2441,16 @@ export const DataGrid: React.FC<DataGridProps> = ({
                       ) : isBoolCol ? (
                         <select
                           className="select form-select font-mono"
-                          value={String(val)}
+                          value={val === true || String(val).toLowerCase() === "true" || String(val) === "1" ? "true" : "false"}
                           onChange={(e) =>
                             setRowEditModal({
                               ...rowEditModal,
-                              data: { ...rowEditModal.data, [col.name]: e.target.value === "true" || e.target.value === "1" },
+                              data: { ...rowEditModal.data, [col.name]: e.target.value === "true" },
                             })
                           }
                         >
-                          <option value="true">true (1)</option>
-                          <option value="false">false (0)</option>
+                          <option value="true">true</option>
+                          <option value="false">false</option>
                         </select>
                       ) : isGeometryColumn(col.type, col.name) ? (
                         <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
@@ -2696,21 +2981,22 @@ export const DataGrid: React.FC<DataGridProps> = ({
               </button>
             </div>
 
-            {/* Modal Body - Field Cards */}
+            {/* Modal Body */}
             <div className="row-detail-body">
               {columns
                 .filter((col) => {
                   if (!inspectSearchTerm.trim()) return true;
                   const term = inspectSearchTerm.toLowerCase();
                   const val = inspectRowModal.row[col.name];
-                  const valStr = val === null || val === undefined ? "null" : typeof val === "object" ? JSON.stringify(val) : String(val);
-                  return col.name.toLowerCase().includes(term) || col.type.toLowerCase().includes(term) || valStr.toLowerCase().includes(term);
+                  const valStr = val === null || val === undefined ? "null" : String(val).toLowerCase();
+                  return col.name.toLowerCase().includes(term) || valStr.includes(term);
                 })
                 .map((col) => {
                   const val = inspectRowModal.row[col.name];
                   const isNull = val === null || val === undefined;
                   const isGeom = isGeometryColumn(col.type, col.name) || (!isNull && isGisData(val));
                   const gisSum = isGeom && !isNull ? formatGisSummary(val) : null;
+                  const cInfo = !isNull ? getContentInfo(val, col.name, col.type) : null;
                   const valStr = isNull ? "NULL" : typeof val === "object" ? JSON.stringify(val, null, 2) : String(val);
                   const isMatch = inspectSearchTerm.trim().length > 0;
 
@@ -2735,6 +3021,11 @@ export const DataGrid: React.FC<DataGridProps> = ({
                               <Globe size={9} /> GIS
                             </span>
                           )}
+                          {cInfo && (
+                            <span className={`content-editor-pill ${cInfo.badgeClass}`} style={{ pointerEvents: "none", margin: 0 }}>
+                              {cInfo.label}
+                            </span>
+                          )}
                         </div>
 
                         <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
@@ -2752,6 +3043,26 @@ export const DataGrid: React.FC<DataGridProps> = ({
                             >
                               <Globe size={11} />
                               <span>Map</span>
+                            </button>
+                          )}
+                          {cInfo && !isNull && (
+                            <button
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => {
+                                openContentEditor(
+                                  inspectRowModal.pkKey,
+                                  false,
+                                  undefined,
+                                  col.name,
+                                  col.type,
+                                  val,
+                                  page * pageSize + inspectRowModal.rowIdx + 1
+                                );
+                              }}
+                              title="Open in Text Editor"
+                            >
+                              <FileText size={11} />
+                              <span>Edit</span>
                             </button>
                           )}
                           <button
@@ -2807,7 +3118,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                     const sql = `INSERT INTO ${qTable} (${colList}) VALUES (${valList});`;
                     navigator.clipboard.writeText(sql);
                   }}
-                  title="Copy full row as SQL INSERT statement"
+                  title="Copy full row as SQL INSERT"
                 >
                   <FileCode size={12} />
                   <span>Copy SQL</span>
@@ -2851,6 +3162,14 @@ export const DataGrid: React.FC<DataGridProps> = ({
           pickerMode={gisModalData.pickerMode}
           onPickCoordinates={gisModalData.onPick}
           onClose={() => setGisModalData(null)}
+        />
+      )}
+
+      {/* Rich Content Text Editor Modal */}
+      {contentEditorModal && (
+        <ContentEditorModal
+          data={contentEditorModal}
+          theme={theme}
         />
       )}
 

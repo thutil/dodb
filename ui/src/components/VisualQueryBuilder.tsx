@@ -2166,12 +2166,13 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
             const qCol = quoteIdent(k, dialect);
             const colInfo = tableCols.find((c) => c.name === k);
             const colType = colInfo?.type?.toLowerCase() || "";
-            const isNumeric = /int|float|double|decimal|numeric|real|serial/i.test(colType);
-            const isBool = /bool/i.test(colType);
+            const isBool = /bool|tinyint\(1\)|bit/i.test(colType);
+            const isNumeric = /int|float|double|decimal|numeric|real|serial/i.test(colType) && !isBool;
 
             if (v === null || v === undefined) return `${qCol} = NULL`;
             if (typeof v === "boolean" || (isBool && (v === "true" || v === "false" || v === true || v === false))) {
-              return `${qCol} = ${v === true || v === "true" ? "TRUE" : "FALSE"}`;
+              const b = v === true || v === "true";
+              return `${qCol} = ${sqlLiteral(b, dialect)}`;
             }
             if (typeof v === "number" || (isNumeric && !isNaN(Number(v)) && String(v).trim() !== "")) {
               return `${qCol} = ${Number(v)}`;

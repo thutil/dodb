@@ -37,6 +37,7 @@ No bloated Java runtimes, no slow Electron shells, and no hidden cloud proxies. 
 - 🕸️ **Visual ER Diagrams** — Auto-generated entity relationship diagrams with foreign key topology and relationship highlighting.
 - ⚡ **Monaco SQL Console** — Full-featured code editor with smart autocomplete, highlight-to-run (`Cmd + Enter`), and multi-tab results.
 - 📝 **Virtual DataGrid & Inline Editing** — Instant double-click edits, staged transactional mutation bar, multi-select rows (`Cmd + Click`), and batch actions.
+- 📄 **Smart Content Detection & Monaco Text Editor** — Auto-detects Markdown, HTML, JSON, and Plaintext with live preview, JSON formatting tools, and fullscreen focus mode.
 - 🔒 **Local & Direct Connection** — Direct socket connections with local AES-256-GCM encryption for saved passwords. Zero telemetry.
 
 ---
@@ -118,7 +119,23 @@ Explore and edit database records with safety and speed.
 
 ---
 
-### 6. Detailed Inspector & JSON View / Export
+### 6. Smart Content Detection & Monaco Text Editor
+
+Inspect and edit rich content columns directly with an IDE-grade text editor.
+
+- **Intelligent Content Detection** — Automatically detects `Markdown`, `HTML`, `JSON`, and `Plaintext` with quick-launch pills in grid cells and context menus.
+- **Monaco-Powered Editor Modal** — Native Monaco editor with syntax highlighting, word wrap, copy, live line/word/character statistics, and JSON syntax validation.
+- **Split & Live Preview** — Clean, side-by-side text preview for Markdown and HTML documents.
+- **JSON Formatting Tools** — 1-click Format (prettify) and Minify JSON data.
+- **Fullscreen Focus Mode** — Distraction-free full-screen editor (`Esc` to exit, `⌘Enter` to apply changes).
+
+<p align="center">
+  <img src="docs/screenshot/text-editor.png" alt="Smart Content Detection and Monaco Text Editor" width="100%" />
+</p>
+
+---
+
+### 7. Detailed Inspector & JSON View / Export
 
 - Right-click any row to inspect fields in full-screen modal with instant search and formatted JSON view.
 - Modal record editor with NULL toggles and auto-increment handling.
@@ -130,7 +147,7 @@ Explore and edit database records with safety and speed.
 
 ---
 
-### 7. Profile & Connection Management
+### 8. Profile & Connection Management
 
 - Save and organize database connections with color tags and environment groups.
 - Direct socket connections. Passwords you choose to save are encrypted with AES-256-GCM.
