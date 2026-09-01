@@ -17,6 +17,7 @@ import {
   MarkerType,
   ReactFlowProvider,
   useReactFlow,
+  type OnError,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
@@ -53,6 +54,7 @@ import {
   GripHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
+  FileText,
 } from "lucide-react";
 import {
   ConnectionProfile,
@@ -77,6 +79,8 @@ import { extractColumnMappingsFromSql } from "../utils/sqlUtils";
 import { setSharedSql, useSharedSql } from "../utils/queryWorkspaceStore";
 import { PendingChanges, CommitResult } from "./DataGrid";
 import { saveTextFileAsync } from "../utils/saveFile";
+import { ContentEditorModal, ContentEditorData } from "./ContentEditorModal";
+import { getContentInfo } from "../utils/contentDetection";
 
 interface VisualQueryBuilderProps {
   activeProfile: ConnectionProfile | null;
@@ -263,12 +267,12 @@ const VisualTableNode: React.FC<NodeProps> = React.memo(function VisualTableNode
 
       <style jsx>{`
         .table-node-card {
-          min-width: 250px;
-          max-width: 320px;
+          min-width: 260px;
+          max-width: 330px;
           background: var(--bg-card);
           border: 1px solid var(--border-light);
-          border-radius: var(--radius-md);
-          box-shadow: var(--shadow-sm);
+          border-radius: var(--radius-md, 8px);
+          box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.08), 0 2px 6px -1px rgba(0, 0, 0, 0.04);
           overflow: hidden;
           font-size: 12px;
           user-select: none;
@@ -277,14 +281,14 @@ const VisualTableNode: React.FC<NodeProps> = React.memo(function VisualTableNode
 
         .table-node-card.is-selected {
           border-color: var(--accent-blue);
-          box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.35), var(--shadow-sm);
+          box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25), 0 8px 24px -4px rgba(59, 130, 246, 0.15);
         }
 
         .table-card-header {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 8px 10px;
+          padding: 9px 12px;
           background: var(--bg-tertiary);
           border-bottom: 1px solid var(--border-light);
           gap: 8px;
@@ -298,10 +302,11 @@ const VisualTableNode: React.FC<NodeProps> = React.memo(function VisualTableNode
         }
 
         .table-icon-badge {
-          width: 22px;
-          height: 22px;
-          border-radius: var(--radius-xs);
-          background: rgba(59, 130, 246, 0.12);
+          width: 24px;
+          height: 24px;
+          border-radius: var(--radius-xs, 4px);
+          background: rgba(59, 130, 246, 0.08);
+          border: 1px solid rgba(59, 130, 246, 0.16);
           color: var(--accent-blue);
           display: flex;
           align-items: center;
@@ -316,17 +321,19 @@ const VisualTableNode: React.FC<NodeProps> = React.memo(function VisualTableNode
         }
 
         .table-name {
-          font-weight: 700;
-          font-size: 12px;
+          font-weight: 600;
+          font-size: 12.5px;
           color: var(--text-main);
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
+          letter-spacing: -0.1px;
         }
 
         .table-sub-count {
-          font-size: 9.5px;
+          font-size: 10px;
           color: var(--text-muted);
+          font-weight: 400;
         }
 
         .table-header-actions {
@@ -379,23 +386,23 @@ const VisualTableNode: React.FC<NodeProps> = React.memo(function VisualTableNode
         }
 
         .column-row.is-checked {
-          background: rgba(59, 130, 246, 0.05);
+          background: rgba(59, 130, 246, 0.035);
         }
 
         .column-row.is-filtered {
-          background: rgba(59, 130, 246, 0.12);
+          background: rgba(59, 130, 246, 0.08);
         }
 
         .col-where-badge {
           display: inline-flex;
           align-items: center;
           gap: 3px;
-          padding: 1px 4px;
-          border-radius: var(--radius-xs);
-          background: rgba(59, 130, 246, 0.2);
+          padding: 1px 5px;
+          border-radius: 3px;
+          background: rgba(59, 130, 246, 0.12);
           color: var(--accent-blue);
           font-size: 8.5px;
-          font-weight: 700;
+          font-weight: 600;
         }
 
         .quick-col-filter-btn.is-active {
@@ -413,6 +420,7 @@ const VisualTableNode: React.FC<NodeProps> = React.memo(function VisualTableNode
           accent-color: var(--accent-blue);
           width: 13px;
           height: 13px;
+          border-radius: 3px;
         }
 
         .col-info-wrapper {
@@ -434,8 +442,9 @@ const VisualTableNode: React.FC<NodeProps> = React.memo(function VisualTableNode
         .pk-tag {
           font-size: 8.5px;
           font-weight: 700;
-          color: var(--accent-amber);
-          background: rgba(245, 158, 11, 0.12);
+          color: #d97706;
+          background: rgba(245, 158, 11, 0.1);
+          border: 1px solid rgba(245, 158, 11, 0.22);
           padding: 1px 4px;
           border-radius: 3px;
           display: flex;
@@ -453,27 +462,30 @@ const VisualTableNode: React.FC<NodeProps> = React.memo(function VisualTableNode
           width: 4px;
           height: 4px;
           border-radius: 50%;
-          background: var(--text-muted);
+          background: var(--border-light);
           flex-shrink: 0;
         }
 
         .col-name {
           color: var(--text-main);
+          font-size: 11.5px;
+          font-weight: 500;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
         }
 
         .column-row.is-checked .col-name {
-          color: var(--accent-blue);
+          color: var(--text-main);
           font-weight: 600;
         }
 
         .col-type {
           font-size: 10px;
           color: var(--text-muted);
-          opacity: 0.8;
+          opacity: 0.85;
           flex-shrink: 0;
+          font-family: var(--font-mono);
         }
 
         .quick-col-filter-btn {
@@ -500,17 +512,17 @@ const VisualTableNode: React.FC<NodeProps> = React.memo(function VisualTableNode
         }
 
         :global(.column-snap-handle) {
-          width: 8px !important;
-          height: 8px !important;
-          background: var(--accent-blue) !important;
-          border: 2px solid var(--bg-card) !important;
+          width: 7px !important;
+          height: 7px !important;
+          background: var(--bg-card) !important;
+          border: 2px solid var(--accent-blue) !important;
           border-radius: 50% !important;
           transition: transform 0.15s ease, background 0.15s ease;
         }
 
         :global(.column-snap-handle:hover) {
-          transform: scale(1.5);
-          background: #60a5fa !important;
+          transform: scale(1.4);
+          background: var(--accent-blue) !important;
         }
       `}</style>
     </div>
@@ -885,6 +897,15 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
   onCommitChanges,
   onOpenInSqlConsole,
 }) => {
+  const nodeTypes = useMemo(() => NODE_TYPES, []);
+  const edgeTypes = useMemo(() => EDGE_TYPES, []);
+
+  const onFlowError: OnError = useCallback((id, message) => {
+    // Suppress warning 002: nodeTypes/edgeTypes recreation during HMR/Fast Refresh
+    if (id === "002") return;
+    console.warn(`[React Flow]: ${message} (code #${id})`);
+  }, []);
+
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [tableSchemas, setTableSchemas] = useState<Record<string, ColumnInfo[]>>({});
@@ -926,6 +947,7 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
   const [editValue, setEditValue] = useState<string>("");
   const [isSubmittingChanges, setIsSubmittingChanges] = useState<boolean>(false);
   const [commitMessage, setCommitMessage] = useState<{ success: boolean; text: string } | null>(null);
+  const [contentEditorModal, setContentEditorModal] = useState<ContentEditorData | null>(null);
 
   const editInputRef = useRef<HTMLInputElement>(null);
   const { fitView } = useReactFlow();
@@ -1924,6 +1946,42 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
     window.addEventListener("mouseup", handleMouseUp);
   };
 
+  // Helper to lookup column type from schemas
+  const findColType = useCallback((fieldName: string): string | undefined => {
+    const colOnly = fieldName.includes(".") ? fieldName.split(".").pop()! : fieldName;
+    for (const tbl of Object.keys(tableSchemas)) {
+      const matched = tableSchemas[tbl]?.find((c) => c.name === colOnly || c.name === fieldName);
+      if (matched?.type) return matched.type;
+    }
+    return undefined;
+  }, [tableSchemas]);
+
+  // Open Content / Rich Text Editor Modal for cell in Visual Query Builder
+  const openContentEditor = useCallback((
+    rIdx: number,
+    colName: string,
+    currentVal: unknown,
+    colType?: string
+  ) => {
+    setContentEditorModal({
+      title: `Query Result — ${colName}`,
+      subtitle: `Row #${rIdx + 1}`,
+      colName,
+      colType: colType || findColType(colName),
+      value: currentVal,
+      onSave: (newVal) => {
+        setEditedCells((prev) => ({
+          ...prev,
+          [rIdx]: {
+            ...(prev[rIdx] || {}),
+            [colName]: newVal,
+          },
+        }));
+      },
+      onClose: () => setContentEditorModal(null),
+    });
+  }, [findColType]);
+
   // Start inline editing
   const startEditing = (rowIdx: number, colName: string, currentVal: unknown) => {
     setEditingCell({ rowIdx, colName, originalVal: currentVal });
@@ -2701,8 +2759,9 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
             onEdgeClick={handleEdgeClick}
-            nodeTypes={NODE_TYPES}
-            edgeTypes={EDGE_TYPES}
+            nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            onError={onFlowError}
             colorMode={theme}
             fitView
             minZoom={0.2}
@@ -3049,7 +3108,7 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
                         <thead>
                           <tr>
                             <th className="th-idx">#</th>
-                            <th className="th-actions">Actions</th>
+                            <th className="th-actions" style={{ width: "60px" }}>Actions</th>
                             {(queryResult.fields || Object.keys(queryResult.rows[0] || {})).map(
                               (f) => (
                                 <th key={f}>{f}</th>
@@ -3081,14 +3140,29 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
                                 </td>
 
                                 <td className="td-actions">
-                                  <button
-                                    type="button"
-                                    className={`row-action-btn ${isDeleted ? "is-active-del" : ""}`}
-                                    onClick={() => toggleDeleteRow(idx)}
-                                    title={isDeleted ? "Undo delete row" : "Mark row for deletion"}
-                                  >
-                                    {isDeleted ? <RotateCcw size={11} /> : <Trash2 size={11} />}
-                                  </button>
+                                  <div style={{ display: "inline-flex", alignItems: "center", gap: "2px" }}>
+                                    <button
+                                      type="button"
+                                      className="row-action-btn"
+                                      onClick={() => {
+                                        const targetField = fields.find((fld) => getContentInfo(row[fld], fld, findColType(fld))) || fields[0];
+                                        if (targetField) {
+                                          openContentEditor(idx, targetField, (editedCells[idx] || {})[targetField] ?? row[targetField], findColType(targetField));
+                                        }
+                                      }}
+                                      title="Open row content in Text Editor"
+                                    >
+                                      <FileText size={11} />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className={`row-action-btn ${isDeleted ? "is-active-del" : ""}`}
+                                      onClick={() => toggleDeleteRow(idx)}
+                                      title={isDeleted ? "Undo delete row" : "Mark row for deletion"}
+                                    >
+                                      {isDeleted ? <RotateCcw size={11} /> : <Trash2 size={11} />}
+                                    </button>
+                                  </div>
                                 </td>
 
                                 {fields.map((f) => {
@@ -3097,6 +3171,8 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
                                   const isNull = cellVal === null || cellVal === undefined;
                                   const isCurrentlyEditing =
                                     editingCell?.rowIdx === idx && editingCell?.colName === f;
+                                  const colType = findColType(f);
+                                  const cInfo = !isNull ? getContentInfo(cellVal, f, colType) : null;
 
                                   if (isCurrentlyEditing) {
                                     return (
@@ -3125,13 +3201,46 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
                                     <td
                                       key={f}
                                       className={`result-cell ${isNull ? "is-null" : ""} ${isCellEdited ? "is-edited" : ""}`}
-                                      onDoubleClick={() => startEditing(idx, f, cellVal)}
-                                      title="Double-click to edit cell"
+                                      onDoubleClick={() => {
+                                        if (isDeleted) return;
+                                        if (cInfo) {
+                                          openContentEditor(idx, f, cellVal, colType);
+                                        } else {
+                                          startEditing(idx, f, cellVal);
+                                        }
+                                      }}
+                                      title={
+                                        cInfo
+                                          ? `${typeof cellVal === "object" ? JSON.stringify(cellVal) : String(cellVal)}\n\n(${cInfo.label}: Double-click or click badge to open Text Editor)`
+                                          : !isNull
+                                            ? String(cellVal)
+                                            : "Double-click to edit cell"
+                                      }
                                     >
                                       <div className="cell-content-box">
-                                        <span className="cell-value-text">
-                                          {isNull ? "NULL" : String(cellVal)}
-                                        </span>
+                                        {cInfo ? (
+                                          <div className="content-cell-content">
+                                            <span className="content-cell-text font-mono">
+                                              {typeof cellVal === "object" ? JSON.stringify(cellVal) : String(cellVal)}
+                                            </span>
+                                            <button
+                                              type="button"
+                                              className={`content-editor-pill ${cInfo.badgeClass}`}
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                openContentEditor(idx, f, cellVal, colType);
+                                              }}
+                                              title={cInfo.titleSnippet ? `${cInfo.titleSnippet} (Click to open Text Editor)` : `Open Text Editor (${cInfo.label})`}
+                                            >
+                                              <FileText size={10} />
+                                              <span>{cInfo.label}</span>
+                                            </button>
+                                          </div>
+                                        ) : (
+                                          <span className="cell-value-text font-mono">
+                                            {isNull ? "NULL" : String(cellVal)}
+                                          </span>
+                                        )}
                                         {isCellEdited && <span className="edited-dot" />}
                                       </div>
                                     </td>
@@ -3747,6 +3856,13 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
         )}
       </div>
 
+      {contentEditorModal && (
+        <ContentEditorModal
+          data={contentEditorModal}
+          theme={theme}
+        />
+      )}
+
       <style jsx>{`
         .visual-query-container {
           display: flex;
@@ -3810,32 +3926,33 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
           display: flex;
           align-items: center;
           gap: 6px;
-          background: var(--bg-tertiary);
+          background: var(--bg-card);
           padding: 3px 10px;
           border-radius: 20px;
           border: 1px solid var(--border-light);
+          box-shadow: var(--shadow-sm);
         }
 
         .step-item {
           display: flex;
           align-items: center;
-          gap: 4px;
-          font-size: 10.5px;
+          gap: 5px;
+          font-size: 11px;
           color: var(--text-muted);
           font-weight: 500;
         }
 
         .step-num {
-          width: 15px;
-          height: 15px;
+          width: 16px;
+          height: 16px;
           border-radius: 50%;
-          background: var(--bg-card);
+          background: var(--bg-tertiary);
           color: var(--text-muted);
           display: flex;
           align-items: center;
           justify-content: center;
           font-size: 9px;
-          font-weight: 700;
+          font-weight: 600;
         }
 
         .step-item.is-done {
@@ -3843,8 +3960,9 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
         }
 
         .step-item.is-done .step-num {
-          background: var(--accent-blue);
-          color: #ffffff;
+          background: rgba(59, 130, 246, 0.12);
+          color: var(--accent-blue);
+          border: 1px solid rgba(59, 130, 246, 0.25);
         }
 
         .step-item.is-current {
@@ -3853,9 +3971,8 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
         }
 
         .step-item.is-current .step-num {
-          background: rgba(59, 130, 246, 0.15);
-          color: var(--accent-blue);
-          border: 1px solid var(--accent-blue);
+          background: var(--accent-blue);
+          color: #ffffff;
         }
 
         .step-run .step-num {
@@ -4155,26 +4272,27 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
 
         .canvas-floating-toolbox {
           position: absolute;
-          top: 12px;
+          top: 14px;
           left: 50%;
           transform: translateX(-50%);
           background: var(--bg-card);
+          backdrop-filter: blur(12px);
           border: 1px solid var(--border-light);
-          padding: 3px 6px;
-          border-radius: var(--radius-md);
-          box-shadow: var(--shadow-sm);
+          padding: 3px 5px;
+          border-radius: 24px;
+          box-shadow: 0 4px 16px -2px rgba(0, 0, 0, 0.08), 0 2px 6px -1px rgba(0, 0, 0, 0.04);
           display: flex;
           align-items: center;
-          gap: 4px;
+          gap: 3px;
           z-index: 25;
         }
 
         .toolbox-btn {
-          background: var(--bg-tertiary);
-          border: 1px solid var(--border-light);
-          color: var(--text-main);
-          padding: 4px 9px;
-          border-radius: var(--radius-xs);
+          background: transparent;
+          border: 1px solid transparent;
+          color: var(--text-sub);
+          padding: 4px 10px;
+          border-radius: 16px;
           font-size: 11px;
           font-weight: 500;
           cursor: pointer;
@@ -4186,6 +4304,8 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
 
         .toolbox-btn:hover {
           background: var(--bg-hover);
+          color: var(--text-main);
+          border-color: var(--border-light);
         }
 
         .add-table-tb-btn {
@@ -4499,7 +4619,7 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
           border: none;
           border-bottom: 2px solid transparent;
           color: var(--text-muted);
-          padding: 0 10px;
+          padding: 0 12px;
           height: 100%;
           display: flex;
           align-items: center;
@@ -4507,7 +4627,7 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
           font-size: 11px;
           font-weight: 500;
           cursor: pointer;
-          transition: color 0.15s ease, border-bottom-color 0.15s ease;
+          transition: all 0.15s ease;
         }
 
         .drawer-tab-btn:hover {
@@ -4517,11 +4637,11 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
         .drawer-tab-btn.active {
           color: var(--accent-blue);
           border-bottom-color: var(--accent-blue);
-          font-weight: 700;
+          font-weight: 600;
         }
 
         .tab-pill {
-          background: rgba(59, 130, 246, 0.12);
+          background: rgba(59, 130, 246, 0.08);
           color: var(--accent-blue);
           padding: 1px 6px;
           border-radius: 10px;
@@ -4936,7 +5056,7 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
         .results-table {
           width: 100%;
           border-collapse: collapse;
-          font-size: 11px;
+          font-size: 11.5px;
         }
 
         .results-table th {
@@ -4944,12 +5064,28 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
           top: 0;
           background: var(--bg-tertiary);
           border-bottom: 1px solid var(--border-light);
-          padding: 6px 10px;
+          padding: 7px 12px;
           text-align: left;
-          font-weight: 700;
+          font-weight: 600;
+          font-size: 11px;
           color: var(--text-sub);
           white-space: nowrap;
           z-index: 2;
+          letter-spacing: 0.2px;
+          max-width: 320px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .results-table td {
+          padding: 6px 12px;
+          border-bottom: 1px solid var(--border-light);
+          white-space: nowrap;
+          color: var(--text-main);
+          position: relative;
+          max-width: 320px;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
 
         .result-data-row {
@@ -4960,22 +5096,22 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
           background: var(--bg-hover);
         }
 
+        .result-data-row:nth-child(even) td {
+          background: rgba(0, 0, 0, 0.015);
+        }
+
+        .result-data-row:hover:nth-child(even) td {
+          background: var(--bg-hover);
+        }
+
         .result-data-row.is-deleted td {
           text-decoration: line-through;
           opacity: 0.6;
-          background: rgba(239, 68, 68, 0.08) !important;
+          background: rgba(239, 68, 68, 0.06) !important;
         }
 
         .result-data-row.is-edited-row {
           background: rgba(245, 158, 11, 0.04);
-        }
-
-        .results-table td {
-          padding: 5px 10px;
-          border-bottom: 1px solid var(--border-light);
-          white-space: nowrap;
-          color: var(--text-main);
-          position: relative;
         }
 
         .th-idx,
@@ -4987,7 +5123,7 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
 
         .th-actions,
         .td-actions {
-          width: 44px;
+          width: 60px;
           text-align: center !important;
           padding: 2px 4px !important;
         }
@@ -5020,7 +5156,7 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
         }
 
         .result-cell.is-edited {
-          background: rgba(245, 158, 11, 0.12) !important;
+          background: rgba(245, 158, 11, 0.08) !important;
           color: #d97706;
           font-weight: 600;
         }
@@ -5030,6 +5166,60 @@ export const VisualQueryBuilderInner: React.FC<VisualQueryBuilderProps> = ({
           align-items: center;
           justify-content: space-between;
           gap: 6px;
+          min-width: 0;
+        }
+
+        .cell-value-text {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        :global(.content-editor-pill) {
+          display: inline-flex;
+          align-items: center;
+          gap: 3px;
+          padding: 1px 5px;
+          border-radius: 3px;
+          font-size: 9.5px;
+          font-weight: 600;
+          cursor: pointer;
+          border: 1px solid var(--border-light);
+          background: var(--bg-tertiary);
+          color: var(--text-muted);
+          transition: all 0.12s ease;
+          letter-spacing: 0.2px;
+          flex-shrink: 0;
+        }
+
+        :global(.content-editor-pill:hover) {
+          border-color: var(--accent-blue);
+          color: var(--accent-blue);
+          background: rgba(59, 130, 246, 0.08);
+        }
+
+        :global(.content-editor-pill.badge-txt) {
+          color: var(--text-sub);
+          background: var(--bg-hover);
+          border-color: var(--border-light);
+        }
+
+        :global(.content-editor-pill.badge-json) {
+          color: #0284c7;
+          background: rgba(2, 132, 199, 0.08);
+          border-color: rgba(2, 132, 199, 0.2);
+        }
+
+        :global(.content-editor-pill.badge-markdown) {
+          color: #7c3aed;
+          background: rgba(124, 58, 237, 0.08);
+          border-color: rgba(124, 58, 237, 0.2);
+        }
+
+        :global(.content-editor-pill.badge-html) {
+          color: #ea580c;
+          background: rgba(234, 88, 12, 0.08);
+          border-color: rgba(234, 88, 12, 0.2);
         }
 
         .edited-dot {

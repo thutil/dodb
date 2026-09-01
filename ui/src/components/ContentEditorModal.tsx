@@ -13,8 +13,10 @@ import {
   AlignLeft,
   WrapText,
   Copy,
+  Lock,
 } from "lucide-react";
 import { ContentType, detectContentType, getContentInfo } from "../utils/contentDetection";
+import { sanitizeUrl, sanitizeHtmlForPreview } from "../utils/security";
 
 export interface ContentEditorData {
   title: string;
@@ -198,8 +200,11 @@ export const ContentEditorModal: React.FC<ContentEditorModalProps> = ({
     // Ordered list items
     html = html.replace(/^\s*\d+\.\s+(.*$)/gim, '<li class="md-li-num">$1</li>');
 
-    // Links [text](url)
-    html = html.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="md-link">$1</a>');
+    // Links [text](url) - Sanitized against dangerous protocols (javascript:, data:)
+    html = html.replace(/\[(.*?)\]\((.*?)\)/g, (_, label, rawUrl) => {
+      const safeUrl = sanitizeUrl(rawUrl);
+      return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer nofollow" class="md-link">${label}</a>`;
+    });
 
     // Paragraph linebreaks
     html = html.replace(/\n\n+/g, '<div class="md-paragraph-break"></div>');
@@ -424,7 +429,10 @@ export const ContentEditorModal: React.FC<ContentEditorModalProps> = ({
                     <Eye size={12} />
                     <span>Preview ({selectedType.toUpperCase()})</span>
                   </span>
-                  <span className="preview-hint font-mono">Text only</span>
+                  <span className="preview-hint font-mono" style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                    <Lock size={10} />
+                    <span>Sandboxed Safe Preview</span>
+                  </span>
                 </div>
 
                 <div className="preview-content-scroll">
@@ -437,8 +445,8 @@ export const ContentEditorModal: React.FC<ContentEditorModalProps> = ({
                     <div className="html-preview-frame-wrap">
                       <iframe
                         title="HTML Preview"
-                        sandbox="allow-same-origin"
-                        srcDoc={`<!DOCTYPE html><html><head><meta charset="utf-8"/><style>body{font-family:sans-serif;padding:16px;color:${theme === "light" ? "#18181b" : "#ededed"};background:${theme === "light" ? "#ffffff" : "#0f0f11"};margin:0;line-height:1.6;font-size:13px;}</style></head><body>${content}</body></html>`}
+                        sandbox=""
+                        srcDoc={`<!DOCTYPE html><html><head><meta charset="utf-8"/><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data: https: http:; font-src https: data:;"/><style>body{font-family:sans-serif;padding:16px;color:${theme === "light" ? "#18181b" : "#ededed"};background:${theme === "light" ? "#ffffff" : "#0f0f11"};margin:0;line-height:1.6;font-size:13px;}</style></head><body>${sanitizeHtmlForPreview(content)}</body></html>`}
                         className="html-preview-iframe"
                       />
                     </div>

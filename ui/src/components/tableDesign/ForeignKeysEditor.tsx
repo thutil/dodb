@@ -12,6 +12,7 @@ import {
   Node,
   ReactFlowProvider,
   Connection,
+  type OnError,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { ForeignKeyDraft, ColumnDraft, ON_ACTIONS } from "../../utils/ddlBuilder";
@@ -163,6 +164,14 @@ const FkFlowCanvasInner: React.FC<FkFlowCanvasProps> = ({
     }
   }, [onConnectPair]);
 
+  const nodeTypes = useMemo(() => NODE_TYPES, []);
+  const edgeTypes = useMemo(() => EDGE_TYPES, []);
+
+  const onFlowError: OnError = useCallback((id, message) => {
+    if (id === "002") return;
+    console.warn(`[React Flow]: ${message} (code #${id})`);
+  }, []);
+
   return (
     <div
       className="flow-visual-box"
@@ -177,8 +186,9 @@ const FkFlowCanvasInner: React.FC<FkFlowCanvasProps> = ({
       <ReactFlow
         nodes={nodes}
         edges={edges}
-        nodeTypes={NODE_TYPES}
-        edgeTypes={EDGE_TYPES}
+        nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
+        onError={onFlowError}
         onConnect={handleConnect}
         fitView
         fitViewOptions={{ padding: 0.2 }}
