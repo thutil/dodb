@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.9] - 2026-09-01
+
+### Added
+
+- **Smart Content Type Detection & Rich Content Editor**:
+  - Automatically identifies whether cell values or columns contain **Markdown**, **HTML**, **JSON**, or **Plaintext** based on heuristics, column names (e.g. `content`, `body`, `notes`, `description`, `summary`), and data formats.
+  - Adds compact, intuitive type badges (`MD`, `JSON`, `HTML`, `TXT`) directly in data grid and SQL console cells, accompanied by header title tags / counts where applicable.
+  - Launches a powerful Monaco-based modal text editor on button click, double-click, or right-click context menu (`Open in Text Editor`).
+  - Supports switching content types (`Markdown | HTML | JSON | Plaintext`) on the fly.
+  - **Fullscreen Focus Mode**: Toggle fullscreen to focus solely on drafting and editing expansive text, with word, character, and line count statistics.
+  - **Split / Preview View**: Live preview renderer for Markdown and HTML (with asset/image tags safely bypassed for clean, text-centric editing).
+  - **JSON Prettify, Minify & Validation**: Built-in JSON formatting, minification, and real-time syntax error validation.
+  - Keyboard shortcut `⌘Enter` / `Ctrl+Enter` to quickly apply edits.
+
+### Fixed
+
+- **Boolean Inline Editing & Type Coercion**:
+  - Resolved an issue where inline boolean edits in MySQL/MariaDB (which use `tinyint(1)` or `bit`) and PostgreSQL were erroneously coerced to string `'true'` / `'false'`, preventing successful updates.
+  - Improved `coerceCellValue` to prioritize boolean types (`bool`, `boolean`, `tinyint(1)`, `bit`) before generic numeric integer matches, guaranteeing native boolean primitives are sent.
+  - Added dedicated inline `<select>` dropdown editor for boolean fields in DataGrid, SQL Console, and Row Edit Modals.
+  - Styled visual boolean badge pills (`true` in green, `false` in subtle neutral/gray) for clear readability.
+
+---
+
 ## [0.3.8] - 2026-08-31
 
 ### Added
