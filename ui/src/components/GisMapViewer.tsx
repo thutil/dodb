@@ -237,10 +237,20 @@ export const GisMapViewer: React.FC<GisMapViewerProps> = ({
           popupContent.style.fontSize = "12px";
           popupContent.style.color = "#1e293b";
           popupContent.style.padding = "4px";
-          popupContent.innerHTML = `
-            <div style="font-weight:700;margin-bottom:4px;color:#0f172a;">${feat.label || `Record #${idx + 1}`}</div>
-            <div style="font-family:monospace;font-size:11px;color:#475569;">${coords[1].toFixed(6)}, ${coords[0].toFixed(6)}</div>
-          `;
+
+          const titleEl = document.createElement("div");
+          titleEl.style.fontWeight = "700";
+          titleEl.style.marginBottom = "4px";
+          titleEl.style.color = "#0f172a";
+          titleEl.textContent = feat.label || `Record #${idx + 1}`;
+          popupContent.appendChild(titleEl);
+
+          const coordsEl = document.createElement("div");
+          coordsEl.style.fontFamily = "monospace";
+          coordsEl.style.fontSize = "11px";
+          coordsEl.style.color = "#475569";
+          coordsEl.textContent = `${coords[1].toFixed(6)}, ${coords[0].toFixed(6)}`;
+          popupContent.appendChild(coordsEl);
 
           const popup = new maplibregl.Popup({ offset: 12 }).setDOMContent(popupContent);
 

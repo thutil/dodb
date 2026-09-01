@@ -15,6 +15,7 @@ import {
   Node,
   useReactFlow,
   ReactFlowProvider,
+  type OnError,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import {
@@ -245,6 +246,15 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
   const [sidebarSearch, setSidebarSearch] = useState("");
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const flowWrapperRef = useRef<HTMLDivElement>(null);
+
+  const nodeTypes = useMemo(() => NODE_TYPES, []);
+  const edgeTypes = useMemo(() => EDGE_TYPES, []);
+
+  const onFlowError: OnError = useCallback((id, message) => {
+    // Suppress warning 002: nodeTypes/edgeTypes recreation during HMR/Fast Refresh
+    if (id === "002") return;
+    console.warn(`[React Flow]: ${message} (code #${id})`);
+  }, []);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<TableNodeData>>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -815,8 +825,9 @@ const SchemaDiagramInner: React.FC<SchemaDiagramProps> = ({
               edges={edges}
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
-              nodeTypes={NODE_TYPES}
-              edgeTypes={EDGE_TYPES}
+              nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
+              onError={onFlowError}
               onlyRenderVisibleElements={true}
               minZoom={0.05}
               maxZoom={2}
