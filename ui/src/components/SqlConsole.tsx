@@ -1746,7 +1746,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                       : `SELECT * FROM ${quoteTableIdent(tables[0], dialect)} LIMIT 10;`
                   )
                 }
-                title="Order by recent rows"
+                data-tooltip="Order by recent rows"
               >
                 Recent Rows
               </button>
@@ -1755,7 +1755,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
             <button
               className={`btn btn-secondary btn-sm chip-btn ${showHistory ? "history-btn-active" : ""}`}
               onClick={() => setShowHistory(!showHistory)}
-              title="Query Execution History (ประวัติการรันคำสั่ง)"
+              data-tooltip="Query Execution History (ประวัติการรันคำสั่ง)"
             >
               <History size={12} />
               <span>History</span>
@@ -1806,7 +1806,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                   setSelectedSql("");
                   setSelectionInfo(null);
                 }}
-                title="Clear highlight selection"
+                data-tooltip="Clear highlight selection"
               >
                 <X size={10} />
               </button>
@@ -1830,7 +1830,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
               className={`btn btn-primary run-query-btn ${selectionInfo ? "has-selection" : ""}`}
               onClick={handleRunSelectionOrCurrent}
               disabled={loading}
-              title={
+              data-tooltip={
                 selectionInfo
                   ? "Run highlighted text (Cmd + Enter)"
                   : parsedStatements.length > 1
@@ -2117,7 +2117,12 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
             </div>
 
             <div className="tx-actions">
-              <button className="btn btn-secondary btn-sm" onClick={handleRollback} disabled={submitting}>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={handleRollback}
+                disabled={submitting}
+                title="Discard pending cell changes (Rollback)"
+              >
                 <RotateCcw size={11} />
                 <span>Rollback</span>
               </button>
@@ -2125,7 +2130,12 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                 <FileCode size={11} />
                 <span>Copy SQL</span>
               </button>
-              <button className="btn btn-primary btn-sm btn-commit-action" onClick={handleCommitChanges} disabled={submitting}>
+              <button
+                className="btn btn-primary btn-sm btn-commit-action"
+                onClick={handleCommitChanges}
+                disabled={submitting}
+                title="Save pending cell changes to database (Commit)"
+              >
                 <Check size={11} />
                 <span>{submitting ? "Committing..." : "Commit Changes"}</span>
               </button>

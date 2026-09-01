@@ -157,7 +157,8 @@ export const Header: React.FC<HeaderProps> = ({
               onChangeView("explorer");
             }
           }}
-          title={t("headerBrandTooltip", language)}
+          data-tooltip={t("headerBrandTooltip", language)}
+          data-tooltip-pos="bottom"
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/icon.png" alt="dodb mascot" className="brand-mascot-img" />
@@ -165,7 +166,7 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {activeProfile && (
-          <div className="header-breadcrumb" ref={breadcrumbRef} title={t("headerBreadcrumbTooltip", language)}>
+          <div className="header-breadcrumb" ref={breadcrumbRef}>
             <span className="bc-divider">/</span>
 
             {/* Segment 1: Host / Connection Profile */}
@@ -178,7 +179,8 @@ export const Header: React.FC<HeaderProps> = ({
                   setDbSearch("");
                   setTableSearch("");
                 }}
-                title={t("headerProfileTooltip", language, { name: activeProfile.name, host: activeProfile.host || "Local" })}
+                data-tooltip={t("headerProfileTooltip", language, { name: activeProfile.name, host: activeProfile.host || "Local" })}
+                data-tooltip-pos="bottom"
               >
                 <Server size={11} className="bc-segment-icon" />
                 <span className="bc-label">{activeProfile.name}</span>
@@ -266,7 +268,8 @@ export const Header: React.FC<HeaderProps> = ({
                   setDbSearch("");
                   setTableSearch("");
                 }}
-                title={isConnecting ? t("connecting", language) : t("headerDatabaseTooltip", language, { database: activeDatabase || "default" })}
+                data-tooltip={isConnecting ? t("connecting", language) : t("headerDatabaseTooltip", language, { database: activeDatabase || "default" })}
+                data-tooltip-pos="bottom"
               >
                 {isConnecting ? (
                   <RefreshCw size={11} className="bc-segment-icon spin" />
@@ -294,7 +297,8 @@ export const Header: React.FC<HeaderProps> = ({
                           e.stopPropagation();
                           onRefreshDatabases();
                         }}
-                        title={t("refresh", language)}
+                        data-tooltip={t("refresh", language)}
+                        data-tooltip-pos="bottom"
                       >
                         <RefreshCw size={10} className={isConnecting ? "spin" : ""} />
                       </button>
@@ -365,7 +369,8 @@ export const Header: React.FC<HeaderProps> = ({
                       setDbSearch("");
                       setTableSearch("");
                     }}
-                    title={t("headerTableTooltip", language, { table: activeTable })}
+                    data-tooltip={t("headerTableTooltip", language, { table: activeTable })}
+                    data-tooltip-pos="bottom"
                   >
                     <TableIcon size={11} className="bc-segment-icon" />
                     <span className="bc-label">{activeTable}</span>
@@ -486,7 +491,8 @@ export const Header: React.FC<HeaderProps> = ({
         <button
           className="header-quick-search"
           onClick={onOpenCommandPalette}
-          title={t("headerSearchTooltip", language)}
+          data-tooltip={t("headerSearchTooltip", language)}
+          data-tooltip-pos="bottom"
         >
           <span className="search-text">
             {activeTable ? t("quickSearchInTable", language, { table: activeTable }) : t("quickSearchPlaceholder", language)}
@@ -497,7 +503,8 @@ export const Header: React.FC<HeaderProps> = ({
         {activeProfile && (
           <div
             className={`header-health-pill ${latencyMs == null ? "is-connecting" : latencyMs > 200 ? "is-slow" : latencyMs > 80 ? "is-medium" : "is-good"}`}
-            title={t("headerServerStatusTooltip", language, { status: latencyMs != null ? t("headerServerOnline", language, { latency: latencyMs }) : t("headerServerConnecting", language) })}
+            data-tooltip={t("headerServerStatusTooltip", language, { status: latencyMs != null ? t("headerServerOnline", language, { latency: latencyMs }) : t("headerServerConnecting", language) })}
+            data-tooltip-pos="bottom"
           >
             <span className="health-dot" />
             <span className="health-ping">{latencyMs != null ? `${latencyMs}ms` : "..."}</span>
@@ -511,7 +518,8 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             className={`tab-btn ${activeView === "explorer" ? "active" : ""}`}
             onClick={() => onChangeView("explorer")}
-            title={t("headerExplorerTabTooltip", language)}
+            data-tooltip={t("headerExplorerTabTooltip", language)}
+            data-tooltip-pos="bottom"
           >
             <Database size={12} className="tab-icon" />
             <span className="tab-label">{t("navExplorer", language)}</span>
@@ -519,7 +527,8 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             className={`tab-btn ${activeView === "sql" ? "active" : ""}`}
             onClick={() => onChangeView("sql")}
-            title={t("headerSqlTabTooltip", language)}
+            data-tooltip={t("headerSqlTabTooltip", language)}
+            data-tooltip-pos="bottom"
           >
             <Terminal size={12} className="tab-icon" />
             <span className="tab-label">{t("navSql", language)}</span>
@@ -527,7 +536,8 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             className={`tab-btn ${activeView === "visual-query" ? "active" : ""}`}
             onClick={() => onChangeView("visual-query")}
-            title={t("headerVisualQueryTabTooltip", language)}
+            data-tooltip={t("headerVisualQueryTabTooltip", language)}
+            data-tooltip-pos="bottom"
           >
             <Workflow size={12} className="tab-icon" />
             <span className="tab-label">{t("navVisualQuery", language)}</span>
@@ -535,7 +545,8 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             className={`tab-btn ${activeView === "diagram" ? "active" : ""}`}
             onClick={() => onChangeView("diagram")}
-            title={t("erdTabTooltip", language)}
+            data-tooltip={t("erdTabTooltip", language)}
+            data-tooltip-pos="bottom"
           >
             <GitFork size={12} className="tab-icon" />
             <span className="tab-label">{t("navErd", language)}</span>
@@ -543,7 +554,8 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             className={`tab-btn ${activeView === "admin" ? "active" : ""}`}
             onClick={() => onChangeView("admin")}
-            title={t("headerAdminTabTooltip", language)}
+            data-tooltip={t("headerAdminTabTooltip", language)}
+            data-tooltip-pos="bottom"
           >
             <Shield size={12} className="tab-icon" />
             <span className="tab-label">{t("navAdmin", language)}</span>
@@ -554,18 +566,33 @@ export const Header: React.FC<HeaderProps> = ({
 
         <div className="action-buttons-group">
           {onOpenImport && (
-            <button className="btn btn-secondary header-icon-btn" onClick={onOpenImport} title={t("shortcutImport", language)}>
+            <button
+              className="btn btn-secondary header-icon-btn"
+              onClick={onOpenImport}
+              data-tooltip={t("shortcutImport", language)}
+              data-tooltip-pos="bottom"
+            >
               <Upload size={13} />
             </button>
           )}
 
           {onOpenAuditLogs && (
-            <button className="btn btn-secondary header-icon-btn" onClick={onOpenAuditLogs} title={t("shortcutAuditLogs", language)}>
+            <button
+              className="btn btn-secondary header-icon-btn"
+              onClick={onOpenAuditLogs}
+              data-tooltip={t("shortcutAuditLogs", language)}
+              data-tooltip-pos="bottom"
+            >
               <FileText size={13} />
             </button>
           )}
 
-          <button className="btn btn-secondary header-icon-btn conn-btn" onClick={onOpenConnections} title={t("shortcutConnections", language)}>
+          <button
+            className="btn btn-secondary header-icon-btn conn-btn"
+            onClick={onOpenConnections}
+            data-tooltip={t("shortcutConnections", language)}
+            data-tooltip-pos="bottom"
+          >
             <Server size={13} />
           </button>
 
@@ -573,13 +600,19 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               className="btn btn-secondary header-icon-btn"
               onClick={onOpenSettings}
-              title={t("settingsTitle", language)}
+              data-tooltip={t("settingsTitle", language)}
+              data-tooltip-pos="bottom"
             >
               <SettingsIcon size={13} className="settings-icon" />
             </button>
           )}
 
-          <button className="btn btn-secondary header-icon-btn" onClick={onToggleTheme} title={theme === "dark" ? t("switchThemeLight", language) : t("switchThemeDark", language)}>
+          <button
+            className="btn btn-secondary header-icon-btn"
+            onClick={onToggleTheme}
+            data-tooltip={theme === "dark" ? t("switchThemeLight", language) : t("switchThemeDark", language)}
+            data-tooltip-pos="bottom"
+          >
             {theme === "dark" ? <Sun size={13} className="theme-icon sun" /> : <Moon size={13} className="theme-icon moon" />}
           </button>
         </div>

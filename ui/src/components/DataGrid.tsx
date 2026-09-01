@@ -1334,7 +1334,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
               <button
                 className={`btn btn-secondary filter-toggle-btn ${filters.length > 0 ? "filter-active-btn" : ""}`}
                 onClick={() => setIsFilterPanelOpen(!isFilterPanelOpen)}
-                title={isFilterPanelOpen ? "Close Filter Drawer" : "Open Filter Drawer (Add column filter rules)"}
+                data-tooltip={isFilterPanelOpen ? "Close Filter Drawer" : "Open Filter Drawer (Add column filter rules)"}
               >
                 <Filter size={13} />
                 <span>{t("gridFilter", language)} {filters.length > 0 ? `(${filters.length})` : ""}</span>
@@ -1343,7 +1343,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
               <button
                 className="btn btn-secondary add-row-btn"
                 onClick={handleAddRow}
-                title="Add a new row draft to this table"
+                data-tooltip="Add a new row draft to this table"
               >
                 <Plus size={13} />
                 <span>{t("gridAddRow", language)}</span>
@@ -1354,7 +1354,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                 <button
                   className={`btn btn-secondary ${isExportMenuOpen ? "export-btn-active" : ""}`}
                   onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
-                  title="Export table data (JSON, SQL, CSV)"
+                  data-tooltip="Export table data (JSON, SQL, CSV)"
                 >
                   <Download size={13} />
                   <span>{t("gridExport", language)}</span>
@@ -1433,7 +1433,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
             className="btn btn-secondary refresh-table-btn"
             onClick={() => onRefresh()}
             disabled={loading}
-            title="Reload table records from database"
+            data-tooltip="Reload table records from database"
           >
             <RefreshCw size={13} className={loading ? "spin" : ""} />
             <span>{t("refresh", language)}</span>
@@ -1601,11 +1601,21 @@ export const DataGrid: React.FC<DataGridProps> = ({
           </div>
 
           <div className="tx-actions">
-            <button className="btn btn-secondary" onClick={handleRollback} disabled={submitting}>
+            <button
+              className="btn btn-secondary"
+              onClick={handleRollback}
+              disabled={submitting}
+              data-tooltip={language === "th" ? "ยกเลิกการเปลี่ยนแปลงที่ร่างไว้ทั้งหมด (Rollback)" : "Discard all pending draft changes (Rollback)"}
+            >
               <RotateCcw size={12} />
               <span>{t("gridRollback", language)}</span>
             </button>
-            <button className="btn btn-primary btn-commit-action" onClick={handleCommit} disabled={submitting}>
+            <button
+              className="btn btn-primary btn-commit-action"
+              onClick={handleCommit}
+              disabled={submitting}
+              data-tooltip={language === "th" ? "บันทึกการเปลี่ยนแปลงทั้งหมดลงฐานข้อมูล (Commit)" : "Save all pending changes to database (Commit)"}
+            >
               <Check size={12} />
               <span>{submitting ? t("loading", language) : t("gridCommit", language)}</span>
             </button>

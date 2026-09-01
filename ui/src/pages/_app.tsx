@@ -1,6 +1,7 @@
 import "@/styles/globals.css";
 import type { AppProps } from "next/app";
 import { useEffect } from "react";
+import { GlobalTooltip } from "@/components/GlobalTooltip";
 
 export default function App({ Component, pageProps }: AppProps) {
   useEffect(() => {
@@ -41,5 +42,10 @@ export default function App({ Component, pageProps }: AppProps) {
     };
   }, []);
 
-  return <Component {...pageProps} />;
+  return (
+    <>
+      <Component {...pageProps} />
+      <GlobalTooltip />
+    </>
+  );
 }

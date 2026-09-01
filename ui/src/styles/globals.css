@@ -922,114 +922,125 @@ html, body, #__next {
 }
 
 /* ==========================================================================
-   Modern Premium Custom Tooltip System ([data-tooltip])
+   Modern Global High-Performance Tooltip System (.dodb-global-tooltip)
    ========================================================================== */
-[data-tooltip] {
-  position: relative !important;
-}
-
-[data-tooltip]::before {
-  content: attr(data-tooltip);
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%) translateY(4px);
-  padding: 4px 8px;
-  border-radius: 4px;
-  background: var(--bg-card, #1e222d);
-  color: var(--text-main, #f1f5f9);
-  font-size: 10.5px;
+.dodb-global-tooltip {
+  position: fixed;
+  z-index: 99999999;
+  pointer-events: none;
+  background: var(--bg-card, #17171a);
+  color: var(--text-main, #ededed);
+  font-size: 11px;
   font-weight: 500;
   font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
-  line-height: 1.3;
-  white-space: nowrap;
+  line-height: 1.35;
+  padding: 4px 8px;
+  border-radius: 5px;
   border: 1px solid var(--border-medium, rgba(255, 255, 255, 0.12));
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35), 0 1px 3px rgba(0, 0, 0, 0.2);
-  pointer-events: none;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.25);
+  white-space: normal;
+  width: max-content;
+  max-width: 360px;
+  word-break: break-word;
   opacity: 0;
   visibility: hidden;
-  transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s;
-  z-index: 99999;
+  transform: scale(0.96);
+  transition: opacity 0.1s ease, transform 0.1s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.1s;
+  will-change: transform, opacity;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
-[data-tooltip]::after {
-  content: "";
-  position: absolute;
-  bottom: calc(100% + 2px);
-  left: 50%;
-  transform: translateX(-50%) translateY(4px);
-  border-width: 4px 4px 0 4px;
-  border-style: solid;
-  border-color: var(--border-medium, rgba(255, 255, 255, 0.12)) transparent transparent transparent;
-  pointer-events: none;
-  opacity: 0;
-  visibility: hidden;
-  transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s;
-  z-index: 99999;
-}
-
-[data-tooltip]:hover::before,
-[data-tooltip]:hover::after {
+.dodb-global-tooltip.is-visible {
   opacity: 1;
   visibility: visible;
-  transform: translateX(-50%) translateY(0);
+  transform: scale(1);
 }
 
-[data-tooltip-pos="bottom"]::before {
-  bottom: auto;
-  top: calc(100% + 6px);
-  transform: translateX(-50%) translateY(-4px);
-}
-[data-tooltip-pos="bottom"]::after {
-  bottom: auto;
-  top: calc(100% + 2px);
-  transform: translateX(-50%) translateY(-4px);
-  border-width: 0 4px 4px 4px;
-  border-color: transparent transparent var(--border-medium, rgba(255, 255, 255, 0.12)) transparent;
-}
-[data-tooltip-pos="bottom"]:hover::before,
-[data-tooltip-pos="bottom"]:hover::after {
-  transform: translateX(-50%) translateY(0);
+.dodb-global-tooltip-arrow {
+  position: absolute;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  border-style: solid;
 }
 
-[data-tooltip-pos="left"]::before {
-  bottom: auto;
-  top: 50%;
-  left: auto;
-  right: calc(100% + 6px);
-  transform: translateY(-50%) translateX(4px);
-}
-[data-tooltip-pos="left"]::after {
-  bottom: auto;
-  top: 50%;
-  left: auto;
-  right: calc(100% + 2px);
-  transform: translateY(-50%) translateX(4px);
-  border-width: 4px 0 4px 4px;
-  border-color: transparent transparent transparent var(--border-medium, rgba(255, 255, 255, 0.12));
-}
-[data-tooltip-pos="left"]:hover::before,
-[data-tooltip-pos="left"]:hover::after {
-  transform: translateY(-50%) translateX(0);
+/* Arrow directions */
+.dodb-global-tooltip[data-placed="bottom"] .dodb-global-tooltip-arrow {
+  top: -5px;
+  border-width: 0 5px 5px 5px;
+  border-color: transparent transparent var(--bg-card, #17171a) transparent;
+  filter: drop-shadow(0 -1px 0 var(--border-medium, rgba(255, 255, 255, 0.12)));
 }
 
-[data-tooltip-pos="right"]::before {
-  bottom: auto;
-  top: 50%;
-  left: calc(100% + 6px);
-  transform: translateY(-50%) translateX(-4px);
+.dodb-global-tooltip[data-placed="top"] .dodb-global-tooltip-arrow {
+  bottom: -5px;
+  border-width: 5px 5px 0 5px;
+  border-color: var(--bg-card, #17171a) transparent transparent transparent;
+  filter: drop-shadow(0 1px 0 var(--border-medium, rgba(255, 255, 255, 0.12)));
 }
-[data-tooltip-pos="right"]::after {
-  bottom: auto;
-  top: 50%;
-  left: calc(100% + 2px);
-  transform: translateY(-50%) translateX(-4px);
-  border-width: 4px 4px 4px 0;
-  border-color: transparent var(--border-medium, rgba(255, 255, 255, 0.12)) transparent transparent;
+
+.dodb-global-tooltip[data-placed="right"] .dodb-global-tooltip-arrow {
+  left: -5px;
+  border-width: 5px 5px 5px 0;
+  border-color: transparent var(--bg-card, #17171a) transparent transparent;
+  filter: drop-shadow(-1px 0 0 var(--border-medium, rgba(255, 255, 255, 0.12)));
 }
-[data-tooltip-pos="right"]:hover::before,
-[data-tooltip-pos="right"]:hover::after {
-  transform: translateY(-50%) translateX(0);
+
+.dodb-global-tooltip[data-placed="left"] .dodb-global-tooltip-arrow {
+  right: -5px;
+  border-width: 5px 0 5px 5px;
+  border-color: transparent transparent transparent var(--bg-card, #17171a);
+  filter: drop-shadow(1px 0 0 var(--border-medium, rgba(255, 255, 255, 0.12)));
+}
+
+.dodb-global-tooltip-kbd {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 4px;
+  font-size: 9.5px;
+  font-family: var(--font-mono, monospace);
+  font-weight: 600;
+  border-radius: 3px;
+  background: var(--bg-tertiary, rgba(255, 255, 255, 0.08));
+  color: var(--text-sub, #a1a1aa);
+  border: 1px solid var(--border-medium, rgba(255, 255, 255, 0.12));
+  line-height: 1.1;
+}
+
+/* Light Theme Overrides */
+[data-theme="light"] .dodb-global-tooltip {
+  background: #ffffff;
+  color: #18181b;
+  border-color: rgba(0, 0, 0, 0.12);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="light"] .dodb-global-tooltip[data-placed="bottom"] .dodb-global-tooltip-arrow {
+  border-color: transparent transparent #ffffff transparent;
+  filter: drop-shadow(0 -1px 0 rgba(0, 0, 0, 0.12));
+}
+
+[data-theme="light"] .dodb-global-tooltip[data-placed="top"] .dodb-global-tooltip-arrow {
+  border-color: #ffffff transparent transparent transparent;
+  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.12));
+}
+
+[data-theme="light"] .dodb-global-tooltip[data-placed="right"] .dodb-global-tooltip-arrow {
+  border-color: transparent #ffffff transparent transparent;
+  filter: drop-shadow(-1px 0 0 rgba(0, 0, 0, 0.12));
+}
+
+[data-theme="light"] .dodb-global-tooltip[data-placed="left"] .dodb-global-tooltip-arrow {
+  border-color: transparent transparent transparent #ffffff;
+  filter: drop-shadow(1px 0 0 rgba(0, 0, 0, 0.12));
+}
+
+[data-theme="light"] .dodb-global-tooltip-kbd {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: rgba(0, 0, 0, 0.12);
+  color: #52525b;
 }
 
 /* Embedded Table Designer React Flow Visualizer */

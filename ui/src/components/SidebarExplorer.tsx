@@ -442,6 +442,7 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
                 onClick={onCreateDatabase}
                 disabled={isConnecting}
                 data-tooltip={language === "th" ? "สร้างฐานข้อมูลใหม่ (+ New DB)" : "Create New Database"}
+                data-tooltip-pos="bottom"
               >
                 <Plus size={12} />
               </button>
@@ -451,6 +452,7 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
               onClick={onRefresh}
               disabled={isConnecting}
               data-tooltip={t("shortcutRefresh", language)}
+              data-tooltip-pos="bottom"
               suppressHydrationWarning
             >
               <RefreshCw size={11} className={loading || isConnecting ? "spin" : ""} />
@@ -459,6 +461,7 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
               className="icon-action-btn"
               onClick={toggleCollapse}
               data-tooltip={language === "th" ? "ย่อแถบข้าง (Collapse Sidebar)" : "Collapse Sidebar"}
+              data-tooltip-pos="bottom"
             >
               <PanelLeftClose size={12} />
             </button>
@@ -470,6 +473,8 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
             value={isConnecting ? "" : activeDatabase}
             onChange={(e) => onSelectDatabase(e.target.value)}
             disabled={isConnecting}
+            title={language === "th" ? "เลือกฐานข้อมูลที่ใช้งาน (Active Database)" : "Select Active Database"}
+            data-tooltip-pos="bottom"
             suppressHydrationWarning
           >
             {isConnecting ? (
@@ -579,7 +584,8 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
               <button
                 className="icon-action-btn"
                 onClick={onCreateTable}
-                title={t("sidebarCreateTable", language)}
+                data-tooltip={t("sidebarCreateTable", language)}
+                data-tooltip-pos="bottom"
                 disabled={mounted ? !activeDatabase : true}
                 suppressHydrationWarning
               >
