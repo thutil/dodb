@@ -26,3 +26,8 @@ func Frontend() fs.FS {
 	}
 	return sub
 }
+
+// AppIcon is the application icon embedded from assets/icon.png.
+//
+//go:embed assets/icon.png
+var AppIcon []byte

@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.4.2] - 2026-09-02
+
+### Added
+
+- **Native macOS Application Menu & Custom Event Dispatching**:
+  - Implemented a complete native macOS menu bar with App, File, Edit, View, Window, and Help menus using the Wails v3 application menu API (`cmd/dodb/menu.go`).
+  - Integrated native macOS keyboard shortcuts (`⌘,` for Settings, `⌘N` for New Connection, `⌘T` for SQL Console, `⌘W` for Close Tab, etc.) hooked directly via window event dispatching to the frontend.
+  - Added dedicated Help menu entries including "Check for Updates..." and "About DoDB".
+- **In-App Version Update Checker**:
+  - Integrated GitHub Releases API updater (`ui/src/utils/updater.ts`) to automatically and on-demand check for newer DoDB releases.
+  - Added interactive update notification banner, release notes viewer, direct download triggers, and "Ignore this version" option in the **About Modal** (`ui/src/components/AboutModal.tsx`).
+  - Added complete bilingual localization (Thai & English) for update states, versions, and action buttons (`ui/src/utils/i18n.ts`).
+- **Retina DMG Drag-and-Drop Installer Background**:
+  - Added automated Swift script (`scripts/generate-dmg-background.swift`) to dynamically render clean, high-resolution retina installer backgrounds for macOS disk images (`.dmg`).
+
+### Fixed
+
+- **Eliminated GIS MultiPolygon & Geometry False Positives**:
+  - Resolved an issue where large numeric strings, Session IDs, Snowflake IDs (e.g. `178801910900000005`), BigInt IDs, and timestamps were incorrectly recognized as GIS spatial geometries or MultiPolygons.
+  - Implemented fast rejection (`/^\d+$/`) in `isGisData` and `parseWkbHex` to immediately discard pure numeric values.
+  - Upgraded `parseWkbHex` with strict byte-level OGC/EWKB validation: verified valid byte orders (`00` Big-Endian or `01` Little-Endian), constrained type codes to valid ranges (1–7), rejected undefined EWKB flag bits, and validated coordinate finiteness (`Number.isFinite`).
+  - Enforced complete payload consumption check (`offset === buffer.length`) and verified minimum points/rings for MultiPolygons, Polygons, and LineStrings to prevent corrupted/empty geometry shapes.
+  - Hardened `isGeometryColumn` with boundary-aware regex to prevent misidentifying non-geometry columns (such as `coordinator_id`).
+
 ## [0.4.1] - 2026-09-02
 
 ### Added
