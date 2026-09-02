@@ -71,6 +71,7 @@ func main() {
 	})
 
 	svc.SetWindow(&wailsWindow{window: window})
+	setupAppMenu(app, window)
 
 	if runtime.GOOS == "darwin" {
 		// macOS convention, and what the Tauri build did: closing the window

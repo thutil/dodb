@@ -437,6 +437,52 @@ export default function Home() {
     return () => window.removeEventListener("keydown", handleGlobalShortcuts);
   }, [activeTable, theme, toggleTheme]);
 
+  // Native macOS Application Menu bar listener
+  useEffect(() => {
+    const handleMenuAction = (e: Event) => {
+      const customEvent = e as CustomEvent<string>;
+      const action = customEvent.detail;
+      if (!action) return;
+
+      switch (action) {
+        case "open-about":
+        case "check-updates":
+          setIsAboutModalOpen(true);
+          break;
+        case "open-settings":
+          setIsSettingsOpen(true);
+          break;
+        case "open-connections":
+          setIsConnModalOpen(true);
+          break;
+        case "open-import":
+          setImportTarget({ table: activeTable });
+          break;
+        case "switch-view-explorer":
+          setActiveView("explorer");
+          break;
+        case "switch-view-sql":
+          setActiveView("sql");
+          break;
+        case "switch-view-visual-query":
+          setActiveView("visual-query");
+          break;
+        case "switch-view-diagram":
+          setActiveView("diagram");
+          break;
+        case "switch-view-admin":
+          setActiveView("admin");
+          break;
+        case "toggle-theme":
+          toggleTheme();
+          break;
+      }
+    };
+
+    window.addEventListener("dodb-menu-action", handleMenuAction);
+    return () => window.removeEventListener("dodb-menu-action", handleMenuAction);
+  }, [activeTable, toggleTheme]);
+
   const fetchProfiles = useCallback(async () => {
     try {
       const data: any = await apiClient.getProfiles();
