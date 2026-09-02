@@ -150,7 +150,7 @@ export function isGeometryColumn(colType?: string, colName?: string): boolean {
   const n = (colName || "").toLowerCase();
 
   const isTypeMatch = /(geometry|geography|geom|point|linestring|polygon|multipoint|multilinestring|multipolygon|geometrycollection|spatial)/.test(t);
-  const isNameMatch = /(^geom$|^geometry$|^shape$|^the_geom$|^location$|^coordinates$|^coord$|^lat_lng$|^latlng$|^wkt$|^geojson$|.*geom.*|.*spatial.*|.*polygon.*|.*coord.*)/.test(n);
+  const isNameMatch = /(?:^|[_.-\s])(geometry|geography|geom|the_geom|shape|spatial|polygon|multipolygon|linestring|multilinestring|multipoint|geometrycollection|wkt|geojson)(?:$|[_.-\s])/i.test(n);
 
   return isTypeMatch || isNameMatch;
 }
@@ -174,7 +174,7 @@ export function isGisData(val: unknown): boolean {
     const obj = val as Record<string, unknown>;
     if (obj.type && (obj.coordinates || obj.geometries)) {
       const typeStr = String(obj.type).toLowerCase();
-      return /point|linestring|polygon|geometrycollection/.test(typeStr);
+      return /^(point|linestring|polygon|multipoint|multilinestring|multipolygon|geometrycollection)$/i.test(typeStr);
     }
     return false;
   }
@@ -182,6 +182,11 @@ export function isGisData(val: unknown): boolean {
   if (typeof val === "string") {
     const s = val.trim();
     if (s.length === 0) return false;
+
+    // Fast reject pure numeric IDs (session id, snowflake id, bigint, timestamp)
+    if (/^\d+$/.test(s)) {
+      return false;
+    }
 
     // Check WKT or EWKT (e.g. SRID=4326;POINT(...))
     if (/^(SRID=\d+;)?(POINT|LINESTRING|POLYGON|MULTIPOINT|MULTILINESTRING|MULTIPOLYGON|GEOMETRYCOLLECTION)\s*[\(zZmMsS]/i.test(s)) {
@@ -193,9 +198,13 @@ export function isGisData(val: unknown): boolean {
       return true;
     }
 
-    // Check WKB / EWKB Hex string (starts with 00/01 and typical type bytes, or 16+ hex characters)
-    if (/^[0-9a-fA-F]{16,}$/.test(s)) {
-      return true;
+    // Check WKB / EWKB Hex string (starts with 00/01 byteOrder or MySQL SRID prefix)
+    if (s.length >= 18 && s.length % 2 === 0 && /^[0-9a-fA-F]+$/.test(s)) {
+      const hasStandardHeader = s.startsWith("00") || s.startsWith("01");
+      const hasMysqlHeader = s.length >= 26 && (s.slice(8, 10) === "00" || s.slice(8, 10) === "01");
+      if (hasStandardHeader || hasMysqlHeader) {
+        return parseWkbHex(s) !== null;
+      }
     }
   }
 
@@ -338,22 +347,26 @@ function parseWktBody(type: string, body: string, srid?: number): GeoJsonGeometr
 export function parseWkbHex(hex: string): GeoJsonGeometry | null {
   try {
     let raw = hex.trim();
-    if (!/^[0-9a-fA-F]+$/.test(raw) || raw.length < 10) return null;
+    if (!/^[0-9a-fA-F]+$/.test(raw) || raw.length < 18 || raw.length % 2 !== 0) return null;
+    // Fast reject pure numeric values (session IDs, snowflake IDs, bigint, phone numbers, timestamps)
+    if (/^\d+$/.test(raw)) return null;
 
     // Some databases (e.g. MySQL) prefix 4-byte SRID before standard WKB
     let sridPrefix: number | undefined;
-    if (raw.length >= 18 && (raw.startsWith("0000") || raw.startsWith("E610") || raw.startsWith("e610"))) {
-      const firstByte = parseInt(raw.slice(8, 10), 16);
-      if (firstByte === 0 || firstByte === 1) {
-        const sridBytes = raw.slice(0, 8).match(/.{1,2}/g)!.map((b) => parseInt(b, 16));
-        const view = new DataView(new Uint8Array(sridBytes).buffer);
-        sridPrefix = view.getUint32(0, true);
-        if (sridPrefix > 1000000) {
-          sridPrefix = view.getUint32(0, false);
-        }
-        raw = raw.slice(8);
+    if (raw.length >= 26 && (raw.startsWith("00000000") || raw.slice(8, 10) === "00" || raw.slice(8, 10) === "01") && raw.slice(0, 2) !== "00" && raw.slice(0, 2) !== "01") {
+      const sridBytes = raw.slice(0, 8).match(/.{1,2}/g)!.map((b) => parseInt(b, 16));
+      const view = new DataView(new Uint8Array(sridBytes).buffer);
+      sridPrefix = view.getUint32(0, true);
+      if (sridPrefix > 1000000) {
+        sridPrefix = view.getUint32(0, false);
       }
+      raw = raw.slice(8);
+    } else if (raw.length >= 26 && raw.startsWith("00000000") && (raw.slice(8, 10) === "00" || raw.slice(8, 10) === "01")) {
+      raw = raw.slice(8);
     }
+
+    // WKB root must strictly begin with 00 (XDR/Big Endian) or 01 (NDR/Little Endian)
+    if (!raw.startsWith("00") && !raw.startsWith("01")) return null;
 
     const buffer = new Uint8Array(raw.match(/.{1,2}/g)!.map((byte) => parseInt(byte, 16)));
     const view = new DataView(buffer.buffer);
@@ -363,15 +376,22 @@ export function parseWkbHex(hex: string): GeoJsonGeometry | null {
 
     function readGeometry(): GeoJsonGeometry | null {
       if (offset >= buffer.length) return null;
-      const isLittleEndian = view.getUint8(offset) === 1;
+      const byteOrder = view.getUint8(offset);
+      if (byteOrder !== 0 && byteOrder !== 1) return null;
+      const isLittleEndian = byteOrder === 1;
       offset += 1;
 
-      let typeCode = view.getUint32(offset, isLittleEndian);
+      if (offset + 4 > buffer.length) return null;
+      const typeCode = view.getUint32(offset, isLittleEndian);
       offset += 4;
+
+      // Reject undefined flags in EWKB
+      if ((typeCode & 0x1fff0000) !== 0) return null;
 
       const hasSrid = (typeCode & 0x20000000) !== 0;
       let srid = globalSrid;
       if (hasSrid) {
+        if (offset + 4 > buffer.length) return null;
         srid = view.getUint32(offset, isLittleEndian);
         globalSrid = srid;
         offset += 4;
@@ -387,43 +407,61 @@ export function parseWkbHex(hex: string): GeoJsonGeometry | null {
       if (baseType >= 1000 && baseType < 4000) {
         baseType = baseType % 1000;
       }
-      baseType = baseType & 0xff;
+      if (baseType < 1 || baseType > 7) return null;
 
-      function readPointCoords(): [number, number] {
+      function readPointCoords(): [number, number] | null {
+        if (offset + coordDim * 8 > buffer.length) return null;
         const x = view.getFloat64(offset, isLittleEndian);
         const y = view.getFloat64(offset + 8, isLittleEndian);
         offset += coordDim * 8;
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
         return [x, y];
       }
 
       if (baseType === 1) {
         // Point
         const coords = readPointCoords();
+        if (!coords) return null;
         return { type: "Point", coordinates: coords, srid };
       }
 
       if (baseType === 2) {
         // LineString
+        if (offset + 4 > buffer.length) return null;
         const numPoints = view.getUint32(offset, isLittleEndian);
         offset += 4;
+        if (numPoints === 0) return { type: "LineString", coordinates: [], srid };
+        if (offset + numPoints * coordDim * 8 > buffer.length) return null;
         const points: number[][] = [];
-        for (let i = 0; i < numPoints && offset + 16 <= buffer.length; i++) {
-          points.push(readPointCoords());
+        for (let i = 0; i < numPoints; i++) {
+          const pt = readPointCoords();
+          if (!pt) return null;
+          points.push(pt);
         }
         return { type: "LineString", coordinates: points, srid };
       }
 
       if (baseType === 3) {
         // Polygon
+        if (offset + 4 > buffer.length) return null;
         const numRings = view.getUint32(offset, isLittleEndian);
         offset += 4;
+        if (numRings === 0) return { type: "Polygon", coordinates: [], srid };
         const rings: number[][][] = [];
         for (let r = 0; r < numRings; r++) {
+          if (offset + 4 > buffer.length) return null;
           const numPoints = view.getUint32(offset, isLittleEndian);
           offset += 4;
+          if (numPoints === 0) {
+            rings.push([]);
+            continue;
+          }
+          if (numPoints < 4 || offset + numPoints * coordDim * 8 > buffer.length) return null;
           const points: number[][] = [];
-          for (let i = 0; i < numPoints && offset + 16 <= buffer.length; i++) {
-            points.push(readPointCoords());
+          for (let i = 0; i < numPoints; i++) {
+            const pt = readPointCoords();
+            if (!pt) return null;
+            points.push(pt);
           }
           rings.push(points);
         }
@@ -432,17 +470,22 @@ export function parseWkbHex(hex: string): GeoJsonGeometry | null {
 
       if (baseType === 4) {
         // MultiPoint
+        if (offset + 4 > buffer.length) return null;
         const numPoints = view.getUint32(offset, isLittleEndian);
         offset += 4;
+        if (numPoints === 0) return { type: "MultiPoint", coordinates: [], srid };
         const points: number[][] = [];
         for (let i = 0; i < numPoints; i++) {
-          if (offset >= buffer.length) break;
+          if (offset >= buffer.length) return null;
           const nextByte = view.getUint8(offset);
           if (nextByte === 0 || nextByte === 1) {
             const ptGeom = readGeometry();
-            if (ptGeom && ptGeom.coordinates) points.push(ptGeom.coordinates);
+            if (!ptGeom || !ptGeom.coordinates) return null;
+            points.push(ptGeom.coordinates as number[]);
           } else {
-            points.push(readPointCoords());
+            const pt = readPointCoords();
+            if (!pt) return null;
+            points.push(pt);
           }
         }
         return { type: "MultiPoint", coordinates: points, srid };
@@ -450,39 +493,48 @@ export function parseWkbHex(hex: string): GeoJsonGeometry | null {
 
       if (baseType === 5) {
         // MultiLineString
+        if (offset + 4 > buffer.length) return null;
         const numLines = view.getUint32(offset, isLittleEndian);
         offset += 4;
+        if (numLines === 0) return { type: "MultiLineString", coordinates: [], srid };
         const lines: number[][][] = [];
         for (let i = 0; i < numLines; i++) {
-          if (offset >= buffer.length) break;
+          if (offset >= buffer.length) return null;
           const lineGeom = readGeometry();
-          if (lineGeom && lineGeom.coordinates) lines.push(lineGeom.coordinates);
+          if (!lineGeom || lineGeom.type !== "LineString" || !lineGeom.coordinates) return null;
+          lines.push(lineGeom.coordinates as number[][]);
         }
         return { type: "MultiLineString", coordinates: lines, srid };
       }
 
       if (baseType === 6) {
         // MultiPolygon
+        if (offset + 4 > buffer.length) return null;
         const numPolys = view.getUint32(offset, isLittleEndian);
         offset += 4;
+        if (numPolys === 0) return { type: "MultiPolygon", coordinates: [], srid };
         const polys: number[][][][] = [];
         for (let i = 0; i < numPolys; i++) {
-          if (offset >= buffer.length) break;
+          if (offset >= buffer.length) return null;
           const polyGeom = readGeometry();
-          if (polyGeom && polyGeom.coordinates) polys.push(polyGeom.coordinates);
+          if (!polyGeom || polyGeom.type !== "Polygon" || !polyGeom.coordinates) return null;
+          polys.push(polyGeom.coordinates as number[][][]);
         }
         return { type: "MultiPolygon", coordinates: polys, srid };
       }
 
       if (baseType === 7) {
         // GeometryCollection
+        if (offset + 4 > buffer.length) return null;
         const numGeoms = view.getUint32(offset, isLittleEndian);
         offset += 4;
+        if (numGeoms === 0) return { type: "GeometryCollection", coordinates: [], geometries: [], srid };
         const geoms: GeoJsonGeometry[] = [];
         for (let i = 0; i < numGeoms; i++) {
-          if (offset >= buffer.length) break;
+          if (offset >= buffer.length) return null;
           const g = readGeometry();
-          if (g) geoms.push(g);
+          if (!g) return null;
+          geoms.push(g);
         }
         return { type: "GeometryCollection", coordinates: [], geometries: geoms, srid };
       }
@@ -490,7 +542,11 @@ export function parseWkbHex(hex: string): GeoJsonGeometry | null {
       return null;
     }
 
-    return readGeometry();
+    const rootGeom = readGeometry();
+    if (!rootGeom) return null;
+    // Complete payload validation: must consume the entire buffer
+    if (offset !== buffer.length) return null;
+    return rootGeom;
   } catch {
     return null;
   }
@@ -540,7 +596,7 @@ export function parseGisToGeoJson(val: unknown): GeoJsonGeometry | null {
   if (wktResult) return wktResult;
 
   // 4. Try WKB / EWKB Hex
-  if (/^[0-9a-fA-F]{16,}$/.test(s)) {
+  if (s.length >= 18 && s.length % 2 === 0 && /^[0-9a-fA-F]+$/.test(s) && !/^\d+$/.test(s)) {
     const wkbResult = parseWkbHex(s);
     if (wkbResult) return wkbResult;
   }
@@ -550,10 +606,12 @@ export function parseGisToGeoJson(val: unknown): GeoJsonGeometry | null {
   if (pairMatch) {
     const n1 = parseFloat(pairMatch[1]);
     const n2 = parseFloat(pairMatch[2]);
-    if (Math.abs(n1) <= 90 && Math.abs(n2) <= 180) {
+    if (isValidCoordinate(n1, n2)) {
       return { type: "Point", coordinates: [n2, n1] }; // [lng, lat]
     }
-    return { type: "Point", coordinates: [n1, n2] };
+    if (isValidCoordinate(n2, n1)) {
+      return { type: "Point", coordinates: [n1, n2] }; // [lng, lat]
+    }
   }
 
   return null;
@@ -599,6 +657,9 @@ export function formatGisSummary(val: unknown): GisSummary | null {
   let pointCount = 0;
 
   if (type === "Point") {
+    if (!Array.isArray(geom.coordinates) || geom.coordinates.length < 2 || !Number.isFinite(Number(geom.coordinates[0])) || !Number.isFinite(Number(geom.coordinates[1]))) {
+      return null;
+    }
     const lng = Number(geom.coordinates[0]).toFixed(4);
     const lat = Number(geom.coordinates[1]).toFixed(4);
     coordsPreview = `${lat}, ${lng}`;

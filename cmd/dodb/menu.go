@@ -12,6 +12,7 @@ func dispatchMenuAction(window *application.WebviewWindow, action string) {
 	if window == nil {
 		return
 	}
+	window.HandleMessage("wails:runtime:ready")
 	js := fmt.Sprintf("window.dispatchEvent(new CustomEvent('dodb-menu-action', { detail: '%s' }));", action)
 	window.ExecJS(js)
 }
