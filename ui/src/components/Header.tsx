@@ -486,7 +486,7 @@ export const Header: React.FC<HeaderProps> = ({
         )}
       </div>
 
-      {/* Center: Global Quick Search / Command Palette Bar */}
+      {/* Center: Global Quick Search / Command Palette Bar (Standalone Center) */}
       <div className="header-center">
         <button
           className="header-quick-search"
@@ -494,22 +494,12 @@ export const Header: React.FC<HeaderProps> = ({
           data-tooltip={t("headerSearchTooltip", language)}
           data-tooltip-pos="bottom"
         >
+          <Search size={11} className="search-icon" />
           <span className="search-text">
             {activeTable ? t("quickSearchInTable", language, { table: activeTable }) : t("quickSearchPlaceholder", language)}
           </span>
           <kbd className="search-shortcut">⌘K</kbd>
         </button>
-
-        {activeProfile && (
-          <div
-            className={`header-health-pill ${latencyMs == null ? "is-connecting" : latencyMs > 200 ? "is-slow" : latencyMs > 80 ? "is-medium" : "is-good"}`}
-            data-tooltip={t("headerServerStatusTooltip", language, { status: latencyMs != null ? t("headerServerOnline", language, { latency: latencyMs }) : t("headerServerConnecting", language) })}
-            data-tooltip-pos="bottom"
-          >
-            <span className="health-dot" />
-            <span className="health-ping">{latencyMs != null ? `${latencyMs}ms` : "..."}</span>
-          </div>
-        )}
       </div>
 
       {/* Right: Navigation tabs & action buttons */}
@@ -565,6 +555,17 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="header-divider" />
 
         <div className="action-buttons-group">
+          {activeProfile && (
+            <div
+              className={`header-health-pill ${latencyMs == null ? "is-connecting" : latencyMs > 200 ? "is-slow" : latencyMs > 80 ? "is-medium" : "is-good"}`}
+              data-tooltip={t("headerServerStatusTooltip", language, { status: latencyMs != null ? t("headerServerOnline", language, { latency: latencyMs }) : t("headerServerConnecting", language) })}
+              data-tooltip-pos="bottom"
+            >
+              <span className="health-dot" />
+              <span className="health-ping">{latencyMs != null ? `${latencyMs}ms` : "..."}</span>
+            </div>
+          )}
+
           {onOpenImport && (
             <button
               className="btn btn-secondary header-icon-btn"
@@ -625,11 +626,11 @@ export const Header: React.FC<HeaderProps> = ({
           backdrop-filter: blur(16px);
           -webkit-backdrop-filter: blur(16px);
           border-bottom: 1px solid var(--border-light);
-          display: flex;
+          display: grid;
+          grid-template-columns: 1fr auto 1fr;
           align-items: center;
-          justify-content: space-between;
           padding: 0 12px;
-          gap: 10px;
+          gap: 12px;
           -webkit-app-region: drag;
           user-select: none;
           flex-shrink: 0;
@@ -643,8 +644,9 @@ export const Header: React.FC<HeaderProps> = ({
           align-items: center;
           gap: 8px;
           min-width: 0;
-          flex: 0 1 auto;
+          justify-self: start;
           -webkit-app-region: no-drag;
+          overflow: hidden;
         }
 
         .brand {
@@ -1000,27 +1002,28 @@ export const Header: React.FC<HeaderProps> = ({
           display: flex;
           align-items: center;
           justify-content: center;
-          gap: 6px;
-          flex: 0 1 200px;
-          max-width: 260px;
+          justify-self: center;
           -webkit-app-region: no-drag;
+          z-index: 5;
+          min-width: 180px;
         }
         .header-quick-search {
-          flex: 1;
           display: flex;
           align-items: center;
           gap: 6px;
           background: var(--bg-tertiary);
           border: 1px solid var(--border-light);
           border-radius: var(--radius-sm, 6px);
-          padding: 0 8px;
+          padding: 0 10px;
           height: 28px;
+          width: 260px;
+          min-width: 180px;
+          max-width: 320px;
           color: var(--text-muted);
           font-family: var(--font-sans);
           cursor: pointer;
           transition: all 0.15s ease;
           user-select: none;
-          min-width: 40px;
           box-sizing: border-box;
         }
         .header-quick-search:hover {
@@ -1097,9 +1100,9 @@ export const Header: React.FC<HeaderProps> = ({
           display: flex;
           align-items: center;
           gap: 6px;
+          min-width: 0;
+          justify-self: end;
           -webkit-app-region: no-drag;
-          flex-shrink: 0;
-          margin-left: auto;
         }
 
         .nav-tabs {
@@ -1204,6 +1207,13 @@ export const Header: React.FC<HeaderProps> = ({
           .header-breadcrumb .bc-label {
             max-width: 80px;
           }
+          .header-center {
+            min-width: 160px;
+          }
+          .header-quick-search {
+            width: 220px;
+            min-width: 160px;
+          }
         }
 
         @media (max-width: 1150px) {
@@ -1211,15 +1221,12 @@ export const Header: React.FC<HeaderProps> = ({
           .header-breadcrumb .bc-arrow:first-of-type {
             display: none;
           }
-          .search-text {
-            display: none;
-          }
-          .search-shortcut {
-            display: none;
-          }
           .header-center {
-            flex: 0 0 auto;
-            min-width: 0;
+            min-width: 140px;
+          }
+          .header-quick-search {
+            width: 180px;
+            min-width: 140px;
           }
         }
 
@@ -1236,14 +1243,45 @@ export const Header: React.FC<HeaderProps> = ({
           .header-health-pill {
             display: none;
           }
+          .search-text {
+            font-size: 10px;
+          }
+          .header-center {
+            min-width: 120px;
+          }
+          .header-quick-search {
+            width: 150px;
+            min-width: 120px;
+          }
         }
 
-        @media (max-width: 650px) {
-          .header-center {
+        @media (max-width: 760px) {
+          .search-text {
             display: none;
           }
+          .search-shortcut {
+            display: none;
+          }
+          .header-center {
+            min-width: 32px;
+          }
+          .header-quick-search {
+            width: 32px;
+            min-width: 32px;
+            padding: 0;
+            justify-content: center;
+          }
           .header-breadcrumb {
-            max-width: 120px;
+            max-width: 130px;
+          }
+        }
+
+        @media (max-width: 600px) {
+          .app-header {
+            grid-template-columns: 1fr auto;
+          }
+          .header-center {
+            display: none;
           }
         }
       `}</style>

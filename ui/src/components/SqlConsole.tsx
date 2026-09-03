@@ -127,13 +127,27 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
   const [sql, setSql] = useState<string>(
     () => getSharedSql() || (activeTable ? `SELECT * FROM ${activeTable} LIMIT 50;` : "SELECT 1;")
   );
-  const [monacoTheme, setMonacoTheme] = useState<string>(() => {
+  const [darkEditorTheme, setDarkEditorTheme] = useState<string>(() => {
     if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("dodb_monaco_theme");
-      if (saved) return saved;
+      const saved = localStorage.getItem("dodb_monaco_theme_dark") || localStorage.getItem("dodb_monaco_theme");
+      if (saved && ["monokai", "dracula", "one-dark", "dodb-dark", "vs-dark"].includes(saved)) {
+        return saved;
+      }
     }
     return "monokai";
   });
+
+  const [lightEditorTheme, setLightEditorTheme] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("dodb_monaco_theme_light");
+      if (saved && ["dodb-light", "vs", "github-light", "solarized-light"].includes(saved)) {
+        return saved;
+      }
+    }
+    return "dodb-light";
+  });
+
+  const activeEditorTheme = theme === "dark" ? darkEditorTheme : lightEditorTheme;
   const sqlRef = useRef(sql);
   useEffect(() => {
     sqlRef.current = sql;
@@ -324,9 +338,10 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
   }, []);
 
   const handleClearHistory = useCallback(() => {
-    if (historyScope === "current" && activeDatabase) {
+    const currentDb = (activeDatabase || "").trim().toLowerCase();
+    if (historyScope === "current" && currentDb) {
       setSqlHistory((prev) => {
-        const remaining = prev.filter((h) => h.database !== activeDatabase);
+        const remaining = prev.filter((h) => (h.database || "").trim().toLowerCase() !== currentDb);
         try {
           localStorage.setItem("dodb_sql_history_v1", JSON.stringify(remaining));
         } catch { }
@@ -376,9 +391,13 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
   }, [handleSqlChange]);
 
   const filteredHistory = useMemo(() => {
+    const currentDb = (activeDatabase || "").trim().toLowerCase();
     return sqlHistory.filter((item) => {
-      if (historyScope === "current" && activeDatabase && item.database && item.database !== activeDatabase) {
-        return false;
+      if (historyScope === "current" && currentDb) {
+        const itemDb = (item.database || "").trim().toLowerCase();
+        if (itemDb && itemDb !== currentDb) {
+          return false;
+        }
       }
       if (historySearch.trim()) {
         const q = historySearch.toLowerCase();
@@ -985,7 +1004,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
       const historyEntries: SqlHistoryEntry[] = resultsList.map((item) => ({
         id: `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
         sql: item.sql,
-        database: activeDatabase || "",
+        database: activeDatabaseRef.current || "",
         timestamp: Date.now(),
         status: item.result.error ? "error" : "success",
         durationMs: item.executionTimeMs,
@@ -1618,7 +1637,84 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
       },
     });
 
-    monaco.editor.setTheme(theme === "dark" ? monacoTheme : "light");
+    // 5. dodb-light (Clean Light)
+    monaco.editor.defineTheme("dodb-light", {
+      base: "vs",
+      inherit: true,
+      rules: [
+        { token: "keyword", foreground: "2563eb", fontStyle: "bold" },
+        { token: "keyword.sql", foreground: "2563eb", fontStyle: "bold" },
+        { token: "string.sql", foreground: "059669" },
+        { token: "number", foreground: "d97706" },
+        { token: "comment", foreground: "9ca3af", fontStyle: "italic" },
+        { token: "operator.sql", foreground: "db2777" },
+        { token: "identifier", foreground: "18181b" },
+      ],
+      colors: {
+        "editor.background": "#ffffff",
+        "editor.foreground": "#18181b",
+        "editor.lineHighlightBackground": "#f4f4f6",
+        "editorCursor.foreground": "#2563eb",
+        "editorLineNumber.foreground": "#a1a1aa",
+        "editorLineNumber.activeForeground": "#18181b",
+        "editor.selectionBackground": "#e0e7ff",
+        "editor.selectionHighlightBackground": "#f1f5f9",
+      },
+    });
+
+    // 6. github-light
+    monaco.editor.defineTheme("github-light", {
+      base: "vs",
+      inherit: true,
+      rules: [
+        { token: "keyword", foreground: "d73a49", fontStyle: "bold" },
+        { token: "keyword.sql", foreground: "d73a49", fontStyle: "bold" },
+        { token: "string", foreground: "032f62" },
+        { token: "string.sql", foreground: "032f62" },
+        { token: "number", foreground: "005cc5" },
+        { token: "comment", foreground: "6a737d", fontStyle: "italic" },
+        { token: "operator", foreground: "d73a49" },
+        { token: "identifier", foreground: "24292e" },
+        { token: "type", foreground: "6f42c1" },
+      ],
+      colors: {
+        "editor.background": "#ffffff",
+        "editor.foreground": "#24292e",
+        "editor.lineHighlightBackground": "#f6f8fa",
+        "editorCursor.foreground": "#24292e",
+        "editorLineNumber.foreground": "#babbbd",
+        "editorLineNumber.activeForeground": "#24292e",
+        "editor.selectionBackground": "#c8e1ff",
+      },
+    });
+
+    // 7. solarized-light
+    monaco.editor.defineTheme("solarized-light", {
+      base: "vs",
+      inherit: true,
+      rules: [
+        { token: "keyword", foreground: "859900", fontStyle: "bold" },
+        { token: "keyword.sql", foreground: "859900", fontStyle: "bold" },
+        { token: "string", foreground: "2aa198" },
+        { token: "string.sql", foreground: "2aa198" },
+        { token: "number", foreground: "d33682" },
+        { token: "comment", foreground: "93a1a1", fontStyle: "italic" },
+        { token: "operator", foreground: "cb4b16" },
+        { token: "identifier", foreground: "268bd2" },
+        { token: "type", foreground: "b58900" },
+      ],
+      colors: {
+        "editor.background": "#fdf6e3",
+        "editor.foreground": "#657b83",
+        "editor.lineHighlightBackground": "#eee8d5",
+        "editorCursor.foreground": "#657b83",
+        "editorLineNumber.foreground": "#93a1a1",
+        "editorLineNumber.activeForeground": "#586e75",
+        "editor.selectionBackground": "#eee8d5",
+      },
+    });
+
+    monaco.editor.setTheme(activeEditorTheme);
 
     // Enable inline suggestions (ghost text) & smart tab completion
     editor.updateOptions({
@@ -1698,9 +1794,9 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
   // Update theme dynamically
   useEffect(() => {
     if (monacoRef.current) {
-      monacoRef.current.editor.setTheme(theme === "dark" ? monacoTheme : "light");
+      monacoRef.current.editor.setTheme(activeEditorTheme);
     }
-  }, [theme, monacoTheme]);
+  }, [activeEditorTheme]);
 
   return (
     <div className="sql-console">
@@ -1767,23 +1863,42 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
             <div className="monaco-theme-picker" data-tooltip="Editor Syntax Theme (เปลี่ยนธีม Monaco Editor)">
               <select
                 className="theme-select font-mono"
-                value={theme === "light" ? "light" : monacoTheme}
+                value={activeEditorTheme}
                 onChange={(e) => {
                   const val = e.target.value;
-                  setMonacoTheme(val);
-                  try {
-                    localStorage.setItem("dodb_monaco_theme", val);
-                  } catch { }
+                  if (theme === "dark") {
+                    setDarkEditorTheme(val);
+                    try {
+                      localStorage.setItem("dodb_monaco_theme_dark", val);
+                      localStorage.setItem("dodb_monaco_theme", val);
+                    } catch { }
+                  } else {
+                    setLightEditorTheme(val);
+                    try {
+                      localStorage.setItem("dodb_monaco_theme_light", val);
+                    } catch { }
+                  }
                   if (monacoRef.current) {
-                    monacoRef.current.editor.setTheme(theme === "dark" ? val : "light");
+                    monacoRef.current.editor.setTheme(val);
                   }
                 }}
               >
-                <option value="monokai">Monokai</option>
-                <option value="dracula">Dracula</option>
-                <option value="one-dark">One Dark</option>
-                <option value="dodb-dark">dodb Dark</option>
-                <option value="vs-dark">VS Dark</option>
+                {theme === "dark" ? (
+                  <>
+                    <option value="monokai">Monokai</option>
+                    <option value="dracula">Dracula</option>
+                    <option value="one-dark">One Dark</option>
+                    <option value="dodb-dark">dodb Dark</option>
+                    <option value="vs-dark">VS Dark</option>
+                  </>
+                ) : (
+                  <>
+                    <option value="dodb-light">dodb Light</option>
+                    <option value="vs">VS Light</option>
+                    <option value="github-light">GitHub Light</option>
+                    <option value="solarized-light">Solarized Light</option>
+                  </>
+                )}
               </select>
             </div>
           </div>
@@ -1792,9 +1907,8 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
         <div className="bar-right">
           {selectionInfo ? (
             <div className="selection-active-badge">
-              <Sparkles size={11} className="sparkle-icon" />
               <span>
-                Selection: {selectionInfo.lines} line{selectionInfo.lines > 1 ? "s" : ""} ({selectionInfo.chars} chars)
+                {selectionInfo.lines > 1 ? `${selectionInfo.lines} lines` : "1 line"} ({selectionInfo.chars} chars)
               </span>
               <button
                 className="btn-clear-sel"
@@ -1806,7 +1920,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                   setSelectedSql("");
                   setSelectionInfo(null);
                 }}
-                data-tooltip="Clear highlight selection"
+                title="Clear selection"
               >
                 <X size={10} />
               </button>
@@ -1872,7 +1986,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
         <Editor
           height="100%"
           language="sql"
-          theme={theme === "dark" ? monacoTheme : "light"}
+          theme={activeEditorTheme}
           value={sql}
           onChange={(val) => handleSqlChange(val || "")}
           onMount={handleEditorDidMount}
@@ -2209,7 +2323,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                 <Editor
                   height="100%"
                   language="json"
-                  theme={theme === "dark" ? monacoTheme : "light"}
+                  theme={activeEditorTheme}
                   value={resultJsonFormat === "pretty" ? JSON.stringify(result.rows, null, 2) : JSON.stringify(result.rows)}
                   options={{
                     readOnly: true,
@@ -2997,19 +3111,23 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
             {/* Minimal Header */}
             <div className="history-header">
               <div className="history-header-title">
-                <History size={14} className="history-icon" />
+                <span className="history-icon-wrap">
+                  <History size={14} />
+                </span>
                 <span>Query History</span>
                 <span className="history-count-badge font-mono">{filteredHistory.length}</span>
               </div>
               <button className="icon-close-btn" onClick={() => setShowHistory(false)} title="Close (Esc)">
-                <X size={13} />
+                <X size={14} />
               </button>
             </div>
 
             {/* Clean Filter & Scope Bar */}
             <div className="history-filter-bar">
               <div className="history-search-wrap">
-                <Search size={11} className="history-search-icon" />
+                <span className="history-search-icon-wrap">
+                  <Search size={12} />
+                </span>
                 <input
                   type="text"
                   className="history-search-input"
@@ -3019,8 +3137,8 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                   autoFocus
                 />
                 {historySearch && (
-                  <button className="clear-search-btn" onClick={() => setHistorySearch("")}>
-                    <X size={9} />
+                  <button className="clear-search-btn" onClick={() => setHistorySearch("")} title="Clear filter">
+                    <X size={11} />
                   </button>
                 )}
               </div>
@@ -3228,19 +3346,13 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
         .selection-active-badge {
           display: flex;
           align-items: center;
-          gap: 6px;
-          font-size: 10.5px;
-          font-weight: 600;
-          color: #3b82f6;
-          background: rgba(59, 130, 246, 0.12);
-          border: 1px solid rgba(59, 130, 246, 0.35);
-          padding: 3px 8px;
-          border-radius: 12px;
-          animation: pulse-selection 2s infinite ease-in-out;
-        }
-        @keyframes pulse-selection {
-          0%, 100% { border-color: rgba(59, 130, 246, 0.35); }
-          50% { border-color: rgba(59, 130, 246, 0.75); }
+          gap: 5px;
+          font-size: 11px;
+          color: var(--text-sub);
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-light);
+          padding: 2px 7px;
+          border-radius: var(--radius-xs, 4px);
         }
         .btn-clear-sel {
           display: flex;
@@ -3248,15 +3360,15 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
           justify-content: center;
           background: transparent;
           border: none;
-          color: #3b82f6;
+          color: var(--text-muted);
           cursor: pointer;
-          padding: 2px;
-          border-radius: 50%;
+          padding: 1px;
+          border-radius: 3px;
           transition: all 0.12s ease;
         }
         .btn-clear-sel:hover {
-          background: rgba(59, 130, 246, 0.2);
-          color: #60a5fa;
+          color: var(--text-main);
+          background: var(--bg-hover);
         }
         .statement-count-pill {
           font-weight: 600;
@@ -4169,8 +4281,30 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
           color: var(--text-main);
         }
 
-        .history-header-title .history-icon {
+        .history-icon-wrap {
+          display: flex;
+          align-items: center;
+          justify-content: center;
           color: var(--text-muted);
+        }
+
+        .history-header .icon-close-btn {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 24px;
+          height: 24px;
+          border-radius: 4px;
+          background: transparent;
+          border: none;
+          color: var(--text-muted);
+          cursor: pointer;
+          transition: all 0.15s ease;
+        }
+
+        .history-header .icon-close-btn:hover {
+          background: var(--bg-hover);
+          color: var(--text-main);
         }
 
         .history-count-badge {
@@ -4198,22 +4332,31 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
           flex: 1;
         }
 
-        .history-search-icon {
+        .history-search-icon-wrap {
           position: absolute;
           left: 8px;
+          top: 50%;
+          transform: translateY(-50%);
           color: var(--text-muted);
           pointer-events: none;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 2;
         }
 
         .history-search-input {
           width: 100%;
-          padding: 4px 24px 4px 24px;
-          font-size: 11px;
-          border-radius: var(--radius-xs, 3px);
+          height: 26px;
+          padding: 0 24px 0 26px;
+          font-size: 11.5px;
+          border-radius: var(--radius-xs, 4px);
           background: var(--bg-input, var(--bg-tertiary));
           border: 1px solid var(--border-light);
           color: var(--text-main);
           outline: none;
+          box-sizing: border-box;
+          transition: border-color 0.15s ease;
         }
 
         .history-search-input:focus {
@@ -4223,12 +4366,24 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
         .clear-search-btn {
           position: absolute;
           right: 6px;
+          top: 50%;
+          transform: translateY(-50%);
           background: transparent;
           border: none;
           color: var(--text-muted);
           cursor: pointer;
           padding: 2px;
           display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 3px;
+          z-index: 2;
+          transition: all 0.12s ease;
+        }
+
+        .clear-search-btn:hover {
+          color: var(--text-main);
+          background: var(--bg-hover);
         }
 
         .history-scope-tabs {
