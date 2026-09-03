@@ -114,6 +114,12 @@ export const translations = {
     sqlDiscardDesc: "Discard current SQL changes and load default query for \"{table}\"?",
     sqlDiscardKeep: "Keep SQL",
     sqlDiscardReplace: "Discard",
+    sqlAutoLimitLabel: "Limit",
+    sqlAutoLimitTooltip: "Safe Query Mode: Automatically adds LIMIT to unbounded SELECT queries to prevent high memory usage.",
+    sqlAutoLimitRows: "{count} rows",
+    sqlAutoLimitNone: "No Limit (Raw)",
+    sqlAutoLimitNotice: "Results capped at {limit} rows by Auto-Limit.",
+    sqlRunRawQuery: "Run without limit",
 
     // Visual Query Builder
     vqbTitle: "Visual Query Builder",
@@ -432,6 +438,12 @@ export const translations = {
     sqlDiscardDesc: "ต้องการละทิ้งคำสั่ง SQL ปัจจุบันแล้วโหลดตาราง \"{table}\" หรือไม่?",
     sqlDiscardKeep: "คงคำสั่งเดิม",
     sqlDiscardReplace: "ละทิ้ง",
+    sqlAutoLimitLabel: "จำกัดแถว",
+    sqlAutoLimitTooltip: "Safe Query Mode: ใส่ LIMIT ให้อัตโนมัติเมื่อรันคำสั่ง SELECT เพื่อป้องกันโปรแกรมค้าง",
+    sqlAutoLimitRows: "{count} แถว",
+    sqlAutoLimitNone: "ไม่จำกัด (ทั้งหมด)",
+    sqlAutoLimitNotice: "ผลลัพธ์ถูกจำกัดที่ {limit} แถวโดยระบบ Auto-Limit",
+    sqlRunRawQuery: "รันแบบไม่จำกัด",
 
     // Visual Query Builder
     vqbTitle: "สร้างคำสั่งค้นหา (Visual Query)",

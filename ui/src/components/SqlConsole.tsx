@@ -5,7 +5,7 @@ import {
   Play, Clock, Database, CheckCircle2, AlertCircle, FileCode, Sparkles,
   Layers, Table2, Code2, Copy, Check, Download, WrapText, Globe, MapPin,
   Edit2, Edit3, Trash2, RotateCcw, Eye, Search, X, Plus, Key, Zap,
-  GripHorizontal, ListFilter, History, FileText, Maximize2
+  GripHorizontal, ListFilter, History, FileText, Maximize2, Shield, ShieldAlert
 } from "lucide-react";
 import { QueryExecutionResult, ColumnInfo, ConnectionProfile, DBType } from "../types";
 import { PendingChanges, CommitResult, isBooleanColumn } from "./DataGrid";
@@ -35,6 +35,8 @@ import {
   predictInlineSqlCompletion,
 } from "../utils/sqlAutocomplete";
 import { saveTextFileAsync } from "../utils/saveFile";
+import { applyAutoLimit } from "../utils/sqlLimitHelper";
+import { t, Language } from "../utils/i18n";
 
 interface SqlConsoleProps {
   activeProfile?: ConnectionProfile | null;
@@ -43,6 +45,7 @@ interface SqlConsoleProps {
   tables?: string[];
   columns?: ColumnInfo[];
   theme?: "dark" | "light";
+  language?: Language;
   onExecuteSql: (sql: string) => Promise<QueryExecutionResult>;
   onCommitChanges?: (changes: PendingChanges) => Promise<CommitResult>;
 }
@@ -50,6 +53,9 @@ interface SqlConsoleProps {
 export interface StatementResultItem {
   id: number;
   sql: string;
+  originalSql?: string;
+  wasAutoLimited?: boolean;
+  appliedLimit?: number;
   result: QueryExecutionResult;
   executionTimeMs: number;
 }
@@ -116,10 +122,29 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
   tables = [],
   columns = [],
   theme = "dark",
+  language = "en",
   onExecuteSql,
   onCommitChanges,
 }) => {
   const sqlPushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Auto-Limit (Safe Query Mode)
+  const [autoLimit, setAutoLimit] = useState<number>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("dodb_sql_auto_limit");
+      if (saved !== null) {
+        const parsed = parseInt(saved, 10);
+        if (!isNaN(parsed) && [100, 500, 1000, 5000, 10000, 0].includes(parsed)) {
+          return parsed;
+        }
+      }
+    }
+    return 1000;
+  });
+  const autoLimitRef = useRef(autoLimit);
+  useEffect(() => {
+    autoLimitRef.current = autoLimit;
+  }, [autoLimit]);
 
   // SQL text is shared with the visual Query tab. Monaco stays bound to fast local
   // state; the store is written back debounced so a keystroke never notifies subscribers.
@@ -964,18 +989,25 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
     setCommitMsg(null);
 
     const resultsList: StatementResultItem[] = [];
+    const currentLimit = autoLimitRef.current;
 
     for (let idx = 0; idx < validStatements.length; idx++) {
       const stmtSql = validStatements[idx];
       setBatchProgress({ current: idx + 1, total: validStatements.length });
       const start = performance.now();
 
+      const limitCheck = currentLimit > 0 ? applyAutoLimit(stmtSql, currentLimit) : { sql: stmtSql, wasLimited: false };
+      const sqlToRun = limitCheck.sql;
+
       try {
-        const res = await onExecuteSqlRef.current(stmtSql);
+        const res = await onExecuteSqlRef.current(sqlToRun);
         const duration = Math.round(performance.now() - start);
         resultsList.push({
           id: idx + 1,
-          sql: stmtSql,
+          sql: sqlToRun,
+          originalSql: stmtSql,
+          wasAutoLimited: limitCheck.wasLimited,
+          appliedLimit: limitCheck.appliedLimit,
           result: { ...res, executionTimeMs: duration },
           executionTimeMs: duration,
         });
@@ -988,7 +1020,10 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
         const msg = err instanceof Error ? err.message : String(err);
         resultsList.push({
           id: idx + 1,
-          sql: stmtSql,
+          sql: sqlToRun,
+          originalSql: stmtSql,
+          wasAutoLimited: limitCheck.wasLimited,
+          appliedLimit: limitCheck.appliedLimit,
           result: { error: msg || "Query execution failed", executionTimeMs: duration },
           executionTimeMs: duration,
         });
@@ -1024,6 +1059,54 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
       }
       setActiveResultTab(defaultTab);
       setResult(resultsList[defaultTab].result);
+    }
+  }, []);
+
+  // Execute raw query bypassing Auto-Limit
+  const executeRawStatement = useCallback(async (rawSql: string) => {
+    setLoading(true);
+    setResult(null);
+    const start = performance.now();
+    try {
+      const res = await onExecuteSqlRef.current(rawSql);
+      const duration = Math.round(performance.now() - start);
+      const item: StatementResultItem = {
+        id: 1,
+        sql: rawSql,
+        originalSql: rawSql,
+        wasAutoLimited: false,
+        result: { ...res, executionTimeMs: duration },
+        executionTimeMs: duration,
+      };
+      setStatementResults([item]);
+      setActiveResultTab(0);
+      setResult(item.result);
+      addHistoryEntries([{
+        id: `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+        sql: rawSql,
+        database: activeDatabaseRef.current || "",
+        timestamp: Date.now(),
+        status: res.error ? "error" : "success",
+        durationMs: duration,
+        rowsCount: res.rows?.length ?? (typeof res.affectedRows === "number" ? res.affectedRows : undefined),
+        error: res.error,
+      }]);
+    } catch (err: unknown) {
+      const duration = Math.round(performance.now() - start);
+      const msg = err instanceof Error ? err.message : String(err);
+      const item: StatementResultItem = {
+        id: 1,
+        sql: rawSql,
+        originalSql: rawSql,
+        wasAutoLimited: false,
+        result: { error: msg || "Query execution failed", executionTimeMs: duration },
+        executionTimeMs: duration,
+      };
+      setStatementResults([item]);
+      setActiveResultTab(0);
+      setResult(item.result);
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -1860,6 +1943,27 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
               )}
             </button>
 
+            <div className="monaco-theme-picker" data-tooltip={t("sqlAutoLimitTooltip", language)}>
+              <select
+                className="theme-select font-mono"
+                value={autoLimit}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  setAutoLimit(val);
+                  try {
+                    localStorage.setItem("dodb_sql_auto_limit", String(val));
+                  } catch { }
+                }}
+              >
+                <option value={100}>Limit: 100</option>
+                <option value={500}>Limit: 500</option>
+                <option value={1000}>Limit: 1,000</option>
+                <option value={5000}>Limit: 5,000</option>
+                <option value={10000}>Limit: 10,000</option>
+                <option value={0}>{t("sqlAutoLimitNone", language)}</option>
+              </select>
+            </div>
+
             <div className="monaco-theme-picker" data-tooltip="Editor Syntax Theme (เปลี่ยนธีม Monaco Editor)">
               <select
                 className="theme-select font-mono"
@@ -2122,6 +2226,23 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                   <Layers size={11} />
                   <span>{getTargetTable()?.replace(/["`\[\]]/g, "")}</span>
                 </span>
+              )}
+
+              {statementResults[activeResultTab]?.wasAutoLimited && (statementResults[activeResultTab]?.result.rows?.length ?? 0) >= (statementResults[activeResultTab]?.appliedLimit ?? 0) && (
+                <div className="res-auto-limit-pill" title={t("sqlAutoLimitNotice", language, { limit: statementResults[activeResultTab]?.appliedLimit || autoLimit })}>
+                  <Shield size={11} className="limit-icon" />
+                  <span>{t("sqlAutoLimitNotice", language, { limit: statementResults[activeResultTab]?.appliedLimit || autoLimit })}</span>
+                  {statementResults[activeResultTab]?.originalSql && (
+                    <button
+                      type="button"
+                      className="btn-run-raw"
+                      onClick={() => executeRawStatement(statementResults[activeResultTab]!.originalSql!)}
+                      title={t("sqlRunRawQuery", language)}
+                    >
+                      {t("sqlRunRawQuery", language)}
+                    </button>
+                  )}
+                </div>
               )}
             </div>
 
@@ -3599,6 +3720,41 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
           display: flex;
           align-items: center;
           gap: 12px;
+          flex-wrap: wrap;
+        }
+
+        .res-auto-limit-pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 2px 8px;
+          border-radius: 4px;
+          background: rgba(245, 158, 11, 0.12);
+          border: 1px solid rgba(245, 158, 11, 0.3);
+          color: var(--accent-amber, #f59e0b);
+          font-size: 10.5px;
+          font-family: var(--font-sans);
+          font-weight: 500;
+        }
+        .res-auto-limit-pill .limit-icon {
+          flex-shrink: 0;
+        }
+        .btn-run-raw {
+          background: rgba(245, 158, 11, 0.2);
+          border: 1px solid rgba(245, 158, 11, 0.4);
+          color: var(--accent-amber, #f59e0b);
+          border-radius: 3px;
+          padding: 1px 6px;
+          font-size: 9.5px;
+          font-family: var(--font-mono);
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.12s ease;
+          text-decoration: underline;
+        }
+        .btn-run-raw:hover {
+          background: rgba(245, 158, 11, 0.35);
+          color: #ffffff;
         }
 
         .results-bar-right {
