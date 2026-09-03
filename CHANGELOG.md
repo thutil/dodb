@@ -13,9 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Bound cell context menu directly to the exact target cell value (`cellValue`), ensuring 100% accuracy on clicked fields without index mismatches or truncation.
   - Standardized all context menu actions to strictly follow the active application language (`en` or `th`), eliminating confusing mixed-language labels in parentheses.
   - Fixed context menu coordinate positioning so it opens immediately adjacent to the cursor at any row position without excessive bottom displacement.
-- **macOS App Icon Redesign (Native Squircle Dock Tile)**:
-  - Upgraded the application icon to comply with Apple's Human Interface Guidelines (macOS Big Sur+ Squircle standard with soft ambient drop shadows and subtle inner rim lighting).
-  - Placed the DoDB elephant mascot onto a sleek dark navy/slate gradient background tile, replacing the bare transparent cutout for a cohesive, premium look in the macOS Dock alongside native apps.
+- **macOS App Icon Redesign (Native White Squircle Dock Tile)**:
+  - Upgraded the macOS application icon to comply with Apple's Human Interface Guidelines (macOS Big Sur+ Squircle standard with soft ambient drop shadows and subtle inner rim lighting).
+  - Placed the DoDB elephant mascot onto a clean Apple White/Silver gradient tile for a native, premium look in the macOS Dock, while keeping the Windows icon (`build/windows/icon.ico`) transparent.
 - **Scroll Position Preservation on Sort & Data Reload**:
   - Maintained both vertical (`scrollTop`) and horizontal (`scrollLeft`) scroll positions when sorting columns or updating rows in both the DataGrid and SQL Result Table, ensuring seamless in-place data updates without jarring jumps back to the top of the table.
 
