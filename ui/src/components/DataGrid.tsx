@@ -257,37 +257,37 @@ export const DataGrid: React.FC<DataGridProps> = ({
   const [lastSelectedRowIdx, setLastSelectedRowIdx] = useState<number | null>(null);
   const [batchCopied, setBatchCopied] = useState<string | null>(null);
 
-  // Scroll Container Ref & Horizontal Scroll Retention
+  // Scroll Container Ref & Scroll Retention (Vertical + Horizontal)
   const tableAreaRef = useRef<HTMLDivElement>(null);
   const lastScrollLeftRef = useRef<number>(0);
+  const lastScrollTopRef = useRef<number>(0);
 
   const handleTableAreaScroll = (e: React.UIEvent<HTMLDivElement>) => {
     lastScrollLeftRef.current = e.currentTarget.scrollLeft;
+    lastScrollTopRef.current = e.currentTarget.scrollTop;
   };
 
-  // Reset scroll to top-left when table or database changes
+  // Reset scroll to top-left only when table or database changes
   useEffect(() => {
     lastScrollLeftRef.current = 0;
+    lastScrollTopRef.current = 0;
     if (tableAreaRef.current) {
       tableAreaRef.current.scrollLeft = 0;
       tableAreaRef.current.scrollTop = 0;
     }
   }, [tableName, activeDatabase]);
 
-  // Reset vertical scroll to top on sort change while preserving horizontal scroll
-  useEffect(() => {
-    if (tableAreaRef.current) {
-      tableAreaRef.current.scrollTop = 0;
-      tableAreaRef.current.scrollLeft = lastScrollLeftRef.current;
-    }
-  }, [sortColumn, sortOrder]);
-
-  // Ensure horizontal scroll is restored after rows or columns update
+  // Ensure both vertical and horizontal scroll positions are restored after sort or data update
   useLayoutEffect(() => {
-    if (tableAreaRef.current && lastScrollLeftRef.current > 0) {
-      tableAreaRef.current.scrollLeft = lastScrollLeftRef.current;
+    if (tableAreaRef.current) {
+      if (lastScrollLeftRef.current > 0) {
+        tableAreaRef.current.scrollLeft = lastScrollLeftRef.current;
+      }
+      if (lastScrollTopRef.current > 0) {
+        tableAreaRef.current.scrollTop = lastScrollTopRef.current;
+      }
     }
-  }, [rows, columns]);
+  }, [rows, columns, sortColumn, sortOrder]);
 
   // Close export dropdown and context menu on outside click
   useEffect(() => {

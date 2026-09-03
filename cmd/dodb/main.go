@@ -45,10 +45,18 @@ func main() {
 		slog.Warn("fewer commands registered than expected", "registered", got, "expected", want)
 	}
 
+	// On macOS, the bundle's Contents/Resources/icon.icns is used automatically.
+	// Supplying a flat PNG to Wails on Darwin causes Wails to call setApplicationIconImage:
+	// which strips macOS squircle dock rendering.
+	var appIcon []byte
+	if runtime.GOOS != "darwin" {
+		appIcon = dodb.AppIcon
+	}
+
 	app := application.New(application.Options{
 		Name:        "dodb",
 		Description: "Modern Multi-Platform Database Manager for Postgres, MySQL, MariaDB & SQLite",
-		Icon:        dodb.AppIcon,
+		Icon:        appIcon,
 		LogLevel:    slog.LevelWarn,
 		Assets: application.AssetOptions{
 			Handler:        application.BundledAssetFileServer(dodb.Frontend()),

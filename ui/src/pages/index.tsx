@@ -1523,6 +1523,7 @@ export default function Home() {
                     tables={tables}
                     columns={columns}
                     theme={theme}
+                    language={language}
                     onExecuteSql={handleExecuteSql}
                     onCommitChanges={handleCommitChanges}
                   />
