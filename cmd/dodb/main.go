@@ -48,6 +48,7 @@ func main() {
 	app := application.New(application.Options{
 		Name:        "dodb",
 		Description: "Modern Multi-Platform Database Manager for Postgres, MySQL, MariaDB & SQLite",
+		Icon:        dodb.AppIcon,
 		LogLevel:    slog.LevelWarn,
 		Assets: application.AssetOptions{
 			Handler:        application.BundledAssetFileServer(dodb.Frontend()),
@@ -68,9 +69,13 @@ func main() {
 		MinHeight: 640,
 		// The Tauri build opened maximised; keep that.
 		StartState: application.WindowStateMaximised,
+		Linux: application.LinuxWindow{
+			Icon: dodb.AppIcon,
+		},
 	})
 
 	svc.SetWindow(&wailsWindow{window: window})
+	setupAppMenu(app, window)
 
 	if runtime.GOOS == "darwin" {
 		// macOS convention, and what the Tauri build did: closing the window

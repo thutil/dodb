@@ -7,16 +7,17 @@ import {
   ExternalLink,
   Cpu,
   Layers,
-  Sparkles,
   Shield,
   Terminal,
   Workflow,
   GitFork,
   Heart,
-  HardDrive
+  HardDrive,
+  RefreshCw,
 } from "lucide-react";
 
 import { Language, t } from "../utils/i18n";
+import { UpdateCheckResult, checkGitTagUpdate } from "../utils/updater";
 
 interface AboutModalProps {
   isOpen: boolean;
@@ -32,8 +33,8 @@ export const AboutModal: React.FC<AboutModalProps> = ({
   language = "en",
 }) => {
   const [copied, setCopied] = useState(false);
-
-  if (!isOpen) return null;
+  const [updateResult, setUpdateResult] = useState<UpdateCheckResult>({ status: "idle" });
+  const [isChecking, setIsChecking] = useState(false);
 
   const handleCopyInfo = () => {
     const info = `DODB Database Manager\nVersion: v${version}\nPlatform: macOS (Native Desktop)\nEngines: PostgreSQL, MySQL, MariaDB, SQLite\nStack: Wails v2 + Next.js + Go`;
@@ -41,6 +42,23 @@ export const AboutModal: React.FC<AboutModalProps> = ({
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+
+  const handleCheckUpdate = async () => {
+    if (isChecking) return;
+    setIsChecking(true);
+    setUpdateResult({ status: "checking" });
+
+    try {
+      const res = await checkGitTagUpdate(version);
+      setUpdateResult(res);
+    } catch {
+      setUpdateResult({ status: "error" });
+    } finally {
+      setIsChecking(false);
+    }
+  };
+
+  if (!isOpen) return null;
 
   return (
     <div className="about-modal-overlay" onClick={onClose}>
@@ -64,6 +82,61 @@ export const AboutModal: React.FC<AboutModalProps> = ({
             <div className="app-title-row">
               <h2 className="app-name font-mono">DODB</h2>
               <span className="app-version-chip font-mono">v{version}</span>
+
+              {/* Simple Update Checker Button / Status */}
+              {updateResult.status === "idle" && (
+                <button
+                  type="button"
+                  className="check-update-btn font-mono"
+                  onClick={handleCheckUpdate}
+                  title="Check git tags on GitHub for newer versions"
+                >
+                  <RefreshCw size={10} />
+                  <span>{t("checkForUpdates", language)}</span>
+                </button>
+              )}
+
+              {updateResult.status === "checking" && (
+                <span className="update-status-pill checking font-mono">
+                  <RefreshCw size={10} className="spin-icon" />
+                  <span>{t("checkingForUpdates", language)}</span>
+                </span>
+              )}
+
+              {updateResult.status === "up-to-date" && (
+                <span className="update-status-pill up-to-date font-mono">
+                  <Check size={11} />
+                  <span>{t("updateUpToDate", language)}</span>
+                </span>
+              )}
+
+              {updateResult.status === "update-available" && (
+                <div className="update-status-pill update-available font-mono">
+                  <span className="badge-new">NEW</span>
+                  <span>{updateResult.latestTag} available</span>
+                  {updateResult.releaseUrl && (
+                    <a
+                      href={updateResult.releaseUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="release-link"
+                      title={t("viewReleaseOnGithub", language)}
+                    >
+                      <ExternalLink size={10} />
+                    </a>
+                  )}
+                </div>
+              )}
+
+              {updateResult.status === "error" && (
+                <button
+                  type="button"
+                  className="check-update-btn error font-mono"
+                  onClick={handleCheckUpdate}
+                >
+                  <span>{t("updateCheckError", language)} - {t("retry", language)}</span>
+                </button>
+              )}
             </div>
             <p className="app-tagline">
               {language === "th"
@@ -230,22 +303,6 @@ export const AboutModal: React.FC<AboutModalProps> = ({
           align-items: center;
         }
 
-        .header-badge {
-          display: inline-flex;
-          align-items: center;
-          gap: 5px;
-          font-size: 10px;
-          font-weight: 700;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-          color: var(--accent-blue);
-          background: rgba(59, 130, 246, 0.12);
-          border: 1px solid rgba(59, 130, 246, 0.25);
-          padding: 2px 8px;
-          border-radius: 12px;
-        }
-        .badge-sparkle { color: #f59e0b; }
-
         .icon-close-btn {
           background: transparent;
           border: none;
@@ -303,6 +360,7 @@ export const AboutModal: React.FC<AboutModalProps> = ({
           display: flex;
           align-items: center;
           gap: 8px;
+          flex-wrap: wrap;
         }
         .app-name {
           font-size: 20px;
@@ -314,12 +372,89 @@ export const AboutModal: React.FC<AboutModalProps> = ({
         .app-version-chip {
           font-size: 10.5px;
           font-weight: 600;
-          color: #60a5fa;
-          background: rgba(59, 130, 246, 0.15);
-          border: 1px solid rgba(59, 130, 246, 0.3);
+          color: var(--text-sub);
+          background: var(--bg-secondary);
+          border: 1px solid var(--border-light);
           padding: 1px 7px;
           border-radius: 4px;
         }
+
+        /* Simple check update button - basic standard theme colors */
+        .check-update-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          font-size: 10px;
+          font-weight: 500;
+          background: var(--bg-secondary);
+          border: 1px solid var(--border-light);
+          color: var(--text-sub);
+          padding: 2px 7px;
+          border-radius: 4px;
+          cursor: pointer;
+          transition: all 0.12s ease;
+        }
+        .check-update-btn:hover {
+          color: var(--text-main);
+          background: var(--bg-hover);
+          border-color: var(--border-main);
+        }
+        .check-update-btn.error {
+          color: var(--accent-red);
+          border-color: var(--border-light);
+        }
+
+        .update-status-pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          font-size: 10px;
+          font-weight: 500;
+          padding: 2px 7px;
+          border-radius: 4px;
+          background: var(--bg-secondary);
+          border: 1px solid var(--border-light);
+          color: var(--text-sub);
+        }
+        .update-status-pill.checking {
+          color: var(--text-muted);
+        }
+        .update-status-pill.up-to-date {
+          color: var(--accent-green);
+        }
+        .update-status-pill.update-available {
+          color: var(--text-main);
+        }
+
+        .badge-new {
+          background: var(--bg-hover);
+          border: 1px solid var(--border-light);
+          color: var(--text-main);
+          font-size: 8.5px;
+          font-weight: 700;
+          padding: 0 4px;
+          border-radius: 3px;
+        }
+
+        .release-link {
+          color: var(--accent-blue);
+          display: inline-flex;
+          align-items: center;
+          margin-left: 2px;
+          transition: opacity 0.12s ease;
+        }
+        .release-link:hover {
+          opacity: 0.8;
+        }
+
+        .spin-icon {
+          animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+
         .app-tagline {
           font-size: 11.5px;
           color: var(--text-sub);
