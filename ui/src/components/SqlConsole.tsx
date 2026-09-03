@@ -127,13 +127,27 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
   const [sql, setSql] = useState<string>(
     () => getSharedSql() || (activeTable ? `SELECT * FROM ${activeTable} LIMIT 50;` : "SELECT 1;")
   );
-  const [monacoTheme, setMonacoTheme] = useState<string>(() => {
+  const [darkEditorTheme, setDarkEditorTheme] = useState<string>(() => {
     if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("dodb_monaco_theme");
-      if (saved) return saved;
+      const saved = localStorage.getItem("dodb_monaco_theme_dark") || localStorage.getItem("dodb_monaco_theme");
+      if (saved && ["monokai", "dracula", "one-dark", "dodb-dark", "vs-dark"].includes(saved)) {
+        return saved;
+      }
     }
     return "monokai";
   });
+
+  const [lightEditorTheme, setLightEditorTheme] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("dodb_monaco_theme_light");
+      if (saved && ["dodb-light", "vs", "github-light", "solarized-light"].includes(saved)) {
+        return saved;
+      }
+    }
+    return "dodb-light";
+  });
+
+  const activeEditorTheme = theme === "dark" ? darkEditorTheme : lightEditorTheme;
   const sqlRef = useRef(sql);
   useEffect(() => {
     sqlRef.current = sql;
@@ -1623,7 +1637,84 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
       },
     });
 
-    monaco.editor.setTheme(theme === "dark" ? monacoTheme : "light");
+    // 5. dodb-light (Clean Light)
+    monaco.editor.defineTheme("dodb-light", {
+      base: "vs",
+      inherit: true,
+      rules: [
+        { token: "keyword", foreground: "2563eb", fontStyle: "bold" },
+        { token: "keyword.sql", foreground: "2563eb", fontStyle: "bold" },
+        { token: "string.sql", foreground: "059669" },
+        { token: "number", foreground: "d97706" },
+        { token: "comment", foreground: "9ca3af", fontStyle: "italic" },
+        { token: "operator.sql", foreground: "db2777" },
+        { token: "identifier", foreground: "18181b" },
+      ],
+      colors: {
+        "editor.background": "#ffffff",
+        "editor.foreground": "#18181b",
+        "editor.lineHighlightBackground": "#f4f4f6",
+        "editorCursor.foreground": "#2563eb",
+        "editorLineNumber.foreground": "#a1a1aa",
+        "editorLineNumber.activeForeground": "#18181b",
+        "editor.selectionBackground": "#e0e7ff",
+        "editor.selectionHighlightBackground": "#f1f5f9",
+      },
+    });
+
+    // 6. github-light
+    monaco.editor.defineTheme("github-light", {
+      base: "vs",
+      inherit: true,
+      rules: [
+        { token: "keyword", foreground: "d73a49", fontStyle: "bold" },
+        { token: "keyword.sql", foreground: "d73a49", fontStyle: "bold" },
+        { token: "string", foreground: "032f62" },
+        { token: "string.sql", foreground: "032f62" },
+        { token: "number", foreground: "005cc5" },
+        { token: "comment", foreground: "6a737d", fontStyle: "italic" },
+        { token: "operator", foreground: "d73a49" },
+        { token: "identifier", foreground: "24292e" },
+        { token: "type", foreground: "6f42c1" },
+      ],
+      colors: {
+        "editor.background": "#ffffff",
+        "editor.foreground": "#24292e",
+        "editor.lineHighlightBackground": "#f6f8fa",
+        "editorCursor.foreground": "#24292e",
+        "editorLineNumber.foreground": "#babbbd",
+        "editorLineNumber.activeForeground": "#24292e",
+        "editor.selectionBackground": "#c8e1ff",
+      },
+    });
+
+    // 7. solarized-light
+    monaco.editor.defineTheme("solarized-light", {
+      base: "vs",
+      inherit: true,
+      rules: [
+        { token: "keyword", foreground: "859900", fontStyle: "bold" },
+        { token: "keyword.sql", foreground: "859900", fontStyle: "bold" },
+        { token: "string", foreground: "2aa198" },
+        { token: "string.sql", foreground: "2aa198" },
+        { token: "number", foreground: "d33682" },
+        { token: "comment", foreground: "93a1a1", fontStyle: "italic" },
+        { token: "operator", foreground: "cb4b16" },
+        { token: "identifier", foreground: "268bd2" },
+        { token: "type", foreground: "b58900" },
+      ],
+      colors: {
+        "editor.background": "#fdf6e3",
+        "editor.foreground": "#657b83",
+        "editor.lineHighlightBackground": "#eee8d5",
+        "editorCursor.foreground": "#657b83",
+        "editorLineNumber.foreground": "#93a1a1",
+        "editorLineNumber.activeForeground": "#586e75",
+        "editor.selectionBackground": "#eee8d5",
+      },
+    });
+
+    monaco.editor.setTheme(activeEditorTheme);
 
     // Enable inline suggestions (ghost text) & smart tab completion
     editor.updateOptions({
@@ -1703,9 +1794,9 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
   // Update theme dynamically
   useEffect(() => {
     if (monacoRef.current) {
-      monacoRef.current.editor.setTheme(theme === "dark" ? monacoTheme : "light");
+      monacoRef.current.editor.setTheme(activeEditorTheme);
     }
-  }, [theme, monacoTheme]);
+  }, [activeEditorTheme]);
 
   return (
     <div className="sql-console">
@@ -1772,23 +1863,42 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
             <div className="monaco-theme-picker" data-tooltip="Editor Syntax Theme (เปลี่ยนธีม Monaco Editor)">
               <select
                 className="theme-select font-mono"
-                value={theme === "light" ? "light" : monacoTheme}
+                value={activeEditorTheme}
                 onChange={(e) => {
                   const val = e.target.value;
-                  setMonacoTheme(val);
-                  try {
-                    localStorage.setItem("dodb_monaco_theme", val);
-                  } catch { }
+                  if (theme === "dark") {
+                    setDarkEditorTheme(val);
+                    try {
+                      localStorage.setItem("dodb_monaco_theme_dark", val);
+                      localStorage.setItem("dodb_monaco_theme", val);
+                    } catch { }
+                  } else {
+                    setLightEditorTheme(val);
+                    try {
+                      localStorage.setItem("dodb_monaco_theme_light", val);
+                    } catch { }
+                  }
                   if (monacoRef.current) {
-                    monacoRef.current.editor.setTheme(theme === "dark" ? val : "light");
+                    monacoRef.current.editor.setTheme(val);
                   }
                 }}
               >
-                <option value="monokai">Monokai</option>
-                <option value="dracula">Dracula</option>
-                <option value="one-dark">One Dark</option>
-                <option value="dodb-dark">dodb Dark</option>
-                <option value="vs-dark">VS Dark</option>
+                {theme === "dark" ? (
+                  <>
+                    <option value="monokai">Monokai</option>
+                    <option value="dracula">Dracula</option>
+                    <option value="one-dark">One Dark</option>
+                    <option value="dodb-dark">dodb Dark</option>
+                    <option value="vs-dark">VS Dark</option>
+                  </>
+                ) : (
+                  <>
+                    <option value="dodb-light">dodb Light</option>
+                    <option value="vs">VS Light</option>
+                    <option value="github-light">GitHub Light</option>
+                    <option value="solarized-light">Solarized Light</option>
+                  </>
+                )}
               </select>
             </div>
           </div>
@@ -1876,7 +1986,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
         <Editor
           height="100%"
           language="sql"
-          theme={theme === "dark" ? monacoTheme : "light"}
+          theme={activeEditorTheme}
           value={sql}
           onChange={(val) => handleSqlChange(val || "")}
           onMount={handleEditorDidMount}
@@ -2213,7 +2323,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                 <Editor
                   height="100%"
                   language="json"
-                  theme={theme === "dark" ? monacoTheme : "light"}
+                  theme={activeEditorTheme}
                   value={resultJsonFormat === "pretty" ? JSON.stringify(result.rows, null, 2) : JSON.stringify(result.rows)}
                   options={{
                     readOnly: true,
