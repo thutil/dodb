@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
 import Editor, { Monaco, OnMount } from "@monaco-editor/react";
 import {
   Play, Clock, Database, CheckCircle2, AlertCircle, FileCode, Sparkles,
@@ -219,6 +219,38 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
   const [editorHeight, setEditorHeight] = useState<number>(200);
   const [isDraggingResize, setIsDraggingResize] = useState<boolean>(false);
 
+  // Table Pagination State
+  const [tablePage, setTablePage] = useState<number>(1);
+  const [tablePageSize, setTablePageSize] = useState<number>(100);
+
+  // Table Scroll Position Retention
+  const tableScrollRef = useRef<HTMLDivElement | null>(null);
+  const lastTableScrollRef = useRef<{ top: number; left: number }>({ top: 0, left: 0 });
+
+  const handleResultTableScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    lastTableScrollRef.current = {
+      top: e.currentTarget.scrollTop,
+      left: e.currentTarget.scrollLeft,
+    };
+  };
+
+  // Restore scroll positions after table re-render
+  useLayoutEffect(() => {
+    if (tableScrollRef.current) {
+      if (lastTableScrollRef.current.top > 0) {
+        tableScrollRef.current.scrollTop = lastTableScrollRef.current.top;
+      }
+      if (lastTableScrollRef.current.left > 0) {
+        tableScrollRef.current.scrollLeft = lastTableScrollRef.current.left;
+      }
+    }
+  }, [result, tablePage, activeResultTab]);
+
+  // Reset page when switching tabs or when results change
+  useEffect(() => {
+    setTablePage(1);
+  }, [result, activeResultTab]);
+
   // Result View Mode: Table vs JSON vs GIS Map
   const [resultViewMode, setResultViewMode] = useState<"table" | "json" | "gis">("table");
   const [resultJsonFormat, setResultJsonFormat] = useState<"pretty" | "compact">("pretty");
@@ -238,6 +270,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
     rowIdx: number;
     row: Record<string, unknown>;
     colName?: string;
+    cellValue?: unknown;
   } | null>(null);
 
   // Searchable Row Inspector Modal State
@@ -970,6 +1003,24 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
     saveTextFileAsync(`query_result_${Date.now()}.json`, jsonStr);
   };
 
+  const handleDownloadResultCsv = (rowsData: any[]) => {
+    if (!rowsData || rowsData.length === 0) return;
+    const colNames = Object.keys(rowsData[0] || {});
+    const csvHeader = colNames.map((col) => `"${String(col).replace(/"/g, '""')}"`).join(",");
+    const csvRows = rowsData.map((row) =>
+      colNames
+        .map((col) => {
+          const val = row[col];
+          if (val === null || val === undefined) return "";
+          if (typeof val === "object") return `"${JSON.stringify(val).replace(/"/g, '""')}"`;
+          return `"${String(val).replace(/"/g, '""')}"`;
+        })
+        .join(",")
+    );
+    const csvStr = [csvHeader, ...csvRows].join("\n");
+    saveTextFileAsync(`query_result_${Date.now()}.csv`, csvStr);
+  };
+
   // Execution Engine for single or multiple SQL statements
   const executeStatements = useCallback(async (statementsToRun: string[]) => {
     const validStatements = statementsToRun
@@ -977,6 +1028,13 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
       .filter((s) => s.length > 0);
 
     if (validStatements.length === 0) return;
+
+    if (tableScrollRef.current) {
+      lastTableScrollRef.current = {
+        top: tableScrollRef.current.scrollTop,
+        left: tableScrollRef.current.scrollLeft,
+      };
+    }
 
     setLoading(true);
     setResult(null);
@@ -2324,11 +2382,20 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
 
                 <button
                   className="btn btn-secondary btn-sm"
+                  onClick={() => handleDownloadResultCsv(result.rows || [])}
+                  title="Download results as .csv spreadsheet"
+                >
+                  <Download size={11} />
+                  <span>.csv</span>
+                </button>
+
+                <button
+                  className="btn btn-secondary btn-sm"
                   onClick={() => handleDownloadResultJson(result.rows || [])}
                   title="Download results as .json file"
                 >
                   <Download size={11} />
-                  <span>Download .json</span>
+                  <span>.json</span>
                 </button>
               </div>
             )}
@@ -2465,21 +2532,35 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
             ) : (
               (() => {
                 const cols = Object.keys(result.rows![0] || {});
+                const totalRows = result.rows!.length;
+                const totalPages = tablePageSize > 0 ? Math.max(1, Math.ceil(totalRows / tablePageSize)) : 1;
+                const currentPage = Math.min(tablePage, totalPages);
+                const startIdx = tablePageSize > 0 ? (currentPage - 1) * tablePageSize : 0;
+                const endIdx = tablePageSize > 0 ? Math.min(currentPage * tablePageSize, totalRows) : totalRows;
+                const displayedRows = tablePageSize > 0 ? result.rows!.slice(startIdx, endIdx) : result.rows!;
+
                 return (
-                  <table className="sql-table font-mono">
-                    <thead>
-                      <tr>
-                        <th style={{ width: "45px", textAlign: "center" }}>#</th>
-                        {cols.map((col) => (
-                          <th key={col}>{col}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {result.rows!.map((row, rIdx) => {
-                        const isDeleted = deletedRowIndices.has(rIdx);
-                        const rowEdits = editedCells[rIdx] || {};
-                        const effectiveRow = { ...row, ...rowEdits };
+                  <div className="table-view-container">
+                    <div
+                      className="table-scroll-inner"
+                      ref={tableScrollRef}
+                      onScroll={handleResultTableScroll}
+                    >
+                      <table className="sql-table font-mono">
+                        <thead>
+                          <tr>
+                            <th style={{ width: "45px", textAlign: "center" }}>#</th>
+                            {cols.map((col) => (
+                              <th key={col}>{col}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {displayedRows.map((row, localIdx) => {
+                            const rIdx = startIdx + localIdx;
+                            const isDeleted = deletedRowIndices.has(rIdx);
+                            const rowEdits = editedCells[rIdx] || {};
+                            const effectiveRow = { ...row, ...rowEdits };
 
                         return (
                           <tr
@@ -2549,6 +2630,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                                       rowIdx: rIdx,
                                       row: effectiveRow,
                                       colName: col,
+                                      cellValue: val,
                                     });
                                   }}
                                   title={
@@ -2676,8 +2758,88 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                       })}
                     </tbody>
                   </table>
-                );
-              })()
+                </div>
+
+                {totalRows > 0 && (
+                  <div className="table-pagination-bar font-mono">
+                    <div className="pagination-info">
+                      <span>
+                        {t("sqlPaginationShowing", language, {
+                          start: totalRows > 0 ? startIdx + 1 : 0,
+                          end: endIdx,
+                          total: totalRows.toLocaleString(),
+                        })}
+                      </span>
+                    </div>
+
+                    {tablePageSize > 0 && totalPages > 1 && (
+                      <div className="pagination-controls">
+                        <button
+                          type="button"
+                          className="pagination-btn"
+                          disabled={currentPage <= 1}
+                          onClick={() => setTablePage(1)}
+                          title="First Page"
+                        >
+                          «
+                        </button>
+                        <button
+                          type="button"
+                          className="pagination-btn"
+                          disabled={currentPage <= 1}
+                          onClick={() => setTablePage((p) => Math.max(1, p - 1))}
+                          title="Previous Page"
+                        >
+                          ‹
+                        </button>
+
+                        <span className="pagination-page-label">
+                          {currentPage} / {totalPages}
+                        </span>
+
+                        <button
+                          type="button"
+                          className="pagination-btn"
+                          disabled={currentPage >= totalPages}
+                          onClick={() => setTablePage((p) => Math.min(totalPages, p + 1))}
+                          title="Next Page"
+                        >
+                          ›
+                        </button>
+                        <button
+                          type="button"
+                          className="pagination-btn"
+                          disabled={currentPage >= totalPages}
+                          onClick={() => setTablePage(totalPages)}
+                          title="Last Page"
+                        >
+                          »
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="pagination-size-select">
+                      <span className="pagination-size-label">{t("sqlPaginationPerPage", language)}</span>
+                      <select
+                        value={tablePageSize}
+                        onChange={(e) => {
+                          setTablePageSize(Number(e.target.value));
+                          setTablePage(1);
+                        }}
+                        className="page-size-select font-mono"
+                      >
+                        <option value={50}>50</option>
+                        <option value={100}>100</option>
+                        <option value={250}>250</option>
+                        <option value={500}>500</option>
+                        <option value={0}>All ({totalRows.toLocaleString()})</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()
             )}
           </div>
         )}
@@ -2688,13 +2850,17 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
         <div
           className="row-context-menu"
           style={{
-            top: typeof window !== "undefined" ? Math.min(contextMenu.y, window.innerHeight - 280) : contextMenu.y,
-            left: typeof window !== "undefined" ? Math.min(contextMenu.x, window.innerWidth - 220) : contextMenu.x,
+            top: typeof window !== "undefined"
+              ? Math.max(10, Math.min(contextMenu.y, window.innerHeight - 220))
+              : contextMenu.y,
+            left: typeof window !== "undefined"
+              ? Math.max(10, Math.min(contextMenu.x, window.innerWidth - 200))
+              : contextMenu.x,
           }}
           onClick={(e) => e.stopPropagation()}
         >
           <div className="context-menu-header">
-            Row #{contextMenu.rowIdx + 1}
+            {t("gridRowNumber", language, { num: contextMenu.rowIdx + 1 })}
           </div>
           <button
             className="context-menu-item"
@@ -2705,7 +2871,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
             }}
           >
             <Eye size={13} />
-            <span>Inspect Details</span>
+            <span>{t("gridInspectDetails", language)}</span>
           </button>
           <button
             className="context-menu-item"
@@ -2715,7 +2881,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
             }}
           >
             <Edit3 size={13} />
-            <span>Edit Record (แก้ไขข้อมูล)</span>
+            <span>{t("gridEditRecord", language)}</span>
           </button>
           {(() => {
             const targetCol = contextMenu.colName
@@ -2723,7 +2889,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
               : columns.find((c) => isRichContentColumn(c.name, c.type));
             const targetColName = targetCol ? targetCol.name : contextMenu.colName;
             if (!targetColName) return null;
-            const cellVal = contextMenu.row[targetColName];
+            const cellVal = contextMenu.cellValue !== undefined ? contextMenu.cellValue : contextMenu.row[targetColName];
             return (
               <button
                 className="context-menu-item"
@@ -2733,7 +2899,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                 }}
               >
                 <FileText size={13} style={{ color: "var(--accent-blue)" }} />
-                <span>Open in Text Editor ({targetColName})</span>
+                <span>{t("gridOpenInEditor", language, { col: targetColName })}</span>
               </button>
             );
           })()}
@@ -2764,10 +2930,11 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                 }}
               >
                 <Globe size={13} style={{ color: "var(--accent-blue)" }} />
-                <span>View on Map (ดูบนแผนที่)</span>
+                <span>{t("gridViewOnMap", language)}</span>
               </button>
             );
           })()}
+
           <div className="context-menu-separator" />
           <button
             className="context-menu-item"
@@ -2777,7 +2944,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
             }}
           >
             <Copy size={13} />
-            <span>Copy as JSON</span>
+            <span>{t("gridCopyAsJson", language)}</span>
           </button>
           <button
             className="context-menu-item"
@@ -2793,7 +2960,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
             }}
           >
             <FileCode size={13} />
-            <span>Copy as SQL INSERT</span>
+            <span>{t("gridCopyAsSql", language)}</span>
           </button>
           <div className="context-menu-separator" />
           <button
@@ -2804,7 +2971,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
             }}
           >
             {deletedRowIndices.has(contextMenu.rowIdx) ? <RotateCcw size={13} /> : <Trash2 size={13} />}
-            <span>{deletedRowIndices.has(contextMenu.rowIdx) ? "Restore Record" : "Delete Record (ลบแถว)"}</span>
+            <span>{deletedRowIndices.has(contextMenu.rowIdx) ? t("gridRestoreRecord", language) : t("gridDeleteRecord", language)}</span>
           </button>
         </div>
       )}
@@ -4038,7 +4205,109 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
 
         .results-table-scroll {
           flex: 1;
+          overflow: hidden;
+          display: flex;
+          flex-direction: column;
+        }
+
+        .table-view-container {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+          min-height: 0;
+          width: 100%;
+          height: 100%;
+        }
+
+        .table-scroll-inner {
+          flex: 1;
           overflow: auto;
+          min-height: 0;
+        }
+
+        .table-pagination-bar {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 6px 14px;
+          background: var(--bg-tertiary);
+          border-top: 1px solid var(--border-light);
+          font-size: 11px;
+          color: var(--text-sub);
+          flex-shrink: 0;
+          gap: 12px;
+          user-select: none;
+        }
+
+        .pagination-info {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+
+        .pagination-controls {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+
+        .pagination-btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 24px;
+          height: 24px;
+          padding: 0;
+          background: var(--bg-card);
+          border: 1px solid var(--border-light);
+          border-radius: var(--radius-xs, 4px);
+          color: var(--text-main);
+          font-size: 13px;
+          font-family: var(--font-sans);
+          cursor: pointer;
+          transition: all 0.12s ease;
+        }
+
+        .pagination-btn:hover:not(:disabled) {
+          background: var(--bg-hover);
+          border-color: var(--border-medium);
+        }
+
+        .pagination-btn:disabled {
+          opacity: 0.35;
+          cursor: not-allowed;
+        }
+
+        .pagination-page-label {
+          font-size: 11px;
+          color: var(--text-main);
+          padding: 0 4px;
+        }
+
+        .pagination-size-select {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        }
+
+        .pagination-size-label {
+          font-size: 10.5px;
+          color: var(--text-muted);
+        }
+
+        .page-size-select {
+          background: var(--bg-card);
+          border: 1px solid var(--border-light);
+          border-radius: var(--radius-xs, 4px);
+          color: var(--text-main);
+          font-size: 11px;
+          padding: 2px 6px;
+          cursor: pointer;
+          outline: none;
+        }
+        .page-size-select:hover {
+          border-color: var(--border-medium);
         }
 
         .sql-table {
@@ -4062,6 +4331,58 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
+        }
+
+        .sql-th-sortable {
+          cursor: pointer;
+          user-select: none;
+          transition: background 0.12s ease;
+        }
+        .sql-th-sortable:hover {
+          background: var(--bg-hover);
+          color: var(--text-main);
+        }
+        .sql-th-sortable.is-sorted {
+          background: var(--bg-card);
+          color: var(--accent-blue);
+        }
+        .th-content {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          width: 100%;
+          justify-content: space-between;
+        }
+        .th-label {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          flex: 1;
+        }
+        .th-sort-icon {
+          display: inline-flex;
+          align-items: center;
+          flex-shrink: 0;
+        }
+        .sort-arrow.muted {
+          opacity: 0.35;
+        }
+        .sql-th-sortable:hover .sort-arrow.muted {
+          opacity: 0.8;
+          color: var(--accent-blue);
+        }
+        .sort-arrow.active {
+          color: var(--accent-blue);
+          opacity: 1;
+        }
+
+        .context-menu-section-header {
+          font-size: 9.5px;
+          font-weight: 700;
+          color: var(--text-muted);
+          text-transform: uppercase;
+          letter-spacing: 0.4px;
+          padding: 4px 8px 2px 8px;
         }
 
         .sql-table td {

@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.4] - 2026-09-03
+
+### Added
+
+- **Clean Monolingual Context Menu & Accurate Cell Targeting**:
+  - Bound cell context menu directly to the exact target cell value (`cellValue`), ensuring 100% accuracy on clicked fields without index mismatches or truncation.
+  - Standardized all context menu actions to strictly follow the active application language (`en` or `th`), eliminating confusing mixed-language labels in parentheses.
+  - Fixed context menu coordinate positioning so it opens immediately adjacent to the cursor at any row position without excessive bottom displacement.
+- **macOS App Icon Redesign (Native Squircle Dock Tile)**:
+  - Upgraded the application icon to comply with Apple's Human Interface Guidelines (macOS Big Sur+ Squircle standard with soft ambient drop shadows and subtle inner rim lighting).
+  - Placed the DoDB elephant mascot onto a sleek dark navy/slate gradient background tile, replacing the bare transparent cutout for a cohesive, premium look in the macOS Dock alongside native apps.
+- **Scroll Position Preservation on Sort & Data Reload**:
+  - Maintained both vertical (`scrollTop`) and horizontal (`scrollLeft`) scroll positions when sorting columns or updating rows in both the DataGrid and SQL Result Table, ensuring seamless in-place data updates without jarring jumps back to the top of the table.
+
 ## [0.4.3] - 2026-09-03
 
 ### Added
@@ -15,6 +29,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Included a **Keep SQL (คงคำสั่งเดิม)** option to preserve written queries while updating the active table context, as well as a **Discard (ละทิ้ง)** option to replace with the new table's default query.
   - Added full bilingual support (Thai & English) for the discard prompt.
 
+- **SQL Auto-Limit (Safe Query Mode)**:
+  - Added an intelligent Safe Query Mode helper (`sqlLimitHelper.ts`) that automatically attaches a safe `LIMIT` clause to unbounded `SELECT` statements, preventing app crashes and memory saturation on high-record tables (e.g. `SELECT * FROM table;` with millions of rows).
+  - Added an Auto-Limit selector dropdown on the SQL Console toolbar (`Limit: 100`, `500`, `1,000 (Default)`, `5,000`, `10,000`, `No Limit`).
+  - Added a subtle status notice badge when results are capped by Auto-Limit, with a one-click **Run without limit (รันแบบไม่จำกัด)** option to fetch raw results on demand.
+  - Automatically leaves queries with existing `LIMIT`/`FETCH FIRST`, as well as non-SELECT statements (`INSERT`, `UPDATE`, `DELETE`, `DDL`, `PRAGMA`), completely untouched.
+- **SQL Result Table UI Pagination & Direct CSV Export**:
+  - Implemented smart UI pagination for SQL query results (`50`, `100 (Default)`, `250`, `500`, `All` per page) with page navigation controls (`«`, `‹`, page indicator, `›`, `»`), eliminating UI freezing and DOM memory lag when rendering thousands of rows.
+  - Added direct **Download .csv** export button on the SQL results toolbar, allowing instant spreadsheet exports.
 - **Light Mode Monaco Syntax Themes**:
   - Added dedicated syntax themes for Light Mode: `dodb Light`, `VS Light`, `GitHub Light`, and `Solarized Light`.
   - Stored separate user preferences for dark and light editor themes (`dodb_monaco_theme_dark` and `dodb_monaco_theme_light`).
