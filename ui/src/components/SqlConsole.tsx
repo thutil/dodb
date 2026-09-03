@@ -324,9 +324,10 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
   }, []);
 
   const handleClearHistory = useCallback(() => {
-    if (historyScope === "current" && activeDatabase) {
+    const currentDb = (activeDatabase || "").trim().toLowerCase();
+    if (historyScope === "current" && currentDb) {
       setSqlHistory((prev) => {
-        const remaining = prev.filter((h) => h.database !== activeDatabase);
+        const remaining = prev.filter((h) => (h.database || "").trim().toLowerCase() !== currentDb);
         try {
           localStorage.setItem("dodb_sql_history_v1", JSON.stringify(remaining));
         } catch { }
@@ -376,9 +377,13 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
   }, [handleSqlChange]);
 
   const filteredHistory = useMemo(() => {
+    const currentDb = (activeDatabase || "").trim().toLowerCase();
     return sqlHistory.filter((item) => {
-      if (historyScope === "current" && activeDatabase && item.database && item.database !== activeDatabase) {
-        return false;
+      if (historyScope === "current" && currentDb) {
+        const itemDb = (item.database || "").trim().toLowerCase();
+        if (itemDb && itemDb !== currentDb) {
+          return false;
+        }
       }
       if (historySearch.trim()) {
         const q = historySearch.toLowerCase();
@@ -985,7 +990,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
       const historyEntries: SqlHistoryEntry[] = resultsList.map((item) => ({
         id: `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
         sql: item.sql,
-        database: activeDatabase || "",
+        database: activeDatabaseRef.current || "",
         timestamp: Date.now(),
         status: item.result.error ? "error" : "success",
         durationMs: item.executionTimeMs,
@@ -1792,9 +1797,8 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
         <div className="bar-right">
           {selectionInfo ? (
             <div className="selection-active-badge">
-              <Sparkles size={11} className="sparkle-icon" />
               <span>
-                Selection: {selectionInfo.lines} line{selectionInfo.lines > 1 ? "s" : ""} ({selectionInfo.chars} chars)
+                {selectionInfo.lines > 1 ? `${selectionInfo.lines} lines` : "1 line"} ({selectionInfo.chars} chars)
               </span>
               <button
                 className="btn-clear-sel"
@@ -1806,7 +1810,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                   setSelectedSql("");
                   setSelectionInfo(null);
                 }}
-                data-tooltip="Clear highlight selection"
+                title="Clear selection"
               >
                 <X size={10} />
               </button>
@@ -2997,19 +3001,23 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
             {/* Minimal Header */}
             <div className="history-header">
               <div className="history-header-title">
-                <History size={14} className="history-icon" />
+                <span className="history-icon-wrap">
+                  <History size={14} />
+                </span>
                 <span>Query History</span>
                 <span className="history-count-badge font-mono">{filteredHistory.length}</span>
               </div>
               <button className="icon-close-btn" onClick={() => setShowHistory(false)} title="Close (Esc)">
-                <X size={13} />
+                <X size={14} />
               </button>
             </div>
 
             {/* Clean Filter & Scope Bar */}
             <div className="history-filter-bar">
               <div className="history-search-wrap">
-                <Search size={11} className="history-search-icon" />
+                <span className="history-search-icon-wrap">
+                  <Search size={12} />
+                </span>
                 <input
                   type="text"
                   className="history-search-input"
@@ -3019,8 +3027,8 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
                   autoFocus
                 />
                 {historySearch && (
-                  <button className="clear-search-btn" onClick={() => setHistorySearch("")}>
-                    <X size={9} />
+                  <button className="clear-search-btn" onClick={() => setHistorySearch("")} title="Clear filter">
+                    <X size={11} />
                   </button>
                 )}
               </div>
@@ -3228,19 +3236,13 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
         .selection-active-badge {
           display: flex;
           align-items: center;
-          gap: 6px;
-          font-size: 10.5px;
-          font-weight: 600;
-          color: #3b82f6;
-          background: rgba(59, 130, 246, 0.12);
-          border: 1px solid rgba(59, 130, 246, 0.35);
-          padding: 3px 8px;
-          border-radius: 12px;
-          animation: pulse-selection 2s infinite ease-in-out;
-        }
-        @keyframes pulse-selection {
-          0%, 100% { border-color: rgba(59, 130, 246, 0.35); }
-          50% { border-color: rgba(59, 130, 246, 0.75); }
+          gap: 5px;
+          font-size: 11px;
+          color: var(--text-sub);
+          background: var(--bg-tertiary);
+          border: 1px solid var(--border-light);
+          padding: 2px 7px;
+          border-radius: var(--radius-xs, 4px);
         }
         .btn-clear-sel {
           display: flex;
@@ -3248,15 +3250,15 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
           justify-content: center;
           background: transparent;
           border: none;
-          color: #3b82f6;
+          color: var(--text-muted);
           cursor: pointer;
-          padding: 2px;
-          border-radius: 50%;
+          padding: 1px;
+          border-radius: 3px;
           transition: all 0.12s ease;
         }
         .btn-clear-sel:hover {
-          background: rgba(59, 130, 246, 0.2);
-          color: #60a5fa;
+          color: var(--text-main);
+          background: var(--bg-hover);
         }
         .statement-count-pill {
           font-weight: 600;
@@ -4169,8 +4171,30 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
           color: var(--text-main);
         }
 
-        .history-header-title .history-icon {
+        .history-icon-wrap {
+          display: flex;
+          align-items: center;
+          justify-content: center;
           color: var(--text-muted);
+        }
+
+        .history-header .icon-close-btn {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 24px;
+          height: 24px;
+          border-radius: 4px;
+          background: transparent;
+          border: none;
+          color: var(--text-muted);
+          cursor: pointer;
+          transition: all 0.15s ease;
+        }
+
+        .history-header .icon-close-btn:hover {
+          background: var(--bg-hover);
+          color: var(--text-main);
         }
 
         .history-count-badge {
@@ -4198,22 +4222,31 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
           flex: 1;
         }
 
-        .history-search-icon {
+        .history-search-icon-wrap {
           position: absolute;
           left: 8px;
+          top: 50%;
+          transform: translateY(-50%);
           color: var(--text-muted);
           pointer-events: none;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 2;
         }
 
         .history-search-input {
           width: 100%;
-          padding: 4px 24px 4px 24px;
-          font-size: 11px;
-          border-radius: var(--radius-xs, 3px);
+          height: 26px;
+          padding: 0 24px 0 26px;
+          font-size: 11.5px;
+          border-radius: var(--radius-xs, 4px);
           background: var(--bg-input, var(--bg-tertiary));
           border: 1px solid var(--border-light);
           color: var(--text-main);
           outline: none;
+          box-sizing: border-box;
+          transition: border-color 0.15s ease;
         }
 
         .history-search-input:focus {
@@ -4223,12 +4256,24 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
         .clear-search-btn {
           position: absolute;
           right: 6px;
+          top: 50%;
+          transform: translateY(-50%);
           background: transparent;
           border: none;
           color: var(--text-muted);
           cursor: pointer;
           padding: 2px;
           display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 3px;
+          z-index: 2;
+          transition: all 0.12s ease;
+        }
+
+        .clear-search-btn:hover {
+          color: var(--text-main);
+          background: var(--bg-hover);
         }
 
         .history-scope-tabs {

@@ -110,6 +110,10 @@ export const translations = {
     sqlAffectedRows: "{count} rows affected",
     sqlExecutionTime: "Execution time: {ms}ms",
     sqlEmptyQuery: "Enter an SQL query and press Run (⌘+Enter)",
+    sqlDiscardTitle: "Discard query?",
+    sqlDiscardDesc: "Discard current SQL changes and load default query for \"{table}\"?",
+    sqlDiscardKeep: "Keep SQL",
+    sqlDiscardReplace: "Discard",
 
     // Visual Query Builder
     vqbTitle: "Visual Query Builder",
@@ -424,6 +428,10 @@ export const translations = {
     sqlAffectedRows: "ส่งผลกระทบ {count} แถว",
     sqlExecutionTime: "เวลาประมวลผล: {ms}ms",
     sqlEmptyQuery: "พิมพ์คำสั่ง SQL แล้วกดปุ่มประมวลผล หรือ ⌘+Enter",
+    sqlDiscardTitle: "ละทิ้งคำสั่งที่แก้ไขอยู่?",
+    sqlDiscardDesc: "ต้องการละทิ้งคำสั่ง SQL ปัจจุบันแล้วโหลดตาราง \"{table}\" หรือไม่?",
+    sqlDiscardKeep: "คงคำสั่งเดิม",
+    sqlDiscardReplace: "ละทิ้ง",
 
     // Visual Query Builder
     vqbTitle: "สร้างคำสั่งค้นหา (Visual Query)",
