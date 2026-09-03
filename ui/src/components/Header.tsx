@@ -646,7 +646,6 @@ export const Header: React.FC<HeaderProps> = ({
           min-width: 0;
           justify-self: start;
           -webkit-app-region: no-drag;
-          overflow: hidden;
         }
 
         .brand {
@@ -701,6 +700,7 @@ export const Header: React.FC<HeaderProps> = ({
           min-width: 0;
           flex-shrink: 1;
           box-sizing: border-box;
+          -webkit-app-region: no-drag;
         }
         .bc-divider {
           color: var(--border-medium);
@@ -803,6 +803,7 @@ export const Header: React.FC<HeaderProps> = ({
           padding: 6px;
           z-index: 1000;
           animation: popoverFadeIn 0.12s ease-out;
+          -webkit-app-region: no-drag;
         }
         @keyframes popoverFadeIn {
           from {
