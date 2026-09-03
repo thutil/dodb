@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-Generates standard macOS Big Sur+ Full-Bleed White Squircle App Icon for DoDB.
-- Full 1024x1024 canvas filled with white squircle (r=225px)
-- No outer black border padding/clamping
+Generates standard macOS Solid Square White App Icon for DoDB.
+- Full 1024x1024 solid white square (radius = 0, no transparency, macOS clips the squircle natively)
 - Generates build/darwin/icon.icns matching Apple's strict iconset specifications
 - Generates transparent icon for Windows (build/windows/icon.ico)
 """
@@ -10,24 +9,13 @@ Generates standard macOS Big Sur+ Full-Bleed White Squircle App Icon for DoDB.
 import os
 import shutil
 import subprocess
-from PIL import Image, ImageDraw
+from PIL import Image
 
 def generate_all_icons():
     canvas = 1024
-    r = 225  # standard macOS 1024px squircle radius (22.5%)
 
-    # 1. Generate full-bleed 1024x1024 squircle image
-    scale = 2
-    c_hr = canvas * scale
-    r_hr = r * scale
-
-    tile_hr = Image.new("RGBA", (c_hr, c_hr), (255, 255, 255, 255))
-    mask_hr = Image.new("L", (c_hr, c_hr), 0)
-    m_draw = ImageDraw.Draw(mask_hr)
-    m_draw.rounded_rectangle((0, 0, c_hr - 1, c_hr - 1), radius=r_hr, fill=255)
-    tile_hr.putalpha(mask_hr)
-
-    tile = tile_hr.resize((canvas, canvas), Image.Resampling.LANCZOS)
+    # 1. Generate full solid 1024x1024 white square (no radius, macOS clips the squircle natively)
+    icon_img = Image.new("RGBA", (canvas, canvas), (255, 255, 255, 255))
 
     # Elephant Mascot
     el = Image.open("assets/elephant_raw.png").convert("RGBA")
@@ -44,13 +32,12 @@ def generate_all_icons():
     el_x = (canvas - el_w) // 2
     el_y = (canvas - el_h) // 2
 
-    icon_img = Image.new("RGBA", (canvas, canvas), (0, 0, 0, 0))
-    icon_img.paste(tile, (0, 0), mask=tile)
+    # Paste elephant onto solid white square
     icon_img.paste(el, (el_x, el_y), mask=el)
 
     icon_img.save("assets/icon.png", "PNG", optimize=True)
     icon_img.save("ui/public/icon.png", "PNG", optimize=True)
-    print("✓ Created assets/icon.png & ui/public/icon.png")
+    print("✓ Created solid square assets/icon.png & ui/public/icon.png")
 
     # 2. Build standard .iconset and .icns for macOS
     iconset_dir = "/tmp/dodb.iconset"
