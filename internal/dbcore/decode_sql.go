@@ -47,6 +47,13 @@ func querySQLite(db *sql.DB, query string) ([]*orderedjson.Object, error) {
 	})
 }
 
+// queryMSSQL decodes a Microsoft SQL Server result.
+func queryMSSQL(db *sql.DB, query string) ([]*orderedjson.Object, error) {
+	return querySQLGeneric(db, query, func(dbType, _ string, v any) any {
+		return mssqlValueToJSON(dbType, v)
+	})
+}
+
 // querySQLGeneric walks a database/sql result set, handing each cell to the
 // engine's mapper along with the driver's reported column type.
 func querySQLGeneric(
@@ -255,6 +262,99 @@ func numericOrText(v any) any {
 		return DecodeBytesOrHex(t)
 	default:
 		return fmt.Sprint(v)
+	}
+}
+
+func mssqlValueToJSON(dbType string, v any) any {
+	if v == nil {
+		return nil
+	}
+
+	switch strings.ToUpper(dbType) {
+	case "BIT":
+		switch b := v.(type) {
+		case bool:
+			return b
+		case int64:
+			return b != 0
+		case int:
+			return b != 0
+		case []byte:
+			if len(b) > 0 {
+				return b[0] != 0 && b[0] != '0'
+			}
+			return false
+		case string:
+			return b == "1" || strings.EqualFold(b, "true")
+		}
+		return false
+
+	case "DECIMAL", "NUMERIC", "MONEY", "SMALLMONEY":
+		return asText(v)
+
+	case "BIGINT", "INT", "SMALLINT", "TINYINT":
+		if i, ok := asInt64(v); ok {
+			return i
+		}
+		return asText(v)
+
+	case "FLOAT", "REAL":
+		switch n := v.(type) {
+		case float64:
+			return n
+		case float32:
+			return float64(n)
+		default:
+			if f, err := strconv.ParseFloat(asText(v), 64); err == nil {
+				return f
+			}
+			return asText(v)
+		}
+
+	case "DATE":
+		if t, ok := v.(time.Time); ok {
+			return t.Format("2006-01-02")
+		}
+		return asText(v)
+
+	case "DATETIME", "DATETIME2", "SMALLDATETIME":
+		if t, ok := v.(time.Time); ok {
+			return FormatNaiveDateTime(t)
+		}
+		return asText(v)
+
+	case "DATETIMEOFFSET":
+		if t, ok := v.(time.Time); ok {
+			return t.Format(time.RFC3339Nano)
+		}
+		return asText(v)
+
+	case "TIME":
+		if t, ok := v.(time.Time); ok {
+			return t.Format("15:04:05.999999999")
+		}
+		return asText(v)
+
+	case "UNIQUEIDENTIFIER":
+		return strings.ToUpper(fmt.Sprint(v))
+
+	case "BINARY", "VARBINARY", "IMAGE":
+		if b, ok := v.([]byte); ok {
+			return fmt.Sprintf("0x%X", b)
+		}
+		return asText(v)
+
+	default:
+		switch val := v.(type) {
+		case bool:
+			return val
+		case time.Time:
+			return FormatNaiveDateTime(val)
+		case []byte:
+			return DecodeBytesOrHex(val)
+		default:
+			return v
+		}
 	}
 }
 

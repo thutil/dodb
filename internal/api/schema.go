@@ -60,7 +60,7 @@ func (s *Service) GetTableConstraints(id, database, table string) (TableConstrai
 	if err != nil {
 		return TableConstraints{}, err
 	}
-	schema, tbl := splitSchemaTable(table)
+	schema, tbl := splitSchemaTable(profile.Type, table)
 
 	var (
 		idxRows, fkRows []*orderedjson.Object
@@ -69,7 +69,8 @@ func (s *Service) GetTableConstraints(id, database, table string) (TableConstrai
 		fks             []ForeignKey
 	)
 
-	if profile.Type == model.Postgres {
+	switch profile.Type {
+	case model.Postgres:
 		idxRows, err = pool.Query(ctx(), pgIndexQuery(profile.Type, schema, tbl), nil)
 		if err != nil {
 			return TableConstraints{}, fmt.Errorf("Could not read the indexes of this table: %w", err)
@@ -81,7 +82,19 @@ func (s *Service) GetTableConstraints(id, database, table string) (TableConstrai
 			return TableConstraints{}, fmt.Errorf("Could not read the foreign keys of this table: %w", err)
 		}
 		fks = groupForeignKeys(fkRows, pgAction)
-	} else {
+	case model.Mssql:
+		idxRows, err = pool.Query(ctx(), mssqlIndexQuery(profile.Type, schema, tbl), nil)
+		if err != nil {
+			return TableConstraints{}, fmt.Errorf("Could not read the indexes of this table: %w", err)
+		}
+		indexes, pkName = groupIndexes(idxRows, "index_name", "column_name", "seq", "is_unique", "is_primary", nil)
+
+		fkRows, err = pool.Query(ctx(), mssqlForeignKeyQuery(profile.Type, schema, tbl), nil)
+		if err != nil {
+			return TableConstraints{}, fmt.Errorf("Could not read the foreign keys of this table: %w", err)
+		}
+		fks = groupForeignKeys(fkRows, mssqlAction)
+	default:
 		idxRows, err = pool.Query(ctx(), "SHOW INDEX FROM `"+strings.ReplaceAll(tbl, "`", "")+"`", nil)
 		if err != nil {
 			return TableConstraints{}, fmt.Errorf("Could not read the indexes of this table: %w", err)
@@ -104,10 +117,13 @@ func (s *Service) GetTableConstraints(id, database, table string) (TableConstrai
 	return TableConstraints{Indexes: indexes, ForeignKeys: fks, PrimaryKeyName: pkName}, nil
 }
 
-// splitSchemaTable splits a possibly schema-qualified name, defaulting to public.
-func splitSchemaTable(table string) (schema, name string) {
+// splitSchemaTable splits a possibly schema-qualified name.
+func splitSchemaTable(db model.SupportedDB, table string) (schema, name string) {
 	if i := strings.Index(table, "."); i > 0 {
 		return table[:i], table[i+1:]
+	}
+	if db == model.Mssql {
+		return "dbo", table
 	}
 	return "public", table
 }
@@ -337,6 +353,62 @@ func myForeignKeyQuery(db model.SupportedDB, table string) string {
                   AND k.REFERENCED_TABLE_NAME IS NOT NULL
                 ORDER BY k.CONSTRAINT_NAME, k.ORDINAL_POSITION
                 `, dialect.EscapeLiteral(db, table))
+}
+
+func mssqlAction(code string) string {
+	switch strings.ToUpper(strings.ReplaceAll(code, "_", " ")) {
+	case "CASCADE":
+		return "CASCADE"
+	case "SET NULL":
+		return "SET NULL"
+	case "SET DEFAULT":
+		return "SET DEFAULT"
+	case "RESTRICT":
+		return "RESTRICT"
+	default:
+		return "NO ACTION"
+	}
+}
+
+func mssqlIndexQuery(db model.SupportedDB, schema, table string) string {
+	return fmt.Sprintf(`
+                SELECT
+                    i.name AS index_name,
+                    i.is_unique,
+                    i.is_primary_key AS is_primary,
+                    c.name AS column_name,
+                    ic.key_ordinal AS seq
+                FROM sys.indexes i
+                JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
+                JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+                JOIN sys.tables t ON t.object_id = i.object_id
+                JOIN sys.schemas s ON s.schema_id = t.schema_id
+                WHERE t.name = '%s' AND s.name = '%s' AND i.is_hypothetical = 0
+                ORDER BY i.name, ic.key_ordinal
+                `, dialect.EscapeLiteral(db, table), dialect.EscapeLiteral(db, schema))
+}
+
+func mssqlForeignKeyQuery(db model.SupportedDB, schema, table string) string {
+	return fmt.Sprintf(`
+                SELECT
+                    fk.name AS fk_name,
+                    c.name AS column_name,
+                    CASE WHEN r_s.name = 'dbo' THEN r_t.name ELSE (r_s.name + '.' + r_t.name) END AS ref_table,
+                    r_c.name AS ref_column,
+                    fk.delete_referential_action_desc AS on_delete,
+                    fk.update_referential_action_desc AS on_update,
+                    fkc.constraint_column_id AS seq
+                FROM sys.foreign_keys fk
+                JOIN sys.foreign_key_columns fkc ON fkc.constraint_object_id = fk.object_id
+                JOIN sys.tables t ON t.object_id = fk.parent_object_id
+                JOIN sys.schemas s ON s.schema_id = t.schema_id
+                JOIN sys.tables r_t ON r_t.object_id = fk.referenced_object_id
+                JOIN sys.schemas r_s ON r_s.schema_id = r_t.schema_id
+                JOIN sys.columns c ON c.object_id = fkc.parent_object_id AND c.column_id = fkc.parent_column_id
+                JOIN sys.columns r_c ON r_c.object_id = fkc.referenced_object_id AND r_c.column_id = fkc.referenced_column_id
+                WHERE t.name = '%s' AND s.name = '%s'
+                ORDER BY fk.name, fkc.constraint_column_id
+                `, dialect.EscapeLiteral(db, table), dialect.EscapeLiteral(db, schema))
 }
 
 // DDLResult is the execute_ddl payload.

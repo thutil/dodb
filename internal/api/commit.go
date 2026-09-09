@@ -19,6 +19,8 @@ func countStarExpr(db model.SupportedDB) string {
 		return "COUNT(*)::bigint"
 	case model.Mariadb:
 		return "CAST(COUNT(*) AS SIGNED)"
+	case model.Mssql:
+		return "CAST(COUNT(*) AS BIGINT)"
 	default:
 		return "COUNT(*)"
 	}

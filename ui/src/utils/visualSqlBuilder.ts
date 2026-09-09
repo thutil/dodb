@@ -33,6 +33,9 @@ export interface BuildVisualSqlParams {
 
 export function quoteIdent(ident: string, dbType: DBType = "mariadb"): string {
   if (!ident) return "";
+  if (dbType === "mssql") {
+    return `[${ident.replace(/\]/g, "]]")}]`;
+  }
   if (dbType === "mariadb") {
     return `\`${ident.replace(/`/g, "``")}\``;
   }
@@ -264,9 +267,16 @@ export function buildVisualSql({
   // 7. LIMIT and OFFSET clause
   let limitClause = "";
   if (limit && limit > 0) {
-    limitClause = `\nLIMIT ${limit}`;
-    if (offset && offset > 0) {
-      limitClause += ` OFFSET ${offset}`;
+    if (dbType === "mssql") {
+      if (!orderByClause) {
+        orderByClause = "\nORDER BY (SELECT NULL)";
+      }
+      limitClause = `\nOFFSET ${offset || 0} ROWS FETCH NEXT ${limit} ROWS ONLY`;
+    } else {
+      limitClause = `\nLIMIT ${limit}`;
+      if (offset && offset > 0) {
+        limitClause += ` OFFSET ${offset}`;
+      }
     }
   }
 

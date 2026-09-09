@@ -248,9 +248,20 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
       setForm((prev) => ({
         ...prev,
         type,
-        name: prev.name && prev.name !== "Local Postgres" && prev.name !== "Local MariaDB" ? prev.name : "Local SQLite",
+        name: prev.name && prev.name !== "Local Postgres" && prev.name !== "Local MariaDB" && prev.name !== "Local MSSQL" ? prev.name : "Local SQLite",
         filePath: prev.filePath || "./data/database.sqlite",
         database: prev.filePath || "./data/database.sqlite",
+      }));
+    } else if (type === "mssql") {
+      const defaultPort = 1433;
+      setPortText(String(defaultPort));
+      setForm((prev) => ({
+        ...prev,
+        type,
+        port: defaultPort,
+        name: prev.name && prev.name !== "Local Postgres" && prev.name !== "Local MariaDB" && prev.name !== "Local SQLite" ? prev.name : "Local MSSQL",
+        user: "sa",
+        database: "master",
       }));
     } else {
       const defaultPort = type === "postgres" ? 5432 : 3306;
@@ -266,10 +277,11 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
   };
 
   const getCleanForm = (): Partial<ConnectionProfile> => {
-    const finalPort = portText ? parseInt(portText, 10) : (form.type === "postgres" ? 5432 : 3306);
+    const fallbackPort = form.type === "postgres" ? 5432 : form.type === "mssql" ? 1433 : 3306;
+    const finalPort = portText ? parseInt(portText, 10) : fallbackPort;
     const data: Partial<ConnectionProfile> = {
       ...form,
-      port: isNaN(finalPort) ? (form.type === "postgres" ? 5432 : 3306) : finalPort,
+      port: isNaN(finalPort) ? fallbackPort : finalPort,
       group: form.group ? form.group.trim() : "Default",
       keepAlive: form.keepAlive === true,
       // SQLite has no password to withhold, so the switch never applies to it.
@@ -961,6 +973,14 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
                   >
                     <HardDrive size={13} className="seg-icon" />
                     <span className="seg-label">SQLite</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`engine-seg-btn ${form.type === "mssql" ? "active" : ""}`}
+                    onClick={() => handleTypeChange("mssql")}
+                  >
+                    <Server size={13} className="seg-icon" />
+                    <span className="seg-label">SQL Server (MSSQL)</span>
                   </button>
                 </div>
               </div>
@@ -1767,7 +1787,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           border: 1px solid var(--border-light);
           color: var(--text-muted);
         }
-        .postgres-avatar, .mariadb-avatar, .sqlite-avatar, .new-avatar {
+        .postgres-avatar, .mariadb-avatar, .sqlite-avatar, .mssql-avatar, .new-avatar {
           color: var(--text-sub);
         }
 

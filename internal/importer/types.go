@@ -288,7 +288,7 @@ func (t InferredType) blankIsNull() bool {
 func SQLTypeFor(t InferredType, db model.SupportedDB) string {
 	switch t {
 	case TypeInteger:
-		if db == model.Mariadb {
+		if db == model.Mariadb || db == model.Mssql {
 			return "INT"
 		}
 		return "INTEGER"
@@ -300,6 +300,8 @@ func SQLTypeFor(t InferredType, db model.SupportedDB) string {
 			return "DOUBLE PRECISION"
 		case model.Mariadb:
 			return "DOUBLE"
+		case model.Mssql:
+			return "FLOAT"
 		default:
 			return "REAL"
 		}
@@ -309,6 +311,8 @@ func SQLTypeFor(t InferredType, db model.SupportedDB) string {
 			return "BOOLEAN"
 		case model.Mariadb:
 			return "TINYINT(1)"
+		case model.Mssql:
+			return "BIT"
 		default:
 			// SQLite has no boolean; INTEGER holding 0/1 is the convention, and
 			// the decoder reads a column DECLARED boolean, not this one.
@@ -325,6 +329,8 @@ func SQLTypeFor(t InferredType, db model.SupportedDB) string {
 			return "TIMESTAMP"
 		case model.Mariadb:
 			return "DATETIME"
+		case model.Mssql:
+			return "DATETIME2"
 		default:
 			return "TEXT"
 		}
@@ -334,10 +340,15 @@ func SQLTypeFor(t InferredType, db model.SupportedDB) string {
 			return "JSONB"
 		case model.Mariadb:
 			return "JSON"
+		case model.Mssql:
+			return "NVARCHAR(MAX)"
 		default:
 			return "TEXT"
 		}
 	default:
+		if db == model.Mssql {
+			return "NVARCHAR(MAX)"
+		}
 		return "TEXT"
 	}
 }

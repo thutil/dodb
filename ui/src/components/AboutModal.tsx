@@ -37,7 +37,7 @@ export const AboutModal: React.FC<AboutModalProps> = ({
   const [isChecking, setIsChecking] = useState(false);
 
   const handleCopyInfo = () => {
-    const info = `DODB Database Manager\nVersion: v${version}\nPlatform: macOS (Native Desktop)\nEngines: PostgreSQL, MySQL, MariaDB, SQLite\nStack: Wails v2 + Next.js + Go`;
+    const info = `DODB Database Manager\nVersion: v${version}\nPlatform: macOS (Native Desktop)\nEngines: PostgreSQL, MySQL, MariaDB, SQLite, SQL Server (MSSQL)\nStack: Wails v2 + Next.js + Go`;
     navigator.clipboard.writeText(info);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -170,6 +170,10 @@ export const AboutModal: React.FC<AboutModalProps> = ({
               <div className="engine-chip sqlite">
                 <span className="engine-dot sqlite" />
                 <span className="engine-name">SQLite</span>
+              </div>
+              <div className="engine-chip mssql">
+                <span className="engine-dot mssql" />
+                <span className="engine-name">SQL Server</span>
               </div>
             </div>
           </div>
@@ -521,6 +525,7 @@ export const AboutModal: React.FC<AboutModalProps> = ({
         .engine-dot.mysql { background: #f29111; }
         .engine-dot.mariadb { background: #c0765a; }
         .engine-dot.sqlite { background: #003b57; }
+        .engine-dot.mssql { background: #cc292b; }
 
         .features-grid {
           display: grid;

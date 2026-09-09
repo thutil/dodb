@@ -27,6 +27,9 @@ func (s *Service) GetDatabases(id string) ([]string, error) {
 	case model.Mariadb:
 		query = "SHOW DATABASES"
 		maintenanceDb = "information_schema"
+	case model.Mssql:
+		query = "SELECT name FROM sys.databases WHERE state_desc = 'ONLINE' ORDER BY name"
+		maintenanceDb = "master"
 	default:
 		query = "SELECT name FROM pragma_database_list"
 		maintenanceDb = ""
@@ -74,6 +77,17 @@ func (s *Service) GetTables(id, database string) (TableList, error) {
         `
 	case model.Mariadb:
 		query = "SHOW TABLES"
+	case model.Mssql:
+		query = `
+            SELECT
+                CASE
+                    WHEN TABLE_SCHEMA = 'dbo' THEN TABLE_NAME
+                    ELSE (TABLE_SCHEMA + '.' + TABLE_NAME)
+                END AS name
+            FROM INFORMATION_SCHEMA.TABLES
+            WHERE TABLE_TYPE = 'BASE TABLE'
+            ORDER BY (CASE WHEN TABLE_SCHEMA = 'dbo' THEN 1 ELSE 0 END) DESC, TABLE_NAME ASC
+        `
 	default:
 		query = "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
 	}
@@ -201,13 +215,42 @@ func columnsQuery(db model.SupportedDB, table string) string {
             `, schemaFilter, name)
 	case model.Mariadb:
 		return "SHOW FULL COLUMNS FROM `" + strings.ReplaceAll(table, "`", "") + "`"
+	case model.Mssql:
+		schema, name := "dbo", table
+		if s, n, found := strings.Cut(table, "."); found {
+			schema, name = s, n
+		}
+		schema = strings.ReplaceAll(schema, "'", "''")
+		name = strings.ReplaceAll(name, "'", "''")
+
+		return fmt.Sprintf(`
+                SELECT
+                    c.COLUMN_NAME AS name,
+                    c.DATA_TYPE AS type,
+                    CASE WHEN c.IS_NULLABLE = 'YES' THEN 1 ELSE 0 END AS nullable,
+                    c.COLUMN_DEFAULT AS default_value,
+                    CASE WHEN pk.COLUMN_NAME IS NOT NULL THEN 1 ELSE 0 END AS primary_key,
+                    COLUMNPROPERTY(OBJECT_ID(c.TABLE_SCHEMA + '.' + c.TABLE_NAME), c.COLUMN_NAME, 'IsIdentity') AS is_identity
+                FROM INFORMATION_SCHEMA.COLUMNS c
+                LEFT JOIN (
+                    SELECT kcu.TABLE_SCHEMA, kcu.TABLE_NAME, kcu.COLUMN_NAME
+                    FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+                    JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
+                      ON tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
+                      AND tc.TABLE_SCHEMA = kcu.TABLE_SCHEMA
+                    WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
+                ) pk ON pk.TABLE_SCHEMA = c.TABLE_SCHEMA AND pk.TABLE_NAME = c.TABLE_NAME AND pk.COLUMN_NAME = c.COLUMN_NAME
+                WHERE (c.TABLE_SCHEMA = '%[1]s' OR LOWER(c.TABLE_SCHEMA) = LOWER('%[1]s'))
+                  AND (c.TABLE_NAME = '%[2]s' OR LOWER(c.TABLE_NAME) = LOWER('%[2]s'))
+                ORDER BY c.ORDINAL_POSITION
+            `, schema, name)
 	default:
 		return `PRAGMA table_info("` + strings.ReplaceAll(table, `"`, "") + `")`
 	}
 }
 
 func probeQuery(db model.SupportedDB, table string) string {
-	return "SELECT * FROM " + dialect.QuoteTable(db, table) + " LIMIT 1"
+	return dialect.BuildProbeQuery(db, table)
 }
 
 // normaliseColumn maps one catalog row onto the shape the frontend expects.
@@ -240,6 +283,16 @@ func normaliseColumn(db model.SupportedDB, row *orderedjson.Object) Column {
 			Default:       get("Default"),
 			AutoIncrement: strings.Contains(strings.ToLower(extra), "auto_increment"),
 			Extra:         extra,
+		}
+	case model.Mssql:
+		isIdentity := asBoolish(get("is_identity"))
+		return Column{
+			Name:          asString(get("name")),
+			Type:          asString(get("type")),
+			Nullable:      asBoolish(get("nullable")),
+			PrimaryKey:    asBoolish(get("primary_key")),
+			Default:       get("default_value"),
+			AutoIncrement: isIdentity,
 		}
 	default:
 		def := get("default_value")
@@ -313,8 +366,7 @@ func (s *Service) GetRows(
 
 	hints := pool.ColumnHintsFor(database, table)
 
-	query := fmt.Sprintf("SELECT * FROM %s %s %s LIMIT %d OFFSET %d",
-		tableIdent, whereSQL, orderSQL, limit, offset)
+	query := dialect.BuildSelectPage(profile.Type, tableIdent, whereSQL, orderSQL, limit, offset)
 	countQuery := fmt.Sprintf("SELECT COUNT(*) AS total FROM %s %s", tableIdent, whereSQL)
 
 	rows, firstErr := pool.Query(ctx(), query, hints)
@@ -325,8 +377,7 @@ func (s *Service) GetRows(
 		// quoting. If that fails too, report the ORIGINAL error: the retry's
 		// complaint is usually about the bare identifier and hides the real
 		// cause, which is normally a bad filter or a permission problem.
-		unquoted := fmt.Sprintf("SELECT * FROM %s %s %s LIMIT %d OFFSET %d",
-			table, whereSQL, orderSQL, limit, offset)
+		unquoted := dialect.BuildSelectPage(profile.Type, table, whereSQL, orderSQL, limit, offset)
 		unquotedCount := fmt.Sprintf("SELECT COUNT(*) AS total FROM %s %s", table, whereSQL)
 
 		r2, e2 := pool.Query(ctx(), unquoted, hints)
@@ -337,8 +388,7 @@ func (s *Service) GetRows(
 		case orderSQL != "":
 			// A stale sort column left over from another table is the other
 			// common cause, so drop the ORDER BY and try once more.
-			noSort := fmt.Sprintf("SELECT * FROM %s %s LIMIT %d OFFSET %d",
-				tableIdent, whereSQL, limit, offset)
+			noSort := dialect.BuildSelectPage(profile.Type, tableIdent, whereSQL, "", limit, offset)
 			r3, e3 := pool.Query(ctx(), noSort, hints)
 			c3, ce3 := pool.Query(ctx(), countQuery, nil)
 			if e3 != nil || ce3 != nil {
@@ -372,6 +422,8 @@ func (s *Service) quickSearchClause(pool *dbcore.Pool, db model.SupportedDB, tab
 			parts = append(parts, fmt.Sprintf("CAST(%s AS TEXT) ILIKE '%%%s%%'", ident, escaped))
 		case model.Mariadb:
 			parts = append(parts, fmt.Sprintf("CAST(%s AS CHAR) LIKE '%%%s%%'", ident, escaped))
+		case model.Mssql:
+			parts = append(parts, fmt.Sprintf("CAST(%s AS NVARCHAR(MAX)) LIKE '%%%s%%'", ident, escaped))
 		default:
 			parts = append(parts, fmt.Sprintf("CAST(%s AS TEXT) LIKE '%%%s%%'", ident, escaped))
 		}
@@ -398,6 +450,20 @@ func (s *Service) tableColumnNames(pool *dbcore.Pool, db model.SupportedDB, tabl
 			schema, name)
 	case model.Mariadb:
 		query = "SHOW COLUMNS FROM `" + strings.ReplaceAll(table, "`", "") + "`"
+	case model.Mssql:
+		schema, name := "dbo", table
+		if sc, n, found := strings.Cut(table, "."); found {
+			schema, name = sc, n
+		}
+		schema = strings.ReplaceAll(schema, "]", "")
+		schema = strings.ReplaceAll(schema, "[", "")
+		name = strings.ReplaceAll(name, "]", "")
+		name = strings.ReplaceAll(name, "[", "")
+		query = fmt.Sprintf(
+			"SELECT COLUMN_NAME AS name FROM INFORMATION_SCHEMA.COLUMNS "+
+				"WHERE (TABLE_SCHEMA = '%[1]s' OR LOWER(TABLE_SCHEMA) = LOWER('%[1]s')) "+
+				"AND (TABLE_NAME = '%[2]s' OR LOWER(TABLE_NAME) = LOWER('%[2]s')) ORDER BY ORDINAL_POSITION",
+			schema, name)
 	default:
 		query = `PRAGMA table_info("` + strings.ReplaceAll(table, `"`, "") + `")`
 	}

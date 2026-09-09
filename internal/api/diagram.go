@@ -194,6 +194,53 @@ func diagramQueries(db model.SupportedDB) (tables, columns, fks string) {
 	}
 	// MySQL/MariaDB. unnest has no equivalent, but KEY_COLUMN_USAGE already has
 	// one row per column of a composite key.
+	if db == model.Mssql {
+		return `
+            SELECT
+                CASE
+                    WHEN TABLE_SCHEMA = 'dbo' THEN TABLE_NAME
+                    ELSE (TABLE_SCHEMA + '.' + TABLE_NAME)
+                END AS name
+            FROM INFORMATION_SCHEMA.TABLES
+            WHERE TABLE_TYPE = 'BASE TABLE'
+            ORDER BY (CASE WHEN TABLE_SCHEMA = 'dbo' THEN 1 ELSE 0 END) DESC, TABLE_NAME ASC
+        `, `
+            SELECT
+                CASE
+                    WHEN c.TABLE_SCHEMA = 'dbo' THEN c.TABLE_NAME
+                    ELSE (c.TABLE_SCHEMA + '.' + c.TABLE_NAME)
+                END AS table_name,
+                c.COLUMN_NAME AS column_name,
+                c.DATA_TYPE AS data_type,
+                CASE WHEN pk.COLUMN_NAME IS NOT NULL THEN 1 ELSE 0 END AS is_primary_key
+            FROM INFORMATION_SCHEMA.COLUMNS c
+            LEFT JOIN (
+                SELECT kcu.TABLE_SCHEMA, kcu.TABLE_NAME, kcu.COLUMN_NAME
+                FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+                JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
+                  ON tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
+                  AND tc.TABLE_SCHEMA = kcu.TABLE_SCHEMA
+                WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
+            ) pk ON pk.TABLE_SCHEMA = c.TABLE_SCHEMA AND pk.TABLE_NAME = c.TABLE_NAME AND pk.COLUMN_NAME = c.COLUMN_NAME
+            ORDER BY c.TABLE_SCHEMA, c.TABLE_NAME, c.ORDINAL_POSITION
+        `, `
+            SELECT
+                CASE WHEN s.name = 'dbo' THEN t.name ELSE (s.name + '.' + t.name) END AS from_table,
+                c.name AS from_column,
+                CASE WHEN r_s.name = 'dbo' THEN r_t.name ELSE (r_s.name + '.' + r_t.name) END AS to_table,
+                r_c.name AS to_column
+            FROM sys.foreign_keys fk
+            JOIN sys.foreign_key_columns fkc ON fkc.constraint_object_id = fk.object_id
+            JOIN sys.tables t ON t.object_id = fk.parent_object_id
+            JOIN sys.schemas s ON s.schema_id = t.schema_id
+            JOIN sys.tables r_t ON r_t.object_id = fk.referenced_object_id
+            JOIN sys.schemas r_s ON r_s.schema_id = r_t.schema_id
+            JOIN sys.columns c ON c.object_id = fkc.parent_object_id AND c.column_id = fkc.parent_column_id
+            JOIN sys.columns r_c ON r_c.object_id = fkc.referenced_object_id AND r_c.column_id = fkc.referenced_column_id
+            ORDER BY fk.name, fkc.constraint_column_id
+        `
+	}
+
 	return `
             SELECT TABLE_NAME AS name
             FROM information_schema.TABLES

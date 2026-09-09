@@ -428,7 +428,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     const target = toDialect(activeProfile.type);
     // toDialect falls back to Postgres for anything it does not know, so an
     // unfamiliar hint must not be allowed to silence the warning.
-    const known = ["mysql", "mariadb", "postgres", "postgresql", "sqlite", "sqlite3"];
+    const known = ["mysql", "mariadb", "postgres", "postgresql", "sqlite", "sqlite3", "mssql", "sqlserver"];
     if (hints.some((h) => known.includes(h.trim().toLowerCase()) && toDialect(h) === target)) {
       return null;
     }

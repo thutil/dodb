@@ -27,6 +27,11 @@ func QuoteTable(db model.SupportedDB, table string) string {
 		return quoteQualified(table, `"`)
 	case model.Mariadb:
 		return quoteQualified(table, "`")
+	case model.Mssql:
+		if schema, name, found := strings.Cut(table, "."); found {
+			return "[" + strings.ReplaceAll(schema, "]", "]]") + "].[" + strings.ReplaceAll(name, "]", "]]") + "]"
+		}
+		return "[" + strings.ReplaceAll(table, "]", "]]") + "]"
 	default:
 		// SQLite has no schemas worth qualifying here, so a dot is part of the name.
 		return `"` + strings.ReplaceAll(table, `"`, "") + `"`
@@ -42,10 +47,14 @@ func quoteQualified(table, q string) string {
 
 // QuoteColumn quotes a column name.
 func QuoteColumn(db model.SupportedDB, col string) string {
-	if db == model.Mariadb {
+	switch db {
+	case model.Mariadb:
 		return "`" + strings.ReplaceAll(col, "`", "") + "`"
+	case model.Mssql:
+		return "[" + strings.ReplaceAll(col, "]", "]]") + "]"
+	default:
+		return `"` + strings.ReplaceAll(col, `"`, "") + `"`
 	}
-	return `"` + strings.ReplaceAll(col, `"`, "") + `"`
 }
 
 // EscapeLiteral escapes a string for a single-quoted SQL literal.
@@ -91,8 +100,8 @@ func FormatValue(db model.SupportedDB, v any) string {
 }
 
 func formatBool(db model.SupportedDB, b bool) string {
-	if db == model.Sqlite {
-		// SQLite has no boolean literal; it stores 1/0.
+	if db == model.Sqlite || db == model.Mssql {
+		// SQLite has no boolean literal; it stores 1/0. MSSQL uses BIT (1/0).
 		if b {
 			return "1"
 		}
@@ -102,6 +111,37 @@ func formatBool(db model.SupportedDB, b bool) string {
 		return "TRUE"
 	}
 	return "FALSE"
+}
+
+// BuildSelectPage returns a SELECT statement with pagination for the given dialect.
+func BuildSelectPage(db model.SupportedDB, tableIdent, whereSQL, orderSQL string, limit, offset uint32) string {
+	where := strings.TrimSpace(whereSQL)
+	if where != "" {
+		where = " " + where
+	}
+	order := strings.TrimSpace(orderSQL)
+
+	if db == model.Mssql {
+		if order == "" {
+			order = "ORDER BY (SELECT NULL)"
+		}
+		return fmt.Sprintf("SELECT * FROM %s%s %s OFFSET %d ROWS FETCH NEXT %d ROWS ONLY",
+			tableIdent, where, order, offset, limit)
+	}
+
+	if order != "" {
+		order = " " + order
+	}
+	return fmt.Sprintf("SELECT * FROM %s%s%s LIMIT %d OFFSET %d",
+		tableIdent, where, order, limit, offset)
+}
+
+// BuildProbeQuery returns a query that retrieves a single row to inspect columns/types.
+func BuildProbeQuery(db model.SupportedDB, table string) string {
+	if db == model.Mssql {
+		return "SELECT TOP 1 * FROM " + QuoteTable(db, table)
+	}
+	return "SELECT * FROM " + QuoteTable(db, table) + " LIMIT 1"
 }
 
 // Filter is one grid filter row.

@@ -16,6 +16,7 @@ const (
 	Sqlite   SupportedDB = "sqlite"
 	Mariadb  SupportedDB = "mariadb"
 	Postgres SupportedDB = "postgres"
+	Mssql    SupportedDB = "mssql"
 )
 
 // Valid reports whether the tag is one the backend can dispatch on. Unknown
@@ -24,7 +25,7 @@ const (
 // connecting to the wrong kind of server.
 func (d SupportedDB) Valid() bool {
 	switch d {
-	case Sqlite, Mariadb, Postgres:
+	case Sqlite, Mariadb, Postgres, Mssql:
 		return true
 	}
 	return false

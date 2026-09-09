@@ -178,7 +178,9 @@ export const DataGrid: React.FC<DataGridProps> = ({
       ? "mariadb"
       : activeProfile?.type === "sqlite"
         ? "sqlite"
-        : "postgres";
+        : activeProfile?.type === "mssql"
+          ? "mssql"
+          : "postgres";
 
   const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
 

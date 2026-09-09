@@ -126,9 +126,11 @@ export const Header: React.FC<HeaderProps> = ({
         ? "mariadb"
         : activeProfile?.type === "sqlite"
           ? "sqlite"
-          : "postgres";
+          : activeProfile?.type === "mssql"
+            ? "mssql"
+            : "postgres";
     const quoted = quoteTableIdent(tbl, dialect);
-    const sql = `SELECT * FROM ${quoted} LIMIT 100;`;
+    const sql = dialect === "mssql" ? `SELECT TOP 100 * FROM ${quoted};` : `SELECT * FROM ${quoted} LIMIT 100;`;
     if (onOpenInSql) {
       onOpenInSql(sql);
     } else {
