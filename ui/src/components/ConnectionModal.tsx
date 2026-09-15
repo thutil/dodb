@@ -747,11 +747,6 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
                     : "Connect to a database to continue"}
               </span>
             </div>
-            {activeProfile && (
-              <span className="active-conn-pill">
-                Active: {activeProfile.name}
-              </span>
-            )}
           </div>
           {dismissible && (
             <button className="window-close-btn" onClick={onClose} title="Close">
@@ -1572,18 +1567,6 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           color: var(--accent-rose, #f87171);
           font-weight: 500;
         }
-        .active-conn-pill {
-          display: inline-flex;
-          align-items: center;
-          gap: 5px;
-          background: rgba(16, 185, 129, 0.1);
-          border: 1px solid rgba(16, 185, 129, 0.3);
-          color: var(--accent-green);
-          font-size: 10px;
-          padding: 2px 7px;
-          border-radius: 5px;
-          font-weight: 600;
-        }
         .pulse-green-dot {
           width: 6px;
           height: 6px;
@@ -1947,20 +1930,20 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
         }
         .engine-segmented-control {
           display: grid;
-          grid-template-columns: repeat(3, 1fr);
+          grid-template-columns: repeat(2, 1fr);
           width: 100%;
           background: var(--bg-tertiary);
-          padding: 2px;
+          padding: 3px;
           border-radius: var(--radius-sm, 6px);
           border: 1px solid var(--border-light);
-          gap: 2px;
+          gap: 3px;
         }
         .engine-seg-btn {
           display: flex;
           align-items: center;
           justify-content: center;
-          gap: 6px;
-          padding: 5px 8px;
+          gap: 7px;
+          padding: 7px 10px;
           border: 1px solid transparent;
           background: transparent;
           color: var(--text-sub);
@@ -1972,6 +1955,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
         }
         .engine-seg-btn:hover {
           color: var(--text-main);
+          background: var(--bg-hover);
         }
         .engine-seg-btn.active {
           background: var(--bg-card);
