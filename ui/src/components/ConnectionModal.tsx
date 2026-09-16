@@ -1941,9 +1941,9 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
         .engine-seg-btn {
           display: flex;
           align-items: center;
-          justify-content: center;
-          gap: 7px;
-          padding: 7px 10px;
+          justify-content: flex-start;
+          gap: 8px;
+          padding: 7px 14px;
           border: 1px solid transparent;
           background: transparent;
           color: var(--text-sub);
@@ -1952,6 +1952,14 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           border-radius: var(--radius-xs, 4px);
           cursor: pointer;
           transition: all 0.12s ease;
+        }
+        .seg-icon {
+          flex-shrink: 0;
+        }
+        .seg-label {
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
         .engine-seg-btn:hover {
           color: var(--text-main);
