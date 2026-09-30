@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -12,6 +13,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/microsoft/go-mssqldb"
 	"github.com/thutil/dodb/internal/model"
 	"github.com/thutil/dodb/internal/orderedjson"
 	"github.com/thutil/dodb/internal/profilestore"
@@ -170,6 +172,8 @@ func resolveDatabase(profile model.ConnectionProfile, override string) string {
 		return "postgres"
 	case model.Mariadb:
 		return "mysql"
+	case model.Mssql:
+		return "master"
 	default:
 		return ""
 	}
@@ -275,6 +279,32 @@ func (s *State) openPool(ctx context.Context, profile model.ConnectionProfile, d
 		}
 		return &Pool{Kind: model.Mariadb, SQL: db, hints: newHintCache()}, nil
 
+	case model.Mssql:
+		port := profile.Port
+		if port == 0 {
+			port = 1433
+		}
+		q := url.Values{}
+		q.Set("database", dbName)
+		q.Set("trustservercertificate", "true")
+		u := &url.URL{
+			Scheme:   "sqlserver",
+			User:     url.UserPassword(profile.User, profile.Password),
+			Host:     fmt.Sprintf("%s:%d", strings.TrimSpace(profile.Host), port),
+			RawQuery: q.Encode(),
+		}
+		dsn := u.String()
+		db, err := sql.Open("sqlserver", dsn)
+		if err != nil {
+			return nil, fmt.Errorf("Failed to connect to SQL Server database '%s': %w", dbName, err)
+		}
+		tuneSQLPool(db, profile.KeepAlive)
+		if err := pingWithTimeout(ctx, db); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("Failed to connect to SQL Server database '%s': %w", dbName, err)
+		}
+		return &Pool{Kind: model.Mssql, SQL: db, hints: newHintCache()}, nil
+
 	default:
 		path := sqlitePath(profile, dbName)
 		// _enable_load_extension is what lets SpatiaLite be loaded later; the
@@ -371,6 +401,8 @@ func (p *Pool) Query(ctx context.Context, sql string, hints ColumnHints) ([]*ord
 		return queryPostgres(ctx, p.Postgres, sql)
 	case model.Mariadb:
 		return queryMySQL(p.SQL, sql, hints)
+	case model.Mssql:
+		return queryMSSQL(p.SQL, sql)
 	default:
 		return querySQLite(p.SQL, sql)
 	}

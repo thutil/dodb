@@ -1,4 +1,4 @@
-export type DBType = "mariadb" | "postgres" | "sqlite";
+export type DBType = "mariadb" | "postgres" | "sqlite" | "mssql";
 
 export interface ConnectionProfile {
   id: string;

@@ -248,9 +248,20 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
       setForm((prev) => ({
         ...prev,
         type,
-        name: prev.name && prev.name !== "Local Postgres" && prev.name !== "Local MariaDB" ? prev.name : "Local SQLite",
+        name: prev.name && prev.name !== "Local Postgres" && prev.name !== "Local MariaDB" && prev.name !== "Local MSSQL" ? prev.name : "Local SQLite",
         filePath: prev.filePath || "./data/database.sqlite",
         database: prev.filePath || "./data/database.sqlite",
+      }));
+    } else if (type === "mssql") {
+      const defaultPort = 1433;
+      setPortText(String(defaultPort));
+      setForm((prev) => ({
+        ...prev,
+        type,
+        port: defaultPort,
+        name: prev.name && prev.name !== "Local Postgres" && prev.name !== "Local MariaDB" && prev.name !== "Local SQLite" ? prev.name : "Local MSSQL",
+        user: "sa",
+        database: "master",
       }));
     } else {
       const defaultPort = type === "postgres" ? 5432 : 3306;
@@ -266,10 +277,11 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
   };
 
   const getCleanForm = (): Partial<ConnectionProfile> => {
-    const finalPort = portText ? parseInt(portText, 10) : (form.type === "postgres" ? 5432 : 3306);
+    const fallbackPort = form.type === "postgres" ? 5432 : form.type === "mssql" ? 1433 : 3306;
+    const finalPort = portText ? parseInt(portText, 10) : fallbackPort;
     const data: Partial<ConnectionProfile> = {
       ...form,
-      port: isNaN(finalPort) ? (form.type === "postgres" ? 5432 : 3306) : finalPort,
+      port: isNaN(finalPort) ? fallbackPort : finalPort,
       group: form.group ? form.group.trim() : "Default",
       keepAlive: form.keepAlive === true,
       // SQLite has no password to withhold, so the switch never applies to it.
@@ -735,11 +747,6 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
                     : "Connect to a database to continue"}
               </span>
             </div>
-            {activeProfile && (
-              <span className="active-conn-pill">
-                Active: {activeProfile.name}
-              </span>
-            )}
           </div>
           {dismissible && (
             <button className="window-close-btn" onClick={onClose} title="Close">
@@ -961,6 +968,14 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
                   >
                     <HardDrive size={13} className="seg-icon" />
                     <span className="seg-label">SQLite</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`engine-seg-btn ${form.type === "mssql" ? "active" : ""}`}
+                    onClick={() => handleTypeChange("mssql")}
+                  >
+                    <Server size={13} className="seg-icon" />
+                    <span className="seg-label">SQL Server (MSSQL)</span>
                   </button>
                 </div>
               </div>
@@ -1552,18 +1567,6 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           color: var(--accent-rose, #f87171);
           font-weight: 500;
         }
-        .active-conn-pill {
-          display: inline-flex;
-          align-items: center;
-          gap: 5px;
-          background: rgba(16, 185, 129, 0.1);
-          border: 1px solid rgba(16, 185, 129, 0.3);
-          color: var(--accent-green);
-          font-size: 10px;
-          padding: 2px 7px;
-          border-radius: 5px;
-          font-weight: 600;
-        }
         .pulse-green-dot {
           width: 6px;
           height: 6px;
@@ -1767,7 +1770,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           border: 1px solid var(--border-light);
           color: var(--text-muted);
         }
-        .postgres-avatar, .mariadb-avatar, .sqlite-avatar, .new-avatar {
+        .postgres-avatar, .mariadb-avatar, .sqlite-avatar, .mssql-avatar, .new-avatar {
           color: var(--text-sub);
         }
 
@@ -1927,20 +1930,20 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
         }
         .engine-segmented-control {
           display: grid;
-          grid-template-columns: repeat(3, 1fr);
+          grid-template-columns: repeat(2, 1fr);
           width: 100%;
           background: var(--bg-tertiary);
-          padding: 2px;
+          padding: 3px;
           border-radius: var(--radius-sm, 6px);
           border: 1px solid var(--border-light);
-          gap: 2px;
+          gap: 3px;
         }
         .engine-seg-btn {
           display: flex;
           align-items: center;
-          justify-content: center;
-          gap: 6px;
-          padding: 5px 8px;
+          justify-content: flex-start;
+          gap: 8px;
+          padding: 7px 14px;
           border: 1px solid transparent;
           background: transparent;
           color: var(--text-sub);
@@ -1950,8 +1953,17 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
           cursor: pointer;
           transition: all 0.12s ease;
         }
+        .seg-icon {
+          flex-shrink: 0;
+        }
+        .seg-label {
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
         .engine-seg-btn:hover {
           color: var(--text-main);
+          background: var(--bg-hover);
         }
         .engine-seg-btn.active {
           background: var(--bg-card);
