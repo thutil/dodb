@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useId, useCallback } from "react";
-import maplibregl from "maplibre-gl";
+import * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
   MapPin,
@@ -63,6 +63,9 @@ let isProtocolRegistered = false;
 function initTileCacheProtocol() {
   if (typeof window === "undefined" || isProtocolRegistered) return;
   try {
+    // MapLibre v6 cannot find its worker from inside a bundle, so point it at the
+    // copy the bundler emits. Without this, GeoJSON sources never render.
+    maplibregl.setWorkerUrl(new URL("maplibre-gl/dist/maplibre-gl-worker.mjs", import.meta.url).href);
     maplibregl.addProtocol("cached-tile", async (params, abortController) => {
       const rawUrl = params.url.replace(/^cached-tile:\/\//, "");
       try {

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
-import Editor from "@monaco-editor/react";
+import Editor from "./MonacoEditor";
 import {
   X,
   Maximize2,
