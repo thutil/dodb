@@ -22,13 +22,5 @@
   },
   "devDependencies": {
     "typescript": "^5.8.3"
-  },
-  "pnpm": {
-    "overrides": {
-      "dompurify": "^3.4.14"
-    }
-  },
-  "overrides": {
-    "dompurify": "^3.4.14"
   }
 }

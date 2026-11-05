@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useLayoutEffect, useMemo } from "react";
-import Editor from "@monaco-editor/react";
+import Editor from "./MonacoEditor";
 import {
   Table2,
   RefreshCw,
