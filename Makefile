@@ -1,7 +1,6 @@
 # dodb build entry points.
 #
-# The Go replacement for `tauri dev` / `tauri build`. Two things are worth
-# knowing before reading further:
+# Two things are worth knowing before reading further:
 #
 #   1. assets.go embeds ui/out at COMPILE time, so any target that produces a Go
 #      binary depends on the frontend being built first. That is why `build` and
@@ -125,7 +124,7 @@ golden: fixtures-up
 
 ## fmt: gofmt every Go file
 fmt:
-	gofmt -l -w $$(git ls-files '*.go' | grep -v '^src-tauri/')
+	gofmt -l -w $$(git ls-files '*.go')
 
 ## vet: go vet
 vet:

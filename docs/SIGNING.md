@@ -55,8 +55,9 @@ Notarization is only possible with a Developer ID certificate, so it comes with 
    | `APPLE_TEAM_ID` | the 10-character Team ID |
    | `APPLE_SIGNING_IDENTITY` | optional override, e.g. `Developer ID Application: Your Name (TEAMID)` — the workflow finds it in the certificate otherwise |
 
-5. **Tag a release.** The `Set up macOS code signing` step imports the certificate into a
-   throwaway keychain, resolves the identity, and exports the variables the Tauri bundler reads.
+5. **Tag a release.** The `Set up code signing` step imports the certificate into a
+   throwaway keychain, resolves the identity, and exports the variables
+   `scripts/build-macos.sh` reads.
    All three notarization secrets must be present or the build is signed but not notarized (the
    workflow says so in a warning).
 

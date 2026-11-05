@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # Builds dodb.app and dodb_<version>_universal.dmg.
 #
-# Replaces what tauri-apps/tauri-action did in one step. Everything here was
-# implicit under Tauri's bundler and has to be explicit now: the .app layout,
-# Info.plist, the universal lipo, and the DMG.
+# Wails builds only the binary, so everything else is spelled out here: the
+# .app layout, Info.plist, the universal lipo, and the DMG.
 #
 # Signing is opt-in through the same environment variables the existing
 # release.yml already exports, so an unsigned local build works and CI signs
@@ -64,9 +63,8 @@ lipo -archs "$APP/Contents/MacOS/dodb"
 echo "==> bundle"
 sed "s/{{VERSION}}/${VERSION}/g" build/darwin/Info.plist > "$APP/Contents/Info.plist"
 
-# The .icns is generated from assets/icon.png rather than checked in: Tauri's
-# bundler used to own the icon set, and keeping a second binary copy in the repo
-# only invites the two drifting apart.
+# The .icns is generated from assets/icon.png rather than checked in: keeping a
+# second binary copy in the repo only invites the two drifting apart.
 if [ -f build/darwin/icon.icns ]; then
     cp build/darwin/icon.icns "$APP/Contents/Resources/icon.icns"
 elif [ -f assets/icon.png ]; then
@@ -92,8 +90,7 @@ if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
         --entitlements build/darwin/entitlements.plist \
         --sign "$APPLE_SIGNING_IDENTITY" "$APP"
 else
-    # Ad-hoc, which is what the current Tauri releases already ship. Gatekeeper
-    # still refuses first launch; see docs/SIGNING.md.
+    # Ad-hoc. Gatekeeper still refuses first launch; see docs/SIGNING.md.
     echo "    APPLE_SIGNING_IDENTITY unset - signing ad-hoc"
     codesign --force --deep --options runtime \
         --entitlements build/darwin/entitlements.plist \

@@ -50,10 +50,8 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           node scripts/sync-version.js "$VERSION"
 
-      # This block is unchanged from the Tauri era on purpose: it is plain
-      # security(1) and codesign plumbing with nothing framework-specific in it.
-      # All it does is put an identity in the keychain and export the variables
-      # scripts/build-macos.sh reads.
+      # Plain security(1) and codesign plumbing: put an identity in the keychain
+      # and export the variables scripts/build-macos.sh reads.
       #
       # Signing stays off until APPLE_CERTIFICATE exists, and the Apple variables
       # are only exported when they do -- an empty APPLE_SIGNING_IDENTITY would
