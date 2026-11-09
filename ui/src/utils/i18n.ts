@@ -94,6 +94,7 @@ export const translations = {
     // Sidebar Explorer
     sidebarDatabase: "DATABASE",
     sidebarTables: "TABLES",
+    sidebarSchemas: "SCHEMAS",
     sidebarViews: "VIEWS",
     sidebarFilterTables: "Filter tables (⌘-click to multi-select)",
     sidebarCreateTable: "Create Table",
@@ -430,6 +431,7 @@ export const translations = {
     // Sidebar Explorer
     sidebarDatabase: "ฐานข้อมูล",
     sidebarTables: "ตารางข้อมูล",
+    sidebarSchemas: "สคีมา",
     sidebarViews: "วิว (Views)",
     sidebarFilterTables: "ค้นหาตาราง (⌘-คลิก เพื่อเลือกหลายตาราง)",
     sidebarCreateTable: "สร้างตารางใหม่",

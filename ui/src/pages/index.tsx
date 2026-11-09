@@ -178,6 +178,8 @@ export default function Home() {
   }, []);
   const [structureModalTable, setStructureModalTable] = useState<string | null>(null);
   const [isCreateTableOpen, setIsCreateTableOpen] = useState(false);
+  // Schema picked from a sidebar schema row; cleared whenever the modal closes.
+  const [createTableSchema, setCreateTableSchema] = useState<string | null>(null);
   const [isCreateDbOpen, setIsCreateDbOpen] = useState(false);
   const [editTableModalTable, setEditTableModalTable] = useState<string | null>(null);
   const [confirmDdlRequest, setConfirmDdlRequest] = useState<ConfirmDdlRequest | null>(null);
@@ -1462,7 +1464,10 @@ export default function Home() {
                 }
               }}
               onViewStructure={(tbl) => setStructureModalTable(tbl)}
-              onCreateTable={() => setIsCreateTableOpen(true)}
+              onCreateTable={(schema) => {
+                setCreateTableSchema(schema ?? null);
+                setIsCreateTableOpen(true);
+              }}
               onCreateDatabase={() => setIsCreateDbOpen(true)}
               onEditStructure={(tbl) => setEditTableModalTable(tbl)}
               onTruncateTable={(tbl) => handleRequestTruncate(tbl)}
@@ -1673,13 +1678,17 @@ export default function Home() {
 
         <CreateTableModal
           isOpen={isCreateTableOpen}
-          onClose={() => setIsCreateTableOpen(false)}
+          onClose={() => {
+            setIsCreateTableOpen(false);
+            setCreateTableSchema(null);
+          }}
           dbType={activeProfile?.type || "postgres"}
           activeDatabase={activeDatabase}
           availableTables={tables}
           onFetchColumns={handleFetchColumnsForTable}
           onApplyDdl={handleApplyDdl}
           onCreated={handleTableCreated}
+          initialName={createTableSchema ? `${createTableSchema}.` : ""}
         />
 
         <EditTableModal

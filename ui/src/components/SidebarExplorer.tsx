@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import {
   Database,
@@ -18,9 +18,10 @@ import {
   Upload,
   PanelLeftClose,
   PanelLeftOpen,
+  ChevronRight,
 } from "lucide-react";
 import { DBType } from "../types";
-import { quoteTableIdent, toDialect } from "../utils/ddlBuilder";
+import { bareTableName, quoteTableIdent, schemaOf, toDialect } from "../utils/ddlBuilder";
 import { Language, t } from "../utils/i18n";
 
 interface SidebarExplorerProps {
@@ -32,7 +33,8 @@ interface SidebarExplorerProps {
   onSelectTable: (table: string) => void;
   onViewStructure?: (table: string) => void;
   onOpenInSql?: (sql: string) => void;
-  onCreateTable?: () => void;
+  /** `schema` is set when creating from a non-default schema's row. */
+  onCreateTable?: (schema?: string) => void;
   onEditStructure?: (table: string) => void;
   onTruncateTable?: (table: string) => void;
   onDropTable?: (table: string) => void;
@@ -135,9 +137,80 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
   const dialect: DBType = toDialect(dbType);
   const quoteIdent = (name: string) => quoteTableIdent(name, dialect);
 
-  const filteredTables = tables.filter((table) =>
-    table.toLowerCase().includes(searchTerm.trim().toLowerCase())
-  );
+  // Tables arrive unqualified for the default schema and as "schema.table"
+  // otherwise — the same rule splitSchemaTable applies on the server.
+  const defaultSchema = dialect === "postgres" ? "public" : dialect === "mssql" ? "dbo" : null;
+  const schemaFor = (table: string) => schemaOf(table) ?? defaultSchema ?? "";
+
+  const schemaNames = useMemo(() => {
+    if (!defaultSchema) return [];
+    const names = new Set(tables.map((t) => schemaOf(t) ?? defaultSchema));
+    return Array.from(names).sort((a, b) =>
+      a === defaultSchema ? -1 : b === defaultSchema ? 1 : a.localeCompare(b)
+    );
+  }, [tables, defaultSchema]);
+  // Group only when there is something to group; a lone default schema stays flat.
+  const showGroups = schemaNames.length > 1;
+
+  // Per-database expand/collapse state; a schema with no entry uses the
+  // default (default schema open, the rest closed).
+  const schemaStateKey = `dodb_sidebar_schemas:${dbType ?? ""}:${activeDatabase}`;
+  const [schemaState, setSchemaState] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(schemaStateKey);
+      const parsed = raw ? JSON.parse(raw) : {};
+      setSchemaState(parsed && typeof parsed === "object" ? parsed : {});
+    } catch {
+      setSchemaState({});
+    }
+  }, [schemaStateKey]);
+
+  // Reveal the active table when it sits in a collapsed schema
+  // (e.g. opened from the command palette or a SQL tab).
+  useEffect(() => {
+    if (!activeTable || !defaultSchema) return;
+    const schema = schemaOf(activeTable) ?? defaultSchema;
+    setSchemaState((prev) =>
+      (prev[schema] ?? schema === defaultSchema) ? prev : { ...prev, [schema]: true }
+    );
+  }, [activeTable, defaultSchema]);
+
+  const toggleSchema = (schema: string) => {
+    setSchemaState((prev) => {
+      const expanded = prev[schema] ?? schema === defaultSchema;
+      const next = { ...prev, [schema]: !expanded };
+      try {
+        localStorage.setItem(schemaStateKey, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const query = searchTerm.trim().toLowerCase();
+  const filteredTables = tables.filter((table) => {
+    if (!query) return true;
+    // When grouped, let "public." match default-schema tables too.
+    const haystack = showGroups && !schemaOf(table) ? `${defaultSchema}.${table}` : table;
+    return haystack.toLowerCase().includes(query);
+  });
+
+  // While filtering, every schema with a match is shown open.
+  const isSchemaExpanded = (schema: string) =>
+    query !== "" || (schemaState[schema] ?? schema === defaultSchema);
+
+  const schemaGroups = showGroups
+    ? schemaNames
+        .map((schema) => ({ schema, tables: filteredTables.filter((t) => schemaFor(t) === schema) }))
+        .filter((g) => g.tables.length > 0)
+    : [];
+
+  // Tables in on-screen order; shift-range selection follows what is visible.
+  const orderedTables = showGroups ? schemaGroups.flatMap((g) => g.tables) : filteredTables;
+  const visibleTables = showGroups
+    ? schemaGroups.flatMap((g) => (isSchemaExpanded(g.schema) ? g.tables : []))
+    : filteredTables;
 
   const handleTableClick = (e: React.MouseEvent, table: string) => {
     if (e.metaKey || e.ctrlKey) {
@@ -155,13 +228,13 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
         return next;
       });
       setLastSelectedTable(table);
-    } else if (e.shiftKey && lastSelectedTable && filteredTables.includes(lastSelectedTable)) {
-      // Range selection with Shift
-      const startIdx = filteredTables.indexOf(lastSelectedTable);
-      const endIdx = filteredTables.indexOf(table);
+    } else if (e.shiftKey && lastSelectedTable && visibleTables.includes(lastSelectedTable)) {
+      // Range selection with Shift (skips tables hidden in collapsed schemas)
+      const startIdx = visibleTables.indexOf(lastSelectedTable);
+      const endIdx = visibleTables.indexOf(table);
       if (startIdx !== -1 && endIdx !== -1) {
         const [low, high] = startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
-        const range = filteredTables.slice(low, high + 1);
+        const range = visibleTables.slice(low, high + 1);
         setSelectedTables(new Set(range));
       }
     } else {
@@ -266,6 +339,9 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
     }
   };
 
+  // Grouped view, or a single unnamed group holding the flat list.
+  const tableGroups = showGroups ? schemaGroups : [{ schema: "", tables: filteredTables }];
+
   if (isCollapsed) {
     return (
       <aside className="sidebar collapsed">
@@ -318,7 +394,7 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
             <button
               type="button"
               className="collapsed-action-btn"
-              onClick={onCreateTable}
+              onClick={() => onCreateTable()}
               disabled={mounted ? !activeDatabase : true}
               data-tooltip={language === "th" ? "สร้างตารางใหม่ (Create Table)" : "Create Table"}
               data-tooltip-pos="right"
@@ -504,8 +580,8 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && filteredTables.length > 0) {
-                onSelectTable(filteredTables[0]);
+              if (e.key === "Enter" && orderedTables.length > 0) {
+                onSelectTable(orderedTables[0]);
               }
             }}
             autoCapitalize="none"
@@ -575,15 +651,18 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
       >
         <div className="group-header">
           <div className="group-label">
-            <Database size={12} />
-            <span>{t("sidebarTables", language)}</span>
+            {showGroups ? <Layers size={12} /> : <Database size={12} />}
+            <span>{t(showGroups ? "sidebarSchemas" : "sidebarTables", language)}</span>
           </div>
           <div className="group-header-right">
-            <span className="table-count-badge">{filteredTables.length}</span>
-            {onCreateTable && (
+            <span className="table-count-badge">
+              {showGroups ? schemaGroups.length : filteredTables.length}
+            </span>
+            {/* Grouped: each schema row has its own create button instead. */}
+            {onCreateTable && !showGroups && (
               <button
                 className="icon-action-btn"
-                onClick={onCreateTable}
+                onClick={() => onCreateTable()}
                 data-tooltip={t("sidebarCreateTable", language)}
                 data-tooltip-pos="bottom"
                 disabled={mounted ? !activeDatabase : true}
@@ -611,30 +690,74 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
           </div>
         ) : (
           <div className="table-tree" onScroll={() => setHoveredTable(null)}>
-            {filteredTables.map((table) => {
-              const isSelected = selectedTables.has(table);
-              const isActive = activeTable === table && selectedTables.size <= 1;
+            {/* Rows stay inline in this JSX tree so styled-jsx scopes their classes. */}
+            {tableGroups.map((group) => {
+              const expanded = !showGroups || isSchemaExpanded(group.schema);
+              const rows = expanded
+                ? group.tables.map((table) => {
+                    const label = showGroups ? bareTableName(table) : table;
+                    const isSelected = selectedTables.has(table);
+                    const isActive = activeTable === table && selectedTables.size <= 1;
+                    return (
+                      <div
+                        key={table}
+                        className={`tree-item ${isActive ? "active" : ""} ${isSelected ? "selected" : ""}`}
+                        onClick={(e) => handleTableClick(e, table)}
+                        onContextMenu={(e) => {
+                          setHoveredTable(null);
+                          openMenu(e, { kind: "table", table });
+                        }}
+                        onMouseEnter={(e) => {
+                          const target = e.currentTarget;
+                          const labelEl = target.querySelector(".tree-label") as HTMLElement | null;
+                          const isTruncated = labelEl ? labelEl.scrollWidth > labelEl.clientWidth + 1 : label.length > 20;
+                          const rect = target.getBoundingClientRect();
+                          setHoveredTable({ name: table, rect, isTruncated });
+                        }}
+                        onMouseLeave={() => setHoveredTable(null)}
+                        title={table}
+                      >
+                        <Table2 size={14} className={`tree-icon ${isActive || isSelected ? "active-icon" : ""}`} />
+                        <span className="tree-label">{label}</span>
+                      </div>
+                    );
+                  })
+                : null;
+
+              if (!showGroups) return <React.Fragment key="__flat">{rows}</React.Fragment>;
+
               return (
-                <div
-                  key={table}
-                  className={`tree-item ${isActive ? "active" : ""} ${isSelected ? "selected" : ""}`}
-                  onClick={(e) => handleTableClick(e, table)}
-                  onContextMenu={(e) => {
-                    setHoveredTable(null);
-                    openMenu(e, { kind: "table", table });
-                  }}
-                  onMouseEnter={(e) => {
-                    const target = e.currentTarget;
-                    const labelEl = target.querySelector(".tree-label") as HTMLElement | null;
-                    const isTruncated = labelEl ? labelEl.scrollWidth > labelEl.clientWidth + 1 : table.length > 20;
-                    const rect = target.getBoundingClientRect();
-                    setHoveredTable({ name: table, rect, isTruncated });
-                  }}
-                  onMouseLeave={() => setHoveredTable(null)}
-                  title={table}
-                >
-                  <Table2 size={14} className={`tree-icon ${isActive || isSelected ? "active-icon" : ""}`} />
-                  <span className="tree-label">{table}</span>
+                <div key={group.schema} className="schema-group">
+                  <div className="schema-header">
+                    <button
+                      type="button"
+                      className="schema-toggle"
+                      onClick={() => toggleSchema(group.schema)}
+                      disabled={query !== ""}
+                      aria-expanded={expanded}
+                      title={group.schema}
+                    >
+                      <ChevronRight size={12} className={`schema-chevron ${expanded ? "open" : ""}`} />
+                      <Layers size={12} className="schema-icon" />
+                      <span className="schema-name">{group.schema}</span>
+                      <span className="table-count-badge">{group.tables.length}</span>
+                    </button>
+                    {onCreateTable && (
+                      <button
+                        type="button"
+                        className="icon-action-btn"
+                        onClick={() =>
+                          onCreateTable(group.schema === defaultSchema ? undefined : group.schema)
+                        }
+                        data-tooltip={t("sidebarCreateTable", language)}
+                        data-tooltip-pos="bottom"
+                        disabled={!activeDatabase}
+                      >
+                        <Plus size={12} />
+                      </button>
+                    )}
+                  </div>
+                  {expanded && <div className="schema-tables">{rows}</div>}
                 </div>
               );
             })}
@@ -1171,6 +1294,77 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
           font-size: 11.5px;
           font-weight: 500;
           letter-spacing: -0.2px;
+        }
+
+        .schema-group {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+        .schema-header {
+          display: flex;
+          align-items: center;
+          gap: 2px;
+          border-radius: 5px;
+          transition: background 0.12s ease;
+        }
+        .schema-header:hover {
+          background: var(--bg-hover);
+        }
+        .schema-toggle {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          flex: 1;
+          min-width: 0;
+          padding: 5px 6px;
+          border: none;
+          border-radius: 5px;
+          background: transparent;
+          color: var(--text-sub);
+          font-size: 11px;
+          font-weight: 600;
+          text-align: left;
+          cursor: pointer;
+          transition: background 0.12s ease, color 0.12s ease;
+        }
+        .schema-header:hover .schema-toggle {
+          color: var(--text-main);
+        }
+        .schema-toggle:disabled {
+          cursor: default;
+        }
+        .schema-toggle .table-count-badge {
+          flex-shrink: 0;
+        }
+        .schema-header :global(.schema-chevron) {
+          flex-shrink: 0;
+          opacity: 0.7;
+          transition: transform 0.12s ease;
+        }
+        .schema-header :global(.schema-chevron.open) {
+          transform: rotate(90deg);
+        }
+        .schema-header :global(.schema-icon) {
+          flex-shrink: 0;
+          opacity: 0.7;
+        }
+        .schema-name {
+          flex: 1;
+          min-width: 0;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          font-family: var(--font-mono);
+          letter-spacing: -0.2px;
+        }
+        .schema-tables {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+          margin-left: 11px;
+          padding-left: 6px;
+          border-left: 1px solid var(--border-light);
         }
 
         :global(.sidebar-table-tooltip) {
