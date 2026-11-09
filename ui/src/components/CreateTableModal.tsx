@@ -16,6 +16,8 @@ interface CreateTableModalProps {
   onFetchColumns: (table: string) => Promise<string[]>;
   onApplyDdl: (statements: string[]) => Promise<DdlResult>;
   onCreated: (tableName: string) => void;
+  /** Prefilled table name, e.g. "sales." when creating inside a schema. */
+  initialName?: string;
 }
 
 export const CreateTableModal: React.FC<CreateTableModalProps> = ({
@@ -27,6 +29,7 @@ export const CreateTableModal: React.FC<CreateTableModalProps> = ({
   onFetchColumns,
   onApplyDdl,
   onCreated,
+  initialName = "",
 }) => {
   const [mounted, setMounted] = useState(false);
   const [draft, setDraft] = useState<TableDraft>(() => emptyDraft(dbType));
@@ -40,13 +43,13 @@ export const CreateTableModal: React.FC<CreateTableModalProps> = ({
   // Reset to a clean slate whenever the modal is opened.
   useEffect(() => {
     if (isOpen) {
-      setDraft(emptyDraft(dbType));
+      setDraft({ ...emptyDraft(dbType), name: initialName });
       setTab("columns");
       setStep("design");
       setFailure(null);
       setApplying(false);
     }
-  }, [isOpen, dbType]);
+  }, [isOpen, dbType, initialName]);
 
   const handleClose = useCallback(() => {
     if (applying) return;
