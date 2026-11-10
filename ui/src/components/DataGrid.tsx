@@ -146,6 +146,8 @@ interface DataGridProps {
   errorMessage?: string | null;
   onCreateTable?: () => void;
   language?: Language;
+  /** Views and materialized views: browse and copy only, no row edits. */
+  readOnly?: boolean;
 }
 
 export const DataGrid: React.FC<DataGridProps> = ({
@@ -172,6 +174,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
   errorMessage = null,
   onCreateTable,
   language = "en",
+  readOnly = false,
 }) => {
   const dialect: DBType =
     activeProfile?.type === "mariadb"
@@ -408,6 +411,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
   };
 
   const handleBatchDeleteSelected = () => {
+    if (readOnly) return;
     setDeletedRowKeys((prev) => {
       const next = new Set(prev);
       Array.from(selectedRowIndices).forEach((i) => {
@@ -742,6 +746,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
 
   // Handle Cell Double Click to start inline editing
   const startEditing = (pkKey: string, isNew: boolean, nIdx: number | undefined, colName: string, currentVal: unknown) => {
+    if (readOnly) return;
     setEditingCell({ pkKey, isNew, nIdx, colName, originalVal: currentVal });
     const colDef = columns.find((c) => c.name === colName);
     const isBool = isBooleanColumn(colDef, currentVal);
@@ -848,6 +853,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
 
   // Open Full Row Edit Modal
   const openRowModal = (rowIdx: number, row: TableRowData, isNew?: boolean) => {
+    if (readOnly) return;
     const pkKey = isNew ? `new_${rowIdx}` : getRowKey(row, rowIdx);
     const currentEdits = isNew ? {} : (editedCells[pkKey] || {});
     const merged = { ...row, ...currentEdits };
@@ -900,6 +906,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
 
   // Add new pending row
   const handleAddRow = () => {
+    if (readOnly) return;
     const blank: TableRowData = {};
     columns.forEach((c) => {
       if (c.autoIncrement || (c.primaryKey && c.type.toLowerCase().includes("int"))) {
@@ -917,6 +924,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
 
   // Request mark row for deletion (triggers confirmation modal)
   const handleRequestDeleteRow = (pkKey: string, rowIdx: number, rowData: TableRowData) => {
+    if (readOnly) return;
     if (deletedRowKeys.has(pkKey)) {
       // If already marked, unmark directly (restore)
       setDeletedRowKeys((prev) => {
@@ -944,6 +952,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
 
   // Direct toggle mark row for deletion
   const toggleDeleteRow = (pkKey: string) => {
+    if (readOnly) return;
     setDeletedRowKeys((prev) => {
       const next = new Set(prev);
       if (next.has(pkKey)) {
@@ -1342,14 +1351,16 @@ export const DataGrid: React.FC<DataGridProps> = ({
                 <span>{t("gridFilter", language)} {filters.length > 0 ? `(${filters.length})` : ""}</span>
               </button>
 
-              <button
-                className="btn btn-secondary add-row-btn"
-                onClick={handleAddRow}
-                data-tooltip="Add a new row draft to this table"
-              >
-                <Plus size={13} />
-                <span>{t("gridAddRow", language)}</span>
-              </button>
+              {!readOnly && (
+                <button
+                  className="btn btn-secondary add-row-btn"
+                  onClick={handleAddRow}
+                  data-tooltip="Add a new row draft to this table"
+                >
+                  <Plus size={13} />
+                  <span>{t("gridAddRow", language)}</span>
+                </button>
+              )}
 
               {/* Compact Export Dropdown */}
               <div className="export-dropdown-wrap" onClick={(e) => e.stopPropagation()}>
@@ -1988,16 +1999,18 @@ export const DataGrid: React.FC<DataGridProps> = ({
                       </td>
                       <td className="action-cell">
                         <div className="act-group">
-                          <button
-                            className="icon-edit-btn"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openRowModal(idx, row, false);
-                            }}
-                            title="Edit Entire Row Modal"
-                          >
-                            <Edit3 size={11} />
-                          </button>
+                          {!readOnly && (
+                            <button
+                              className="icon-edit-btn"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openRowModal(idx, row, false);
+                              }}
+                              title="Edit Entire Row Modal"
+                            >
+                              <Edit3 size={11} />
+                            </button>
+                          )}
                           <button
                             className="icon-edit-btn"
                             onClick={(e) => {
@@ -2008,16 +2021,18 @@ export const DataGrid: React.FC<DataGridProps> = ({
                           >
                             <FileText size={11} />
                           </button>
-                          <button
-                            className={`icon-del-btn ${isDeleted ? "active is-deleted" : ""}`}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleRequestDeleteRow(pkKey, idx, row);
-                            }}
-                            title={isDeleted ? "Restore Row" : "Mark Row for Delete"}
-                          >
-                            <Trash2 size={11} />
-                          </button>
+                          {!readOnly && (
+                            <button
+                              className={`icon-del-btn ${isDeleted ? "active is-deleted" : ""}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRequestDeleteRow(pkKey, idx, row);
+                              }}
+                              title={isDeleted ? "Restore Row" : "Mark Row for Delete"}
+                            >
+                              <Trash2 size={11} />
+                            </button>
+                          )}
                           {isDeleted && (
                             <button
                               className="icon-restore-btn"
@@ -2236,15 +2251,17 @@ export const DataGrid: React.FC<DataGridProps> = ({
               <FileCode size={12} />
               <span>{t("gridCopySql", language)}</span>
             </button>
-            <button
-              type="button"
-              className="btn btn-danger btn-sm"
-              onClick={handleBatchDeleteSelected}
-              title="Mark selected rows for deletion"
-            >
-              <Trash2 size={12} />
-              <span>{t("gridDeleteSelected", language, { count: selectedRowIndices.size })}</span>
-            </button>
+            {!readOnly && (
+              <button
+                type="button"
+                className="btn btn-danger btn-sm"
+                onClick={handleBatchDeleteSelected}
+                title="Mark selected rows for deletion"
+              >
+                <Trash2 size={12} />
+                <span>{t("gridDeleteSelected", language, { count: selectedRowIndices.size })}</span>
+              </button>
+            )}
             <button
               type="button"
               className="btn-icon-clear"
@@ -2812,17 +2829,21 @@ export const DataGrid: React.FC<DataGridProps> = ({
                 <FileCode size={13} />
                 <span>{t("gridCopySql", language)}</span>
               </button>
-              <div className="context-menu-separator" />
-              <button
-                className="context-menu-item danger"
-                onClick={() => {
-                  handleBatchDeleteSelected();
-                  setContextMenu(null);
-                }}
-              >
-                <Trash2 size={13} />
-                <span>{t("gridDeleteSelected", language, { count: selectedRowIndices.size })}</span>
-              </button>
+              {!readOnly && (
+                <>
+                  <div className="context-menu-separator" />
+                  <button
+                    className="context-menu-item danger"
+                    onClick={() => {
+                      handleBatchDeleteSelected();
+                      setContextMenu(null);
+                    }}
+                  >
+                    <Trash2 size={13} />
+                    <span>{t("gridDeleteSelected", language, { count: selectedRowIndices.size })}</span>
+                  </button>
+                </>
+              )}
               <div className="context-menu-separator" />
               <button
                 className="context-menu-item"
@@ -2851,16 +2872,18 @@ export const DataGrid: React.FC<DataGridProps> = ({
                 <Eye size={13} />
                 <span>{t("gridInspectDetails", language)}</span>
               </button>
-              <button
-                className="context-menu-item"
-                onClick={() => {
-                  openRowModal(contextMenu.rowIdx, contextMenu.row, false);
-                  setContextMenu(null);
-                }}
-              >
-                <Edit3 size={13} />
-                <span>{t("gridEditRecord", language)}</span>
-              </button>
+              {!readOnly && (
+                <button
+                  className="context-menu-item"
+                  onClick={() => {
+                    openRowModal(contextMenu.rowIdx, contextMenu.row, false);
+                    setContextMenu(null);
+                  }}
+                >
+                  <Edit3 size={13} />
+                  <span>{t("gridEditRecord", language)}</span>
+                </button>
+              )}
               {(() => {
                 const rowPoints = extractPointFromRow(contextMenu.row, columns, coordinatePairs);
                 const gCol = columns.find((c) => isGeometryColumn(c.type, c.name) && isGisData(contextMenu.row[c.name]));
@@ -2892,7 +2915,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                   </button>
                 );
               })()}
-              <button
+              {!readOnly && <button
                 className="context-menu-item"
                 onClick={() => {
                   const clone = { ...contextMenu.row };
@@ -2907,7 +2930,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
               >
                 <Plus size={13} />
                 <span>{t("gridDuplicateRow", language)}</span>
-              </button>
+              </button>}
               <div className="context-menu-separator" />
               <button
                 className="context-menu-item"
@@ -2934,17 +2957,21 @@ export const DataGrid: React.FC<DataGridProps> = ({
                 <FileCode size={13} />
                 <span>{t("gridCopyAsSql", language)}</span>
               </button>
-              <div className="context-menu-separator" />
-              <button
-                className={`context-menu-item ${deletedRowKeys.has(contextMenu.pkKey) ? "" : "danger"}`}
-                onClick={() => {
-                  toggleDeleteRow(contextMenu.pkKey);
-                  setContextMenu(null);
-                }}
-              >
-                {deletedRowKeys.has(contextMenu.pkKey) ? <RotateCcw size={13} /> : <Trash2 size={13} />}
-                <span>{deletedRowKeys.has(contextMenu.pkKey) ? t("gridRestoreRecord", language) : t("gridDeleteRecord", language)}</span>
-              </button>
+              {!readOnly && (
+                <>
+                  <div className="context-menu-separator" />
+                  <button
+                    className={`context-menu-item ${deletedRowKeys.has(contextMenu.pkKey) ? "" : "danger"}`}
+                    onClick={() => {
+                      toggleDeleteRow(contextMenu.pkKey);
+                      setContextMenu(null);
+                    }}
+                  >
+                    {deletedRowKeys.has(contextMenu.pkKey) ? <RotateCcw size={13} /> : <Trash2 size={13} />}
+                    <span>{deletedRowKeys.has(contextMenu.pkKey) ? t("gridRestoreRecord", language) : t("gridDeleteRecord", language)}</span>
+                  </button>
+                </>
+              )}
             </>
           )}
         </div>
@@ -3137,7 +3164,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                 </button>
               </div>
 
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              {!readOnly && <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                 <button
                   className={`btn btn-sm ${deletedRowKeys.has(inspectRowModal.pkKey) ? "btn-secondary" : "btn-danger"}`}
                   onClick={() => {
@@ -3159,7 +3186,7 @@ export const DataGrid: React.FC<DataGridProps> = ({
                   <Edit3 size={12} />
                   <span>Edit Record</span>
                 </button>
-              </div>
+              </div>}
             </div>
           </div>
         </div>

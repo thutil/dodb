@@ -78,8 +78,7 @@ func qualifiedNames(db model.SupportedDB, schemaCol, nameCol, from, where, defau
 
 const pgUserSchemas = "schemaname NOT IN ('pg_catalog', 'information_schema')"
 
-// GetTables lists user tables, views and materialized views. MariaDB/MySQL's
-// SHOW TABLES already includes views among the tables, so it reports none apart.
+// GetTables lists user tables, views and materialized views.
 func (s *Service) GetTables(id, database string) (TableList, error) {
 	profile, err := s.DB.ResolveProfile(id)
 	if err != nil {
@@ -94,7 +93,12 @@ func (s *Service) GetTables(id, database string) (TableList, error) {
 		viewsQ = qualifiedNames(profile.Type, "schemaname", "viewname", "pg_views", pgUserSchemas, "public")
 		matviewsQ = qualifiedNames(profile.Type, "schemaname", "matviewname", "pg_matviews", pgUserSchemas, "public")
 	case model.Mariadb:
-		tablesQ = "SHOW TABLES"
+		// Everything SHOW TABLES lists (base tables, sequences, system-versioned
+		// tables) except views, which get their own list.
+		tablesQ = `SELECT TABLE_NAME AS name FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE <> 'VIEW' ORDER BY TABLE_NAME`
+		viewsQ = `SELECT TABLE_NAME AS name FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'VIEW' ORDER BY TABLE_NAME`
 	case model.Mssql:
 		tablesQ = qualifiedNames(profile.Type, "TABLE_SCHEMA", "TABLE_NAME", "INFORMATION_SCHEMA.TABLES", "TABLE_TYPE = 'BASE TABLE'", "dbo")
 		viewsQ = qualifiedNames(profile.Type, "TABLE_SCHEMA", "TABLE_NAME", "INFORMATION_SCHEMA.TABLES", "TABLE_TYPE = 'VIEW'", "dbo")
@@ -128,6 +132,68 @@ func (s *Service) GetTables(id, database string) (TableList, error) {
 		return TableList{}, err
 	}
 	return out, nil
+}
+
+// ViewDefinition is the get_view_definition payload: a complete CREATE
+// statement for the view, ready to edit and re-run.
+type ViewDefinition struct {
+	SQL string `json:"sql"`
+}
+
+// GetViewDefinition reads a view's (or Postgres materialized view's) source.
+func (s *Service) GetViewDefinition(id, database, view string, materialized bool) (ViewDefinition, error) {
+	profile, err := s.DB.ResolveProfile(id)
+	if err != nil {
+		return ViewDefinition{}, err
+	}
+	pool, err := s.DB.GetPool(ctx(), profile, database)
+	if err != nil {
+		return ViewDefinition{}, err
+	}
+	db := profile.Type
+	quoted := dialect.QuoteTable(db, view)
+
+	var query string
+	switch db {
+	case model.Postgres:
+		query = fmt.Sprintf("SELECT pg_get_viewdef('%s'::regclass, true) AS def", dialect.EscapeLiteral(db, quoted))
+	case model.Mariadb:
+		query = "SHOW CREATE VIEW " + quoted
+	case model.Mssql:
+		query = fmt.Sprintf("SELECT OBJECT_DEFINITION(OBJECT_ID(N'%s')) AS def", dialect.EscapeLiteral(db, quoted))
+	default:
+		query = fmt.Sprintf("SELECT sql AS def FROM sqlite_master WHERE type = 'view' AND name = '%s'", dialect.EscapeLiteral(db, view))
+	}
+	rows, err := pool.Query(ctx(), query, nil)
+	if err != nil {
+		return ViewDefinition{}, err
+	}
+	if len(rows) == 0 {
+		return ViewDefinition{}, fmt.Errorf("View %s not found", view)
+	}
+
+	var def string
+	if db == model.Mariadb {
+		// SHOW CREATE VIEW: View, Create View, character_set_client, collation_connection.
+		v, _ := rows[0].Get("Create View")
+		def = asString(v)
+	} else {
+		v, _ := rows[0].Get("def")
+		def = asString(v)
+	}
+	if def == "" {
+		return ViewDefinition{}, fmt.Errorf("No definition is readable for %s", view)
+	}
+
+	if db == model.Postgres {
+		// pg_get_viewdef returns only the SELECT body.
+		head := "CREATE OR REPLACE VIEW " + quoted + " AS\n"
+		if materialized {
+			head = "CREATE MATERIALIZED VIEW " + quoted + " AS\n"
+		}
+		def = head + strings.TrimSpace(def)
+	}
+	return ViewDefinition{SQL: strings.TrimSpace(def)}, nil
 }
 
 // Column is one entry of the get_columns payload.
@@ -168,6 +234,17 @@ func (s *Service) GetColumns(id, database, table string) (ColumnList, error) {
 		columns = append(columns, normaliseColumn(profile.Type, row))
 	}
 
+	if len(columns) == 0 && profile.Type == model.Postgres {
+		// information_schema leaves out materialized views; pg_attribute has
+		// them, with their real types.
+		attrs, attrErr := pool.Query(ctx(), pgAttributeColumnsQuery(table), nil)
+		if attrErr == nil {
+			for _, row := range attrs {
+				columns = append(columns, normaliseColumn(profile.Type, row))
+			}
+		}
+	}
+
 	if len(columns) == 0 {
 		// The catalog said nothing: probe the table itself. A view over a
 		// foreign table, or a name whose casing the catalog query missed, still
@@ -192,6 +269,26 @@ func (s *Service) GetColumns(id, database, table string) (ColumnList, error) {
 		}
 	}
 	return ColumnList{Columns: columns}, nil
+}
+
+// pgAttributeColumnsQuery lists a relation's columns from pg_attribute, in the
+// shape normaliseColumn reads for Postgres. Unlike information_schema.columns it
+// covers materialized views.
+func pgAttributeColumnsQuery(table string) string {
+	rel := dialect.EscapeLiteral(model.Postgres, dialect.QuoteTable(model.Postgres, table))
+	return fmt.Sprintf(`
+            SELECT
+                a.attname::text AS name,
+                format_type(a.atttypid, a.atttypmod) AS type,
+                NOT a.attnotnull AS nullable,
+                NULL::text AS default_value,
+                false AS primary_key
+            FROM pg_attribute a
+            WHERE a.attrelid = to_regclass('%s')
+              AND a.attnum > 0
+              AND NOT a.attisdropped
+            ORDER BY a.attnum
+        `, rel)
 }
 
 func columnsQuery(db model.SupportedDB, table string) string {

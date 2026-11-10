@@ -44,6 +44,8 @@ interface SqlConsoleProps {
   activeDatabase: string;
   activeTable: string | null;
   tables?: string[];
+  /** Views and materialized views, suggested next to tables. */
+  views?: string[];
   columns?: ColumnInfo[];
   theme?: "dark" | "light";
   language?: Language;
@@ -116,11 +118,16 @@ const SQL_FUNCTIONS = [
 
 const schemaCache = new Map<string, DatabaseSchemaInfo>();
 
+const NO_VIEWS: string[] = [];
+// Column lookups for autocomplete are one request per view; stop somewhere sane.
+const MAX_VIEW_COLUMN_FETCHES = 100;
+
 export const SqlConsole: React.FC<SqlConsoleProps> = ({
   activeProfile,
   activeDatabase,
   activeTable,
   tables = [],
+  views = NO_VIEWS,
   columns = [],
   theme = "dark",
   language = "en",
@@ -494,6 +501,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
   const activeDatabaseRef = useRef(activeDatabase);
   const activeTableRef = useRef(activeTable);
   const tablesRef = useRef(tables);
+  const viewsRef = useRef(views);
   const columnsRef = useRef(columns);
   const schemaInfoRef = useRef(schemaInfo);
   const activeProfileRef = useRef(activeProfile);
@@ -503,6 +511,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
   activeDatabaseRef.current = activeDatabase;
   activeTableRef.current = activeTable;
   tablesRef.current = tables;
+  viewsRef.current = views;
   columnsRef.current = columns;
   schemaInfoRef.current = schemaInfo;
   activeProfileRef.current = activeProfile;
@@ -561,13 +570,42 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
           });
         }
 
+        const baseTables = tList.length > 0 ? tList : tables;
+        const known = new Set(baseTables);
         const info: DatabaseSchemaInfo = {
-          tables: tList.length > 0 ? tList : tables,
+          tables: [...baseTables, ...views.filter((v) => !known.has(v))],
           tableColumns: tMap,
           relations: rels,
         };
         schemaCache.set(cacheKey, info);
         setSchemaInfo(info);
+
+        // The schema diagram covers base tables only; fetch view columns separately.
+        const pending = views.filter((v) => !tMap.has(v.toLowerCase())).slice(0, MAX_VIEW_COLUMN_FETCHES);
+        if (pending.length === 0) return;
+        Promise.all(
+          pending.map((v) =>
+            apiClient
+              .getColumns(activeProfile.id, activeDatabase, v)
+              .then((res: any) => ({ v, cols: Array.isArray(res?.columns) ? res.columns : [] }))
+              .catch(() => ({ v, cols: [] }))
+          )
+        ).then((results) => {
+          results.forEach(({ v, cols }) => {
+            const mapped: ColumnInfo[] = cols.map((c: any) => ({
+              name: c.name,
+              type: c.type || "text",
+              nullable: !!c.nullable,
+              primaryKey: !!c.primaryKey,
+              defaultValue: c.default ?? null,
+              autoIncrement: !!c.autoIncrement,
+            }));
+            tMap.set(v.toLowerCase(), mapped);
+            const bareName = v.split(".").pop();
+            if (bareName && !tMap.has(bareName.toLowerCase())) tMap.set(bareName.toLowerCase(), mapped);
+          });
+          if (alive) setSchemaInfo({ ...info });
+        });
       })
       .catch((err) => {
         console.warn("Could not load schema diagram for SQL autocomplete:", err);
@@ -576,7 +614,7 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
     return () => {
       alive = false;
     };
-  }, [activeProfile?.id, activeDatabase, tables]);
+  }, [activeProfile?.id, activeDatabase, tables, views]);
 
   // Clean up Monaco completion providers on unmount
   useEffect(() => {
@@ -1321,7 +1359,8 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
         const currentSchema = schemaInfoRef.current;
         const currentTables = currentSchema.tables && currentSchema.tables.length > 0
           ? currentSchema.tables
-          : tablesRef.current;
+          : [...tablesRef.current, ...viewsRef.current];
+        const viewSet = new Set(viewsRef.current);
         const tableAliases = extractTableAliasesFromSql(fullSql);
         const context = getAutocompleteContext(lineUntilCursor);
 
@@ -1394,13 +1433,14 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
         if (context.type === "table") {
           const suggestions: any[] = [];
           currentTables.forEach((tbl) => {
+            const isView = viewSet.has(tbl);
             suggestions.push({
               label: {
                 label: tbl,
-                detail: " [Table]",
+                detail: isView ? " [View]" : " [Table]",
                 description: currentActiveDb,
               },
-              kind: monaco.languages.CompletionItemKind.Class,
+              kind: isView ? monaco.languages.CompletionItemKind.Interface : monaco.languages.CompletionItemKind.Class,
               insertText: tbl,
               range,
               sortText: "00_" + tbl,
@@ -1565,13 +1605,14 @@ export const SqlConsole: React.FC<SqlConsoleProps> = ({
 
         // 3. Tables from active database
         currentTables.forEach((tbl) => {
+          const isView = viewSet.has(tbl);
           suggestions.push({
             label: {
               label: tbl,
-              detail: " [Table]",
+              detail: isView ? " [View]" : " [Table]",
               description: currentActiveDb,
             },
-            kind: monaco.languages.CompletionItemKind.Class,
+            kind: isView ? monaco.languages.CompletionItemKind.Interface : monaco.languages.CompletionItemKind.Class,
             insertText: tbl,
             range,
             sortText: "03_" + tbl,

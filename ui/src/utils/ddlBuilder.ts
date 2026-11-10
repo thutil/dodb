@@ -494,6 +494,18 @@ export function buildDropTable(table: string, d: DBType, cascade = false, ifExis
   return base + ";";
 }
 
+/** DROP VIEW, or DROP MATERIALIZED VIEW (Postgres only). CASCADE is Postgres-only too. */
+export function buildDropView(view: string, d: DBType, materialized: boolean, cascade = false): string {
+  const kind = materialized ? "MATERIALIZED VIEW" : "VIEW";
+  const base = "DROP " + kind + " " + quoteTableIdent(view, d);
+  return base + (cascade && d === "postgres" ? " CASCADE;" : ";");
+}
+
+/** REFRESH MATERIALIZED VIEW; CONCURRENTLY needs a unique index on the view. */
+export function buildRefreshMatview(view: string, d: DBType, concurrently = false): string {
+  return "REFRESH MATERIALIZED VIEW " + (concurrently ? "CONCURRENTLY " : "") + quoteTableIdent(view, d) + ";";
+}
+
 export function buildTruncateTable(table: string, d: DBType, cascade = false): string {
   // SQLite has no TRUNCATE.
   if (d === "sqlite") return "DELETE FROM " + quoteTableIdent(table, d) + ";";

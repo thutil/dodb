@@ -21,6 +21,8 @@ import {
   ChevronRight,
   Eye,
   ScanEye,
+  FileCode,
+  RotateCw,
 } from "lucide-react";
 import { DBType } from "../types";
 import { bareTableName, quoteTableIdent, schemaOf, toDialect } from "../utils/ddlBuilder";
@@ -45,6 +47,10 @@ interface SidebarExplorerProps {
   onDropTable?: (table: string) => void;
   onTruncateTables?: (tables: string[]) => void;
   onDropTables?: (tables: string[]) => void;
+  onDropView?: (view: string, materialized: boolean) => void;
+  onRefreshMatview?: (view: string, concurrently: boolean) => void;
+  /** Open the view's CREATE statement in the SQL console. */
+  onOpenViewDefinition?: (view: string, materialized: boolean) => void;
   onImportIntoDatabase?: () => void;
   onImportIntoTable?: (table: string) => void;
   onCreateDatabase?: () => void;
@@ -85,6 +91,9 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
   onDropTable,
   onTruncateTables,
   onDropTables,
+  onDropView,
+  onRefreshMatview,
+  onOpenViewDefinition,
   onImportIntoDatabase,
   onImportIntoTable,
   onCreateDatabase,
@@ -1039,6 +1048,44 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
                 </button>
               )}
 
+              {onOpenViewDefinition && contextMenu.objectKind !== "table" && (
+                <button
+                  className="context-menu-item"
+                  onClick={() => {
+                    onOpenViewDefinition(contextMenu.table, contextMenu.objectKind === "matview");
+                    setContextMenu(null);
+                  }}
+                >
+                  <FileCode size={13} />
+                  <span>Open Definition in SQL</span>
+                </button>
+              )}
+
+              {onRefreshMatview && contextMenu.objectKind === "matview" && (
+                <>
+                  <button
+                    className="context-menu-item"
+                    onClick={() => {
+                      onRefreshMatview(contextMenu.table, false);
+                      setContextMenu(null);
+                    }}
+                  >
+                    <RotateCw size={13} />
+                    <span>Refresh Materialized View</span>
+                  </button>
+                  <button
+                    className="context-menu-item"
+                    onClick={() => {
+                      onRefreshMatview(contextMenu.table, true);
+                      setContextMenu(null);
+                    }}
+                  >
+                    <RotateCw size={13} />
+                    <span>Refresh Concurrently</span>
+                  </button>
+                </>
+              )}
+
               {onImportIntoTable && contextMenu.objectKind === "table" && (
                 <button
                   className="context-menu-item"
@@ -1100,6 +1147,22 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
                   <Trash2 size={13} />
                   <span>Drop Table</span>
                 </button>
+              )}
+
+              {onDropView && contextMenu.objectKind !== "table" && (
+                <>
+                  <div className="context-menu-divider" />
+                  <button
+                    className="context-menu-item danger"
+                    onClick={() => {
+                      onDropView(contextMenu.table, contextMenu.objectKind === "matview");
+                      setContextMenu(null);
+                    }}
+                  >
+                    <Trash2 size={13} />
+                    <span>{contextMenu.objectKind === "matview" ? "Drop Materialized View" : "Drop View"}</span>
+                  </button>
+                </>
               )}
             </>
           )}

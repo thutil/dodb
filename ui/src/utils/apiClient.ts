@@ -110,6 +110,9 @@ export const apiClient = {
   getTables: async (id: string, database: string) => {
     return await invoke("get_tables", { id, database });
   },
+  getViewDefinition: async (id: string, database: string, view: string, materialized: boolean) => {
+    return await invoke("get_view_definition", { id, database, view, materialized });
+  },
   getColumns: async (id: string, database: string, table: string) => {
     return await invoke("get_columns", { id, database, table });
   },

@@ -121,6 +121,18 @@ func (h *Handler) buildRoutes() map[string]func(json.RawMessage) (any, error) {
 			}
 			return s.GetTables(a.ID, a.Database)
 		},
+		"get_view_definition": func(raw json.RawMessage) (any, error) {
+			a, err := decode[struct {
+				ID           string `json:"id"`
+				Database     string `json:"database"`
+				View         string `json:"view"`
+				Materialized bool   `json:"materialized"`
+			}](raw)
+			if err != nil {
+				return nil, err
+			}
+			return s.GetViewDefinition(a.ID, a.Database, a.View, a.Materialized)
+		},
 		"get_columns": func(raw json.RawMessage) (any, error) {
 			a, err := decode[struct {
 				ID       string `json:"id"`
