@@ -49,58 +49,85 @@ func (s *Service) GetDatabases(id string) ([]string, error) {
 	return firstColumnStrings(rows), nil
 }
 
-// TableList is the get_tables payload.
+// TableList is the get_tables payload. Views and materialized views follow
+// the same naming as Tables: unqualified in the default schema, "schema.name"
+// elsewhere.
 type TableList struct {
-	Tables []string `json:"tables"`
+	Tables   []string `json:"tables"`
+	Views    []string `json:"views"`
+	Matviews []string `json:"matviews"`
 }
 
-// GetTables lists user tables, Postgres names qualified when outside public.
+// qualifiedNames builds the listing query for one catalog relation: names in
+// defaultSchema stay bare, the rest are schema-qualified, default schema first.
+func qualifiedNames(db model.SupportedDB, schemaCol, nameCol, from, where, defaultSchema string) string {
+	concat := "(" + schemaCol + " || '.' || " + nameCol + ")::text"
+	bare := nameCol + "::text"
+	if db == model.Mssql {
+		concat = "(" + schemaCol + " + '.' + " + nameCol + ")"
+		bare = nameCol
+	}
+	return fmt.Sprintf(`
+            SELECT
+                CASE WHEN %[1]s = '%[2]s' THEN %[3]s ELSE %[4]s END AS name
+            FROM %[5]s
+            WHERE %[6]s
+            ORDER BY (CASE WHEN %[1]s = '%[2]s' THEN 1 ELSE 0 END) DESC, %[7]s ASC
+        `, schemaCol, defaultSchema, bare, concat, from, where, nameCol)
+}
+
+const pgUserSchemas = "schemaname NOT IN ('pg_catalog', 'information_schema')"
+
+// GetTables lists user tables, views and materialized views. MariaDB/MySQL's
+// SHOW TABLES already includes views among the tables, so it reports none apart.
 func (s *Service) GetTables(id, database string) (TableList, error) {
 	profile, err := s.DB.ResolveProfile(id)
 	if err != nil {
 		return TableList{}, err
 	}
-	var query string
+	var tablesQ, viewsQ, matviewsQ string
 	switch profile.Type {
 	case model.Postgres:
 		// public first and unqualified, everything else schema-qualified, which
 		// is the naming the rest of the app then quotes and splits on.
-		query = `
-            SELECT
-                CASE
-                    WHEN schemaname = 'public' THEN tablename::text
-                    ELSE (schemaname || '.' || tablename)::text
-                END AS name
-            FROM pg_tables
-            WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
-            ORDER BY (schemaname = 'public') DESC, tablename ASC
-        `
+		tablesQ = qualifiedNames(profile.Type, "schemaname", "tablename", "pg_tables", pgUserSchemas, "public")
+		viewsQ = qualifiedNames(profile.Type, "schemaname", "viewname", "pg_views", pgUserSchemas, "public")
+		matviewsQ = qualifiedNames(profile.Type, "schemaname", "matviewname", "pg_matviews", pgUserSchemas, "public")
 	case model.Mariadb:
-		query = "SHOW TABLES"
+		tablesQ = "SHOW TABLES"
 	case model.Mssql:
-		query = `
-            SELECT
-                CASE
-                    WHEN TABLE_SCHEMA = 'dbo' THEN TABLE_NAME
-                    ELSE (TABLE_SCHEMA + '.' + TABLE_NAME)
-                END AS name
-            FROM INFORMATION_SCHEMA.TABLES
-            WHERE TABLE_TYPE = 'BASE TABLE'
-            ORDER BY (CASE WHEN TABLE_SCHEMA = 'dbo' THEN 1 ELSE 0 END) DESC, TABLE_NAME ASC
-        `
+		tablesQ = qualifiedNames(profile.Type, "TABLE_SCHEMA", "TABLE_NAME", "INFORMATION_SCHEMA.TABLES", "TABLE_TYPE = 'BASE TABLE'", "dbo")
+		viewsQ = qualifiedNames(profile.Type, "TABLE_SCHEMA", "TABLE_NAME", "INFORMATION_SCHEMA.TABLES", "TABLE_TYPE = 'VIEW'", "dbo")
 	default:
-		query = "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+		tablesQ = "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+		viewsQ = "SELECT name FROM sqlite_master WHERE type='view' ORDER BY name"
 	}
 
 	pool, err := s.DB.GetPool(ctx(), profile, database)
 	if err != nil {
 		return TableList{}, err
 	}
-	rows, err := pool.Query(ctx(), query, nil)
-	if err != nil {
+	list := func(query string) ([]string, error) {
+		if query == "" {
+			return []string{}, nil
+		}
+		rows, err := pool.Query(ctx(), query, nil)
+		if err != nil {
+			return nil, err
+		}
+		return firstColumnStrings(rows), nil
+	}
+	out := TableList{}
+	if out.Tables, err = list(tablesQ); err != nil {
 		return TableList{}, err
 	}
-	return TableList{Tables: firstColumnStrings(rows)}, nil
+	if out.Views, err = list(viewsQ); err != nil {
+		return TableList{}, err
+	}
+	if out.Matviews, err = list(matviewsQ); err != nil {
+		return TableList{}, err
+	}
+	return out, nil
 }
 
 // Column is one entry of the get_columns payload.

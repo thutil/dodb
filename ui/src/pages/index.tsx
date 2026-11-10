@@ -75,6 +75,9 @@ const LAST_PROFILE_KEY = "dodb_last_active_profile";
 const LAST_DATABASE_KEY = "dodb_last_active_database";
 const RECONNECT_DELAYS_MS = [1000, 2000, 5000, 10000];
 
+type ViewLists = { views: string[]; matviews: string[] };
+const NO_VIEWS: ViewLists = { views: [], matviews: [] };
+
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:5820/api";
 
 
@@ -190,6 +193,8 @@ export default function Home() {
   const [databases, setDatabases] = useState<string[]>([]);
   const [activeDatabase, setActiveDatabase] = useState<string>("");
   const [tables, setTables] = useState<string[]>([]);
+  // Views and materialized views, named like `tables`; shown in the sidebar only.
+  const [viewLists, setViewLists] = useState<ViewLists>(NO_VIEWS);
   const [activeTable, setActiveTable] = useState<string | null>(null);
   const [loadingTables, setLoadingTables] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
@@ -538,6 +543,7 @@ export default function Home() {
     setActiveDatabase("");
     setDatabases([]);
     setTables([]);
+    setViewLists(NO_VIEWS);
     setActiveTable(null);
     setColumns([]);
     setRows([]);
@@ -621,6 +627,7 @@ export default function Home() {
     if (!activeProfile || !activeDatabase) return;
     setLoadingTables(true);
     setTables([]);
+    setViewLists(NO_VIEWS);
     setActiveTable(null);
     setRows([]);
     setColumns([]);
@@ -628,16 +635,20 @@ export default function Home() {
     try {
       const data: any = await apiClient.getTables(activeProfile.id, activeDatabase);
       const newTables: string[] = data.tables || [];
+      const newViews: ViewLists = { views: data.views || [], matviews: data.matviews || [] };
       setTables(newTables);
-      if (newTables.length > 0) {
+      setViewLists(newViews);
+      // A view can be the active object too, so keep it across refreshes.
+      const openable = [...newTables, ...newViews.views, ...newViews.matviews];
+      if (openable.length > 0) {
         let savedTable: string | null = null;
         try {
           savedTable = sessionStorage.getItem("dodb_last_active_table");
         } catch {}
         setActiveTable((curr) => {
-          if (curr && newTables.includes(curr)) return curr;
-          if (savedTable && newTables.includes(savedTable)) return savedTable;
-          return newTables[0];
+          if (curr && openable.includes(curr)) return curr;
+          if (savedTable && openable.includes(savedTable)) return savedTable;
+          return openable[0];
         });
       } else {
         setActiveTable(null);
@@ -913,6 +924,7 @@ export default function Home() {
     setActiveDatabase("");
     setDatabases([]);
     setTables([]);
+    setViewLists(NO_VIEWS);
     setActiveTable(null);
     setColumns([]);
     setRows([]);
@@ -1433,6 +1445,8 @@ export default function Home() {
                 }
               }}
               tables={tables}
+              views={viewLists.views}
+              matviews={viewLists.matviews}
               activeTable={activeTable}
               onSelectTable={(tbl) => {
                 if (activeView === "sql") {
