@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import Head from "next/head";
 import { Header } from "../components/Header";
 import { SidebarExplorer } from "../components/SidebarExplorer";
@@ -63,7 +63,14 @@ import { Language, t } from "../utils/i18n";
 import { AlertCircle, X, CheckCircle2, Download, Upload, XCircle } from "lucide-react";
 import { ConnectionProfile, ColumnInfo, TableRowData, QueryExecutionResult, ColumnFilter, DBType } from "../types";
 import { DdlResult } from "../components/tableDesign/draft";
-import { quoteTableIdent, buildDropTable, buildTruncateTable, toDialect } from "../utils/ddlBuilder";
+import {
+  quoteTableIdent,
+  buildDropTable,
+  buildDropView,
+  buildRefreshMatview,
+  buildTruncateTable,
+  toDialect,
+} from "../utils/ddlBuilder";
 import { apiClient } from "../utils/apiClient";
 import { auditLogger } from "../utils/auditLogger";
 import { dumpManager, DumpProgress } from "../utils/dumpManager";
@@ -74,6 +81,9 @@ const SESSION_ID_PREFIX = "session-";
 const LAST_PROFILE_KEY = "dodb_last_active_profile";
 const LAST_DATABASE_KEY = "dodb_last_active_database";
 const RECONNECT_DELAYS_MS = [1000, 2000, 5000, 10000];
+
+type ViewLists = { views: string[]; matviews: string[] };
+const NO_VIEWS: ViewLists = { views: [], matviews: [] };
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:5820/api";
 
@@ -190,7 +200,12 @@ export default function Home() {
   const [databases, setDatabases] = useState<string[]>([]);
   const [activeDatabase, setActiveDatabase] = useState<string>("");
   const [tables, setTables] = useState<string[]>([]);
+  // Views and materialized views, named like `tables`; shown in the sidebar only.
+  const [viewLists, setViewLists] = useState<ViewLists>(NO_VIEWS);
   const [activeTable, setActiveTable] = useState<string | null>(null);
+  const allViews = useMemo(() => [...viewLists.views, ...viewLists.matviews], [viewLists]);
+  // Views open read-only in the grid: their rows are not ours to edit.
+  const activeIsView = !!activeTable && allViews.includes(activeTable);
   const [loadingTables, setLoadingTables] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [columns, setColumns] = useState<ColumnInfo[]>([]);
@@ -538,6 +553,7 @@ export default function Home() {
     setActiveDatabase("");
     setDatabases([]);
     setTables([]);
+    setViewLists(NO_VIEWS);
     setActiveTable(null);
     setColumns([]);
     setRows([]);
@@ -621,6 +637,7 @@ export default function Home() {
     if (!activeProfile || !activeDatabase) return;
     setLoadingTables(true);
     setTables([]);
+    setViewLists(NO_VIEWS);
     setActiveTable(null);
     setRows([]);
     setColumns([]);
@@ -628,16 +645,20 @@ export default function Home() {
     try {
       const data: any = await apiClient.getTables(activeProfile.id, activeDatabase);
       const newTables: string[] = data.tables || [];
+      const newViews: ViewLists = { views: data.views || [], matviews: data.matviews || [] };
       setTables(newTables);
-      if (newTables.length > 0) {
+      setViewLists(newViews);
+      // A view can be the active object too, so keep it across refreshes.
+      const openable = [...newTables, ...newViews.views, ...newViews.matviews];
+      if (openable.length > 0) {
         let savedTable: string | null = null;
         try {
           savedTable = sessionStorage.getItem("dodb_last_active_table");
         } catch {}
         setActiveTable((curr) => {
-          if (curr && newTables.includes(curr)) return curr;
-          if (savedTable && newTables.includes(savedTable)) return savedTable;
-          return newTables[0];
+          if (curr && openable.includes(curr)) return curr;
+          if (savedTable && openable.includes(savedTable)) return savedTable;
+          return openable[0];
         });
       } else {
         setActiveTable(null);
@@ -913,6 +934,7 @@ export default function Home() {
     setActiveDatabase("");
     setDatabases([]);
     setTables([]);
+    setViewLists(NO_VIEWS);
     setActiveTable(null);
     setColumns([]);
     setRows([]);
@@ -1264,6 +1286,45 @@ export default function Home() {
     });
   };
 
+  const handleRequestDropView = (view: string, materialized: boolean) => {
+    const dialect = toDialect(activeProfile?.type);
+    const label = materialized ? "Materialized View" : "View";
+    setConfirmDdlRequest({
+      title: `Drop ${label} "${view}"`,
+      description: `Are you sure you want to permanently DROP ${label.toLowerCase()} "${view}"? Objects that depend on it need CASCADE. This action cannot be undone.`,
+      statements: [buildDropView(view, dialect, materialized, false)],
+      cascadeStatements: [buildDropView(view, dialect, materialized, true)],
+      allowCascade: dialect === "postgres",
+      confirmLabel: `Drop ${label}`,
+      typeToConfirm: view,
+    });
+  };
+
+  const handleRequestRefreshMatview = (view: string, concurrently: boolean) => {
+    const dialect = toDialect(activeProfile?.type);
+    setConfirmDdlRequest({
+      title: `Refresh Materialized View "${view}"`,
+      description: concurrently
+        ? `Re-run the query behind "${view}" without blocking readers. This needs a unique index on the view.`
+        : `Re-run the query behind "${view}". Reads of the view block until the refresh finishes.`,
+      statements: [buildRefreshMatview(view, dialect, concurrently)],
+      allowCascade: false,
+      confirmLabel: concurrently ? "Refresh Concurrently" : "Refresh",
+    });
+  };
+
+  const handleOpenViewDefinition = async (view: string, materialized: boolean) => {
+    if (!activeProfile || !activeDatabase) return;
+    try {
+      const res: any = await apiClient.getViewDefinition(activeProfile.id, activeDatabase, view, materialized);
+      setSharedSql(res?.sql ?? "");
+      setActiveView("sql");
+    } catch (err) {
+      const msg = typeof err === "string" ? err : (err as Error)?.message || String(err);
+      showToast({ type: "error", title: `Could not read the definition of ${view}`, sub: msg });
+    }
+  };
+
   const handleRequestTruncateMultiple = (tbls: string[]) => {
     if (tbls.length === 0) return;
     if (tbls.length === 1) {
@@ -1323,8 +1384,9 @@ export default function Home() {
         }
         showToast({
           type: "success",
+          // "Drop Table "x"" -> "Table "x" dropped successfully"; same for views.
           title: req.typeToConfirm && req.typeToConfirm !== "DROP"
-            ? `Table "${req.typeToConfirm}" dropped successfully`
+            ? `${req.title.replace(/^Drop /, "")} dropped successfully`
             : `${req.title} completed`,
           sub: `${req.statements.length} DDL statement(s) executed`,
         });
@@ -1433,6 +1495,8 @@ export default function Home() {
                 }
               }}
               tables={tables}
+              views={viewLists.views}
+              matviews={viewLists.matviews}
               activeTable={activeTable}
               onSelectTable={(tbl) => {
                 if (activeView === "sql") {
@@ -1474,6 +1538,9 @@ export default function Home() {
               onDropTable={(tbl) => handleRequestDrop(tbl)}
               onTruncateTables={(tbls) => handleRequestTruncateMultiple(tbls)}
               onDropTables={(tbls) => handleRequestDropMultiple(tbls)}
+              onDropView={handleRequestDropView}
+              onRefreshMatview={handleRequestRefreshMatview}
+              onOpenViewDefinition={handleOpenViewDefinition}
               onImportIntoDatabase={() => setImportTarget({ table: null })}
               onImportIntoTable={(tbl) => setImportTarget({ table: tbl })}
               onOpenInSql={(sql) => {
@@ -1526,6 +1593,7 @@ export default function Home() {
                     activeDatabase={activeDatabase}
                     activeTable={activeTable}
                     tables={tables}
+                    views={allViews}
                     columns={columns}
                     theme={theme}
                     language={language}
@@ -1590,6 +1658,7 @@ export default function Home() {
                   errorMessage={tableError}
                   onCreateTable={() => setIsCreateTableOpen(true)}
                   language={language}
+                  readOnly={activeIsView}
                 />
               ) : activeView === "sql" || activeView === "visual-query" ? null : activeView === "diagram" ? (
                 <SchemaDiagram

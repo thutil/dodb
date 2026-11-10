@@ -19,6 +19,10 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   ChevronRight,
+  Eye,
+  ScanEye,
+  FileCode,
+  RotateCw,
 } from "lucide-react";
 import { DBType } from "../types";
 import { bareTableName, quoteTableIdent, schemaOf, toDialect } from "../utils/ddlBuilder";
@@ -29,6 +33,9 @@ interface SidebarExplorerProps {
   activeDatabase: string;
   onSelectDatabase: (db: string) => void;
   tables: string[];
+  /** Views and materialized views, named like `tables`. Open read-only. */
+  views?: string[];
+  matviews?: string[];
   activeTable: string | null;
   onSelectTable: (table: string) => void;
   onViewStructure?: (table: string) => void;
@@ -40,6 +47,10 @@ interface SidebarExplorerProps {
   onDropTable?: (table: string) => void;
   onTruncateTables?: (tables: string[]) => void;
   onDropTables?: (tables: string[]) => void;
+  onDropView?: (view: string, materialized: boolean) => void;
+  onRefreshMatview?: (view: string, concurrently: boolean) => void;
+  /** Open the view's CREATE statement in the SQL console. */
+  onOpenViewDefinition?: (view: string, materialized: boolean) => void;
   onImportIntoDatabase?: () => void;
   onImportIntoTable?: (table: string) => void;
   onCreateDatabase?: () => void;
@@ -50,17 +61,26 @@ interface SidebarExplorerProps {
   language?: Language;
 }
 
-/** Right-click target: a specific table, multiple tables, or empty space. */
+type ObjectKind = "table" | "view" | "matview";
+
+/** Right-click target: a specific table or view, multiple tables, or empty space. */
 type MenuTarget =
-  | { kind: "table"; x: number; y: number; table: string }
+  | { kind: "table"; x: number; y: number; table: string; objectKind: ObjectKind }
   | { kind: "multi_tables"; x: number; y: number; tables: string[] }
   | { kind: "blank"; x: number; y: number };
+
+const NO_NAMES: string[] = [];
+
+/** Collapse-state key for one kind of object inside a schema ("" when ungrouped). */
+const sectionKey = (schema: string, kind: ObjectKind) => `${schema}\u0000${kind}`;
 
 export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
   databases,
   activeDatabase,
   onSelectDatabase,
   tables,
+  views = NO_NAMES,
+  matviews = NO_NAMES,
   activeTable,
   onSelectTable,
   onViewStructure,
@@ -71,6 +91,9 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
   onDropTable,
   onTruncateTables,
   onDropTables,
+  onDropView,
+  onRefreshMatview,
+  onOpenViewDefinition,
   onImportIntoDatabase,
   onImportIntoTable,
   onCreateDatabase,
@@ -107,30 +130,39 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
     });
   };
 
-  // Prune selectedTables whenever the tables list changes (e.g., after drop or database switch)
+  const objectKinds = useMemo(() => {
+    const kinds = new Map<string, ObjectKind>();
+    tables.forEach((n) => kinds.set(n, "table"));
+    views.forEach((n) => kinds.set(n, "view"));
+    matviews.forEach((n) => kinds.set(n, "matview"));
+    return kinds;
+  }, [tables, views, matviews]);
+  const isTable = (name: string) => objectKinds.get(name) === "table";
+
+  // Prune selectedTables whenever the object list changes (e.g., after drop or database switch)
   useEffect(() => {
     setSelectedTables((prev) => {
       const valid = new Set<string>();
       prev.forEach((t) => {
-        if (tables.includes(t)) {
+        if (objectKinds.has(t)) {
           valid.add(t);
         }
       });
-      // If activeTable exists in tables and nothing else is valid, keep activeTable selected
-      if (valid.size === 0 && activeTable && tables.includes(activeTable)) {
+      // If activeTable exists and nothing else is valid, keep activeTable selected
+      if (valid.size === 0 && activeTable && objectKinds.has(activeTable)) {
         valid.add(activeTable);
       }
       return valid;
     });
-  }, [tables, activeTable]);
+  }, [objectKinds, activeTable]);
 
   // Synchronize activeTable with selectedTables if not multi-selecting
   useEffect(() => {
-    if (activeTable && selectedTables.size <= 1 && !selectedTables.has(activeTable) && tables.includes(activeTable)) {
+    if (activeTable && selectedTables.size <= 1 && !selectedTables.has(activeTable) && objectKinds.has(activeTable)) {
       setSelectedTables(new Set([activeTable]));
       setLastSelectedTable(activeTable);
     }
-  }, [activeTable, tables]);
+  }, [activeTable, objectKinds]);
 
   // Structure editing is unavailable on SQLite (its ALTER TABLE cannot express it).
   const isSqlite = dbType === "sqlite";
@@ -144,11 +176,11 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
 
   const schemaNames = useMemo(() => {
     if (!defaultSchema) return [];
-    const names = new Set(tables.map((t) => schemaOf(t) ?? defaultSchema));
+    const names = new Set([...objectKinds.keys()].map((t) => schemaOf(t) ?? defaultSchema));
     return Array.from(names).sort((a, b) =>
       a === defaultSchema ? -1 : b === defaultSchema ? 1 : a.localeCompare(b)
     );
-  }, [tables, defaultSchema]);
+  }, [objectKinds, defaultSchema]);
   // Group only when there is something to group; a lone default schema stays flat.
   const showGroups = schemaNames.length > 1;
 
@@ -170,17 +202,23 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
   // Reveal the active table when it sits in a collapsed schema
   // (e.g. opened from the command palette or a SQL tab).
   useEffect(() => {
-    if (!activeTable || !defaultSchema) return;
-    const schema = schemaOf(activeTable) ?? defaultSchema;
-    setSchemaState((prev) =>
-      (prev[schema] ?? schema === defaultSchema) ? prev : { ...prev, [schema]: true }
-    );
-  }, [activeTable, defaultSchema]);
-
-  const toggleSchema = (schema: string) => {
+    if (!activeTable) return;
+    const schema = defaultSchema ? (schemaOf(activeTable) ?? defaultSchema) : "";
+    const kind = objectKinds.get(activeTable);
     setSchemaState((prev) => {
-      const expanded = prev[schema] ?? schema === defaultSchema;
-      const next = { ...prev, [schema]: !expanded };
+      let next = prev;
+      if (defaultSchema && !(prev[schema] ?? schema === defaultSchema)) next = { ...next, [schema]: true };
+      if (kind && prev[sectionKey(schema, kind)] === false) next = { ...next, [sectionKey(schema, kind)]: true };
+      return next;
+    });
+  }, [activeTable, defaultSchema, objectKinds]);
+
+  const toggleSchema = (schema: string) => toggleOpen(schema, schema === defaultSchema);
+  const toggleSection = (schema: string, kind: ObjectKind) => toggleOpen(sectionKey(schema, kind), true);
+  const toggleOpen = (key: string, openByDefault: boolean) => {
+    setSchemaState((prev) => {
+      const expanded = prev[key] ?? openByDefault;
+      const next = { ...prev, [key]: !expanded };
       try {
         localStorage.setItem(schemaStateKey, JSON.stringify(next));
       } catch {}
@@ -189,34 +227,57 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
   };
 
   const query = searchTerm.trim().toLowerCase();
-  const filteredTables = tables.filter((table) => {
+  const matchesQuery = (name: string) => {
     if (!query) return true;
-    // When grouped, let "public." match default-schema tables too.
-    const haystack = showGroups && !schemaOf(table) ? `${defaultSchema}.${table}` : table;
+    // When grouped, let "public." match default-schema objects too.
+    const haystack = showGroups && !schemaOf(name) ? `${defaultSchema}.${name}` : name;
     return haystack.toLowerCase().includes(query);
-  });
+  };
+  const filteredTables = tables.filter(matchesQuery);
+  const filteredViews = views.filter(matchesQuery);
+  const filteredMatviews = matviews.filter(matchesQuery);
+  const hasAnyMatch = filteredTables.length + filteredViews.length + filteredMatviews.length > 0;
 
   // While filtering, every schema with a match is shown open.
   const isSchemaExpanded = (schema: string) =>
     query !== "" || (schemaState[schema] ?? schema === defaultSchema);
+  // A group holding only tables gets no section headers, so nothing to collapse.
+  const hasSectionHeaders = (g: { views: string[]; matviews: string[] }) =>
+    g.views.length + g.matviews.length > 0;
+  const isSectionExpanded = (g: { schema: string; views: string[]; matviews: string[] }, kind: ObjectKind) =>
+    !hasSectionHeaders(g) || query !== "" || (schemaState[sectionKey(g.schema, kind)] ?? true);
 
   const schemaGroups = showGroups
     ? schemaNames
-        .map((schema) => ({ schema, tables: filteredTables.filter((t) => schemaFor(t) === schema) }))
-        .filter((g) => g.tables.length > 0)
+        .map((schema) => {
+          const inSchema = (t: string) => schemaFor(t) === schema;
+          return {
+            schema,
+            tables: filteredTables.filter(inSchema),
+            views: filteredViews.filter(inSchema),
+            matviews: filteredMatviews.filter(inSchema),
+          };
+        })
+        .filter((g) => g.tables.length + g.views.length + g.matviews.length > 0)
     : [];
 
+  // Grouped view, or a single unnamed group holding the flat list.
+  const tableGroups = showGroups
+    ? schemaGroups
+    : [{ schema: "", tables: filteredTables, views: filteredViews, matviews: filteredMatviews }];
+
   // Tables in on-screen order; shift-range selection follows what is visible.
-  const orderedTables = showGroups ? schemaGroups.flatMap((g) => g.tables) : filteredTables;
-  const visibleTables = showGroups
-    ? schemaGroups.flatMap((g) => (isSchemaExpanded(g.schema) ? g.tables : []))
-    : filteredTables;
+  const orderedTables = tableGroups.flatMap((g) => g.tables);
+  const visibleTables = tableGroups.flatMap((g) =>
+    (!showGroups || isSchemaExpanded(g.schema)) && isSectionExpanded(g, "table") ? g.tables : []
+  );
 
   const handleTableClick = (e: React.MouseEvent, table: string) => {
     if (e.metaKey || e.ctrlKey) {
       // Toggle selection with Command / Ctrl
       setSelectedTables((prev) => {
-        const next = new Set(prev);
+        // Multi-selection feeds batch truncate/drop, so it holds tables only.
+        const next = new Set([...prev].filter(isTable));
         if (next.has(table)) {
           next.delete(table);
         } else {
@@ -245,7 +306,10 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
     }
   };
 
-  const openMenu = (e: React.MouseEvent, target: { kind: "table"; table: string } | { kind: "blank" }) => {
+  const openMenu = (
+    e: React.MouseEvent,
+    target: { kind: "table"; table: string; objectKind: ObjectKind } | { kind: "blank" }
+  ) => {
     e.preventDefault();
     e.stopPropagation();
 
@@ -338,9 +402,6 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
       onTruncateTable(tbls[0]);
     }
   };
-
-  // Grouped view, or a single unnamed group holding the flat list.
-  const tableGroups = showGroups ? schemaGroups : [{ schema: "", tables: filteredTables }];
 
   if (isCollapsed) {
     return (
@@ -684,7 +745,7 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
             <RefreshCw size={14} className="spin loading-icon" />
             <span>{t("loading", language)}</span>
           </div>
-        ) : filteredTables.length === 0 ? (
+        ) : !hasAnyMatch ? (
           <div className="sidebar-message">
             {searchTerm ? t("sidebarNoTables", language) : t("noTableFound", language)}
           </div>
@@ -693,36 +754,73 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
             {/* Rows stay inline in this JSX tree so styled-jsx scopes their classes. */}
             {tableGroups.map((group) => {
               const expanded = !showGroups || isSchemaExpanded(group.schema);
-              const rows = expanded
-                ? group.tables.map((table) => {
-                    const label = showGroups ? bareTableName(table) : table;
-                    const isSelected = selectedTables.has(table);
-                    const isActive = activeTable === table && selectedTables.size <= 1;
-                    return (
-                      <div
-                        key={table}
-                        className={`tree-item ${isActive ? "active" : ""} ${isSelected ? "selected" : ""}`}
-                        onClick={(e) => handleTableClick(e, table)}
-                        onContextMenu={(e) => {
-                          setHoveredTable(null);
-                          openMenu(e, { kind: "table", table });
-                        }}
-                        onMouseEnter={(e) => {
-                          const target = e.currentTarget;
-                          const labelEl = target.querySelector(".tree-label") as HTMLElement | null;
-                          const isTruncated = labelEl ? labelEl.scrollWidth > labelEl.clientWidth + 1 : label.length > 20;
-                          const rect = target.getBoundingClientRect();
-                          setHoveredTable({ name: table, rect, isTruncated });
-                        }}
-                        onMouseLeave={() => setHoveredTable(null)}
-                        title={table}
-                      >
-                        <Table2 size={14} className={`tree-icon ${isActive || isSelected ? "active-icon" : ""}`} />
-                        <span className="tree-label">{label}</span>
-                      </div>
-                    );
-                  })
-                : null;
+              const row = (table: string, objectKind: ObjectKind) => {
+                const label = showGroups ? bareTableName(table) : table;
+                const isSelected = selectedTables.has(table);
+                const isActive = activeTable === table && selectedTables.size <= 1;
+                const Icon = objectKind === "view" ? Eye : objectKind === "matview" ? ScanEye : Table2;
+                return (
+                  <div
+                    key={table}
+                    className={`tree-item ${isActive ? "active" : ""} ${isSelected ? "selected" : ""}`}
+                    onClick={(e) => {
+                      if (objectKind === "table") {
+                        handleTableClick(e, table);
+                      } else {
+                        // Views open on any click; they never join a multi-selection.
+                        setSelectedTables(new Set([table]));
+                        setLastSelectedTable(null);
+                        onSelectTable(table);
+                      }
+                    }}
+                    onContextMenu={(e) => {
+                      setHoveredTable(null);
+                      openMenu(e, { kind: "table", table, objectKind });
+                    }}
+                    onMouseEnter={(e) => {
+                      const target = e.currentTarget;
+                      const labelEl = target.querySelector(".tree-label") as HTMLElement | null;
+                      const isTruncated = labelEl ? labelEl.scrollWidth > labelEl.clientWidth + 1 : label.length > 20;
+                      const rect = target.getBoundingClientRect();
+                      setHoveredTable({ name: table, rect, isTruncated });
+                    }}
+                    onMouseLeave={() => setHoveredTable(null)}
+                    title={table}
+                  >
+                    <Icon size={14} className={`tree-icon ${isActive || isSelected ? "active-icon" : ""}`} />
+                    <span className="tree-label">{label}</span>
+                  </div>
+                );
+              };
+              const section = (title: string, names: string[], objectKind: ObjectKind) => {
+                if (names.length === 0) return null;
+                if (!hasSectionHeaders(group)) return names.map((n) => row(n, objectKind));
+                const open = isSectionExpanded(group, objectKind);
+                return (
+                  <React.Fragment key={objectKind}>
+                    <button
+                      type="button"
+                      className="object-section-label"
+                      onClick={() => toggleSection(group.schema, objectKind)}
+                      disabled={query !== ""}
+                      aria-expanded={open}
+                    >
+                      <ChevronRight size={10} className={`section-chevron ${open ? "open" : ""}`} />
+                      <span className="object-section-title">{title}</span>
+                      <span className="object-section-count">{names.length}</span>
+                    </button>
+                    {open && names.map((n) => row(n, objectKind))}
+                  </React.Fragment>
+                );
+              };
+              const rows = expanded ? (
+                <>
+                  {section(t("sidebarTables", language), group.tables, "table")}
+                  {section(t("sidebarViews", language), group.views, "view")}
+                  {section(t("sidebarMatviews", language), group.matviews, "matview")}
+                </>
+              ) : null;
+              const objectCount = group.tables.length + group.views.length + group.matviews.length;
 
               if (!showGroups) return <React.Fragment key="__flat">{rows}</React.Fragment>;
 
@@ -740,7 +838,7 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
                       <ChevronRight size={12} className={`schema-chevron ${expanded ? "open" : ""}`} />
                       <Layers size={12} className="schema-icon" />
                       <span className="schema-name">{group.schema}</span>
-                      <span className="table-count-badge">{group.tables.length}</span>
+                      <span className="table-count-badge">{objectCount}</span>
                     </button>
                     {onCreateTable && (
                       <button
@@ -888,7 +986,13 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
           ) : (
             <>
               <div className="context-menu-header">
-                <Table2 size={12} className="menu-header-icon" />
+                {contextMenu.objectKind === "view" ? (
+                  <Eye size={12} className="menu-header-icon" />
+                ) : contextMenu.objectKind === "matview" ? (
+                  <ScanEye size={12} className="menu-header-icon" />
+                ) : (
+                  <Table2 size={12} className="menu-header-icon" />
+                )}
                 <span className="menu-header-name font-mono">{contextMenu.table}</span>
               </div>
 
@@ -907,7 +1011,7 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
                 </button>
               )}
 
-              {onEditStructure && !isSqlite && (
+              {onEditStructure && !isSqlite && contextMenu.objectKind === "table" && (
                 <button
                   className="context-menu-item"
                   onClick={() => {
@@ -944,7 +1048,45 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
                 </button>
               )}
 
-              {onImportIntoTable && (
+              {onOpenViewDefinition && contextMenu.objectKind !== "table" && (
+                <button
+                  className="context-menu-item"
+                  onClick={() => {
+                    onOpenViewDefinition(contextMenu.table, contextMenu.objectKind === "matview");
+                    setContextMenu(null);
+                  }}
+                >
+                  <FileCode size={13} />
+                  <span>Open Definition in SQL</span>
+                </button>
+              )}
+
+              {onRefreshMatview && contextMenu.objectKind === "matview" && (
+                <>
+                  <button
+                    className="context-menu-item"
+                    onClick={() => {
+                      onRefreshMatview(contextMenu.table, false);
+                      setContextMenu(null);
+                    }}
+                  >
+                    <RotateCw size={13} />
+                    <span>Refresh Materialized View</span>
+                  </button>
+                  <button
+                    className="context-menu-item"
+                    onClick={() => {
+                      onRefreshMatview(contextMenu.table, true);
+                      setContextMenu(null);
+                    }}
+                  >
+                    <RotateCw size={13} />
+                    <span>Refresh Concurrently</span>
+                  </button>
+                </>
+              )}
+
+              {onImportIntoTable && contextMenu.objectKind === "table" && (
                 <button
                   className="context-menu-item"
                   onClick={() => {
@@ -964,7 +1106,9 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
                 onClick={() => handleCopyName(contextMenu.table)}
               >
                 {copiedItem ? <Check size={13} className="copy-check" /> : <Copy size={13} />}
-                <span>{copiedItem ? "Copied Name!" : "Copy Table Name"}</span>
+                <span>
+                  {copiedItem ? "Copied Name!" : contextMenu.objectKind === "table" ? "Copy Table Name" : "Copy Name"}
+                </span>
               </button>
 
               <button
@@ -975,9 +1119,11 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
                 <span>Copy SELECT Query</span>
               </button>
 
-              {(onTruncateTable || onDropTable) && <div className="context-menu-divider" />}
+              {(onTruncateTable || onDropTable) && contextMenu.objectKind === "table" && (
+                <div className="context-menu-divider" />
+              )}
 
-              {onTruncateTable && !isSqlite && (
+              {onTruncateTable && !isSqlite && contextMenu.objectKind === "table" && (
                 <button
                   className="context-menu-item danger"
                   onClick={() => {
@@ -990,7 +1136,7 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
                 </button>
               )}
 
-              {onDropTable && (
+              {onDropTable && contextMenu.objectKind === "table" && (
                 <button
                   className="context-menu-item danger"
                   onClick={() => {
@@ -1001,6 +1147,22 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
                   <Trash2 size={13} />
                   <span>Drop Table</span>
                 </button>
+              )}
+
+              {onDropView && contextMenu.objectKind !== "table" && (
+                <>
+                  <div className="context-menu-divider" />
+                  <button
+                    className="context-menu-item danger"
+                    onClick={() => {
+                      onDropView(contextMenu.table, contextMenu.objectKind === "matview");
+                      setContextMenu(null);
+                    }}
+                  >
+                    <Trash2 size={13} />
+                    <span>{contextMenu.objectKind === "matview" ? "Drop Materialized View" : "Drop View"}</span>
+                  </button>
+                </>
               )}
             </>
           )}
@@ -1357,6 +1519,56 @@ export const SidebarExplorer: React.FC<SidebarExplorerProps> = ({
           text-overflow: ellipsis;
           font-family: var(--font-mono);
           letter-spacing: -0.2px;
+        }
+        .object-section-label {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          width: 100%;
+          margin-top: 4px;
+          padding: 3px 6px 3px 2px;
+          border: none;
+          border-radius: 4px;
+          background: transparent;
+          color: var(--text-muted);
+          font-size: 9.5px;
+          font-weight: 600;
+          letter-spacing: 0.6px;
+          text-transform: uppercase;
+          text-align: left;
+          cursor: pointer;
+          user-select: none;
+          transition: background 0.12s ease, color 0.12s ease;
+        }
+        .object-section-label:first-child {
+          margin-top: 0;
+        }
+        .object-section-label:hover:not(:disabled) {
+          background: var(--bg-hover);
+          color: var(--text-sub);
+        }
+        .object-section-label:disabled {
+          cursor: default;
+        }
+        .object-section-label :global(.section-chevron) {
+          flex-shrink: 0;
+          opacity: 0.7;
+          transition: transform 0.12s ease;
+        }
+        .object-section-label :global(.section-chevron.open) {
+          transform: rotate(90deg);
+        }
+        .object-section-title {
+          flex: 1;
+          min-width: 0;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .object-section-count {
+          font-family: var(--font-mono);
+          font-weight: 500;
+          letter-spacing: 0;
         }
         .schema-tables {
           display: flex;
