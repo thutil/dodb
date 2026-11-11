@@ -104,6 +104,9 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
       edgesData: edges,
     };
 
+    // Let React paint the spinner before the synchronous canvas/HTML work.
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+
     try {
       if (format === "print") {
         await printDiagram(flowContainerRef.current, options, selectedTableIds);
@@ -119,14 +122,13 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
           setTimeout(() => {
             onClose();
           }, 1200);
-        } else {
-          // Native save dialog was cancelled by user
-          setIsExporting(false);
         }
+        // savedPath === null: native save dialog was cancelled by user
       }
     } catch (err: any) {
       console.error("Export diagram failed:", err);
       setExportError(err?.message || (activeLanguage === "th" ? "ไม่สามารถส่งออกแผนภาพได้ กรุณาลองใหม่อีกครั้ง" : "Failed to export diagram. Please try again."));
+    } finally {
       setIsExporting(false);
     }
   }, [
@@ -654,7 +656,6 @@ export const ErdExportModal: React.FC<ErdExportModalProps> = ({
             type="button"
             className="btn btn-secondary btn-sm"
             onClick={onClose}
-            disabled={isExporting}
           >
             {t("erdExportCancel", activeLanguage)}
           </button>

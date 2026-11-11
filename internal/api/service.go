@@ -45,12 +45,17 @@ func New(version string) *Service {
 // SetWindow installs the host window implementation.
 func (s *Service) SetWindow(w WindowHandler) { s.window = w }
 
-// PrintWindow triggers the host window print dialog.
-func (s *Service) PrintWindow() error {
+// PrintWindow triggers the host window print dialog. It reports whether a
+// host window handled the request; false means no native window is installed
+// (e.g. the browser dev server) and the caller should fall back to window.print().
+func (s *Service) PrintWindow() (bool, error) {
 	if s.window == nil {
-		return nil
+		return false, nil
 	}
-	return s.window.Print()
+	if err := s.window.Print(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // AppVersion replaces the getVersion() call at ui/src/pages/index.tsx:220.

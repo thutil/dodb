@@ -37,6 +37,8 @@ export interface DiagramExportOptions {
     source: string;
     target: string;
     label?: string;
+    sourceHandle?: string | null;
+    targetHandle?: string | null;
   }>;
 }
 
@@ -56,12 +58,18 @@ export interface ParsedNode {
   tableName: string;
   columnsCountText: string;
   isCollapsed: boolean;
+  /** Column count before an export capped the card (defaults to columns.length). */
+  totalColumns?: number;
+  /** Columns left off the card by the export cap. */
+  hiddenColumns?: number;
   columns: Array<{
     name: string;
     type: string;
     isPk: boolean;
     isFk?: boolean;
     fkTarget?: string;
+    /** Referenced table, for FK columns. */
+    fkTable?: string;
     isGeom: boolean;
   }>;
 }
@@ -77,7 +85,10 @@ export interface ParsedEdge {
 }
 
 // Standard Paper Dimensions in Millimeters
-const PAPER_MM: Record<Exclude<PaperSize, "Fit">, { width: number; height: number }> = {
+const PAPER_MM: Record<
+  Exclude<PaperSize, "Fit">,
+  { width: number; height: number }
+> = {
   A4: { width: 210, height: 297 },
   A3: { width: 297, height: 420 },
   Letter: { width: 215.9, height: 279.4 },
@@ -90,7 +101,7 @@ export function getPaperDimensions(
   paperSize: PaperSize,
   orientation: PaperOrientation,
   contentBounds: RectBounds,
-  scale: ExportScale = 2
+  scale: ExportScale = 2,
 ): { width: number; height: number; aspectRatio: number } {
   if (paperSize === "Fit") {
     const pad = 80;
@@ -124,7 +135,9 @@ export function getPaperDimensions(
  */
 function parseNodeTransform(el: HTMLElement): { x: number; y: number } {
   const transform = el.style.transform || "";
-  const match = transform.match(/translate(?:3d)?\(\s*(-?[\d.]+)px,\s*(-?[\d.]+)px/i);
+  const match = transform.match(
+    /translate(?:3d)?\(\s*(-?[\d.]+)px,\s*(-?[\d.]+)px/i,
+  );
   if (match) {
     return { x: parseFloat(match[1]), y: parseFloat(match[2]) };
   }
@@ -195,14 +208,19 @@ function resolveNodeOverlaps(nodes: ParsedNode[]): void {
 export function parseTableNodes(
   flowContainer: HTMLElement,
   options: DiagramExportOptions,
-  selectedNodeIds?: Set<string>
+  selectedNodeIds?: Set<string>,
 ): { nodes: ParsedNode[]; bounds: RectBounds } {
   const parsedNodes: ParsedNode[] = [];
 
   // Option A: Extract directly from React Flow nodesData state (Most accurate)
   if (options.nodesData && options.nodesData.length > 0) {
     for (const n of options.nodesData) {
-      if (options.scope === "selected" && selectedNodeIds && selectedNodeIds.size > 0 && !selectedNodeIds.has(n.id)) {
+      if (
+        options.scope === "selected" &&
+        selectedNodeIds &&
+        selectedNodeIds.size > 0 &&
+        !selectedNodeIds.has(n.id)
+      ) {
         continue;
       }
 
@@ -220,6 +238,7 @@ export function parseTableNodes(
           isPk: typeof c === "object" ? !!c.primaryKey : false,
           isFk: !!fkRel,
           fkTarget: fkRel ? `${fkRel.toTable}.${fkRel.toColumn}` : undefined,
+          fkTable: fkRel ? fkRel.toTable : undefined,
           isGeom: false,
         };
       });
@@ -246,12 +265,21 @@ export function parseTableNodes(
     }
   } else {
     // Option B: Fallback DOM parser
-    const nodesLayer = flowContainer.querySelector(".react-flow__nodes") as HTMLElement | null;
+    const nodesLayer = flowContainer.querySelector(
+      ".react-flow__nodes",
+    ) as HTMLElement | null;
     if (nodesLayer) {
-      const nodeElements = Array.from(nodesLayer.querySelectorAll(".react-flow__node")) as HTMLElement[];
+      const nodeElements = Array.from(
+        nodesLayer.querySelectorAll(".react-flow__node"),
+      ) as HTMLElement[];
       for (const el of nodeElements) {
         const id = el.getAttribute("data-id") || "";
-        if (options.scope === "selected" && selectedNodeIds && selectedNodeIds.size > 0 && !selectedNodeIds.has(id)) {
+        if (
+          options.scope === "selected" &&
+          selectedNodeIds &&
+          selectedNodeIds.size > 0 &&
+          !selectedNodeIds.has(id)
+        ) {
           continue;
         }
 
@@ -262,26 +290,38 @@ export function parseTableNodes(
         const tableNameEl = el.querySelector(".card-tbl-name, .table-name");
         const tableName = tableNameEl?.textContent?.trim() || id;
 
-        const countEl = el.querySelector(".card-col-count, .card-tbl-count, .table-sub-count");
+        const countEl = el.querySelector(
+          ".card-col-count, .card-tbl-count, .table-sub-count",
+        );
         const columnsCountText = countEl?.textContent?.trim() || "";
 
         const isCollapsed = el.classList.contains("is-collapsed");
 
-        const columnRows = Array.from(el.querySelectorAll(".col-row, .column-row")) as HTMLElement[];
+        const columnRows = Array.from(
+          el.querySelectorAll(".col-row, .column-row"),
+        ) as HTMLElement[];
         const columns = columnRows.map((row) => {
           const nameEl = row.querySelector(".col-name");
           const name = nameEl?.textContent?.trim() || "";
           const typeEl = row.querySelector(".col-type, .col-type-tag");
           const type = typeEl?.textContent?.trim() || "";
-          const isPk = !!row.querySelector(".pk-icon, .pk-tag") || row.classList.contains("pk-row") || row.classList.contains("is-pk");
-          const isFk = !!row.querySelector(".fk-icon, .fk-tag") || row.classList.contains("fk-row") || row.classList.contains("is-fk");
+          const isPk =
+            !!row.querySelector(".pk-icon, .pk-tag") ||
+            row.classList.contains("pk-row") ||
+            row.classList.contains("is-pk");
+          const isFk =
+            !!row.querySelector(".fk-icon, .fk-tag") ||
+            row.classList.contains("fk-row") ||
+            row.classList.contains("is-fk");
           const isGeom = !!row.querySelector(".gis-icon, .col-geom-icon");
           return { name, type, isPk, isFk, isGeom };
         });
 
         const headerHeight = 38;
         const rowHeight = 28;
-        const computedHeight = isCollapsed ? headerHeight : headerHeight + columns.length * rowHeight + 8;
+        const computedHeight = isCollapsed
+          ? headerHeight
+          : headerHeight + columns.length * rowHeight + 8;
         const finalHeight = Math.max(height, computedHeight);
 
         parsedNodes.push({
@@ -337,15 +377,21 @@ export function parseTableNodes(
  * Parse all SVG edges connecting tables
  */
 export function parseEdges(flowContainer: HTMLElement): ParsedEdge[] {
-  const edgesLayer = flowContainer.querySelector(".react-flow__edges") as HTMLElement | null;
+  const edgesLayer = flowContainer.querySelector(
+    ".react-flow__edges",
+  ) as HTMLElement | null;
   if (!edgesLayer) return [];
 
-  const edgeElements = Array.from(edgesLayer.querySelectorAll(".react-flow__edge")) as HTMLElement[];
+  const edgeElements = Array.from(
+    edgesLayer.querySelectorAll(".react-flow__edge"),
+  ) as HTMLElement[];
   const parsedEdges: ParsedEdge[] = [];
 
   for (const el of edgeElements) {
     const id = el.getAttribute("data-id") || "";
-    const pathEl = el.querySelector("path.react-flow__edge-path") as SVGPathElement | null;
+    const pathEl = el.querySelector(
+      "path.react-flow__edge-path",
+    ) as SVGPathElement | null;
     const pathD = pathEl?.getAttribute("d") || "";
     if (pathD) {
       const labelEl = el.querySelector(".react-flow__edge-text");
@@ -366,7 +412,7 @@ function drawRoundedRect(
   y: number,
   width: number,
   height: number,
-  radius: number
+  radius: number,
 ) {
   ctx.beginPath();
   ctx.moveTo(x + radius, y);
@@ -381,18 +427,321 @@ function drawRoundedRect(
   ctx.closePath();
 }
 
+// ---------------------------------------------------------------------------
+// Export layout
+//
+// The on-screen layout is tuned for panning a canvas, not for paper: with many
+// tables it is a very wide, shallow strip, and one table with a hundred columns
+// stretches the whole thing vertically. For export the tables are re-packed
+// into the page's own shape, related tables are kept next to each other, and
+// tall cards are capped (the data dictionary pages still list every column).
+// When even that leaves the text too small to read, the print report adds
+// detail pages drawn at a readable size.
+// ---------------------------------------------------------------------------
+
+const CARD_W = 280;
+const CARD_HEADER_H = 32;
+const CARD_ROW_H = 22;
+const CARD_PAD_B = 8;
+const BODY_FONT_PX = 11.5;
+/** Most column rows a card shows in an export before collapsing the rest. */
+const EXPORT_MAX_ROWS = 10;
+const PACK_GAP_X = 56;
+const PACK_GAP_Y = 24;
+/** Printed size (mm) of the column-name font below which detail pages are added. */
+const MIN_READABLE_EM_MM = 1.6;
+/** Printed size (mm) of the column-name font on detail pages. */
+const DETAIL_EM_MM = 1.8;
+const MAX_DETAIL_PAGES = 40;
+
+interface ExportEdge {
+  source: string;
+  target: string;
+  sourceCol?: string;
+  targetCol?: string;
+}
+
+interface ExportModel {
+  cards: ParsedNode[];
+  edges: ExportEdge[];
+  /** DOM edge paths, only used when tables keep their on-screen positions. */
+  domEdges: ParsedEdge[];
+  repacked: boolean;
+}
+
+interface PageLabels {
+  title: string;
+  meta: string;
+  footerRight: string;
+}
+
+function columnFromHandle(
+  handle: string | null | undefined,
+  table: string,
+): string | undefined {
+  if (!handle) return undefined;
+  const prefix = `${table}:`;
+  return handle.startsWith(prefix) ? handle.slice(prefix.length) : undefined;
+}
+
+/** Cap a card at EXPORT_MAX_ROWS rows, keeping key columns first when it is cut. */
+function capCardColumns(n: ParsedNode): ParsedNode {
+  const total = n.columns.length;
+  if (n.isCollapsed || total <= EXPORT_MAX_ROWS) {
+    const rows = n.isCollapsed ? 0 : Math.max(1, total);
+    return {
+      ...n,
+      width: CARD_W,
+      totalColumns: total,
+      hiddenColumns: 0,
+      height: CARD_HEADER_H + rows * CARD_ROW_H + CARD_PAD_B,
+    };
+  }
+  const ordered = [
+    ...n.columns.filter((c) => c.isPk),
+    ...n.columns.filter((c) => !c.isPk && c.isFk),
+    ...n.columns.filter((c) => !c.isPk && !c.isFk),
+  ];
+  const visible = ordered.slice(0, EXPORT_MAX_ROWS - 1);
+  return {
+    ...n,
+    width: CARD_W,
+    columns: visible,
+    totalColumns: total,
+    hiddenColumns: total - visible.length,
+    height: CARD_HEADER_H + EXPORT_MAX_ROWS * CARD_ROW_H + CARD_PAD_B,
+  };
+}
+
 /**
- * Capture Page 1: ERD Architecture Diagram to Canvas
+ * Order tables so each group of tables linked by foreign keys is contiguous
+ * (largest group first, breadth-first from its most connected table), followed
+ * by unrelated tables in name order. Packing in this order keeps related
+ * tables near each other, so relationship lines stay short.
  */
-export async function captureDiagramToCanvas(
+function orderByRelationClusters(
+  cards: ParsedNode[],
+  edges: ExportEdge[],
+): ParsedNode[] {
+  const byId = new Map(cards.map((c) => [c.id, c]));
+  const adj = new Map<string, Set<string>>(
+    cards.map((c) => [c.id, new Set<string>()]),
+  );
+  for (const e of edges) {
+    if (e.source === e.target) continue;
+    adj.get(e.source)?.add(e.target);
+    adj.get(e.target)?.add(e.source);
+  }
+  const degree = (id: string) => adj.get(id)?.size ?? 0;
+  const byDegree = [...cards].sort(
+    (a, b) =>
+      degree(b.id) - degree(a.id) || a.tableName.localeCompare(b.tableName),
+  );
+
+  const seen = new Set<string>();
+  const groups: ParsedNode[][] = [];
+  for (const start of byDegree) {
+    if (seen.has(start.id)) continue;
+    const group: ParsedNode[] = [];
+    const queue = [start.id];
+    seen.add(start.id);
+    while (queue.length > 0) {
+      const id = queue.shift()!;
+      group.push(byId.get(id)!);
+      const next = [...(adj.get(id) ?? [])]
+        .filter((n) => !seen.has(n))
+        .sort((a, b) => degree(b) - degree(a) || a.localeCompare(b));
+      for (const n of next) {
+        seen.add(n);
+        queue.push(n);
+      }
+    }
+    groups.push(group);
+  }
+
+  const connected = groups
+    .filter((g) => g.length > 1)
+    .sort((a, b) => b.length - a.length);
+  const singles = groups
+    .filter((g) => g.length === 1)
+    .flat()
+    .sort((a, b) => a.tableName.localeCompare(b.tableName));
+  return [...connected.flat(), ...singles];
+}
+
+/** Masonry-pack cards into `columnCount` columns, each card into the shortest column. */
+function packColumns(
+  cards: ParsedNode[],
+  columnCount: number,
+): { nodes: ParsedNode[]; width: number; height: number } {
+  const colY = new Array<number>(columnCount).fill(0);
+  const nodes = cards.map((card) => {
+    let col = 0;
+    for (let i = 1; i < columnCount; i++) if (colY[i] < colY[col]) col = i;
+    const placed = { ...card, x: col * (CARD_W + PACK_GAP_X), y: colY[col] };
+    colY[col] += card.height + PACK_GAP_Y;
+    return placed;
+  });
+  const used = Math.min(columnCount, cards.length);
+  return {
+    nodes,
+    width: used * CARD_W + Math.max(0, used - 1) * PACK_GAP_X,
+    height: Math.max(0, Math.max(...colY) - PACK_GAP_Y),
+  };
+}
+
+/** Pick the column count whose packed shape fills an area of the given aspect best. */
+function packForAspect(cards: ParsedNode[], aspect: number): ParsedNode[] {
+  if (cards.length === 0) return [];
+  let best = packColumns(cards, 1);
+  let bestScore = Math.min(aspect / best.width, 1 / best.height);
+  for (let k = 2; k <= cards.length; k++) {
+    const p = packColumns(cards, k);
+    const score = Math.min(aspect / p.width, 1 / p.height);
+    if (score > bestScore) {
+      best = p;
+      bestScore = score;
+    }
+  }
+  return best.nodes;
+}
+
+/** Split cards across pages of `capH` layout units, `columnCount` columns each. */
+function paginateCards(
+  cards: ParsedNode[],
+  columnCount: number,
+  capH: number,
+): ParsedNode[][] {
+  const pages: ParsedNode[][] = [];
+  let current: ParsedNode[] = [];
+  const colY = new Array<number>(columnCount).fill(0);
+  for (const card of cards) {
+    let col = 0;
+    for (let i = 1; i < columnCount; i++) if (colY[i] < colY[col]) col = i;
+    if (current.length > 0 && colY[col] + card.height > capH) {
+      pages.push(current);
+      current = [];
+      colY.fill(0);
+      col = 0;
+    }
+    current.push({ ...card, x: col * (CARD_W + PACK_GAP_X), y: colY[col] });
+    colY[col] += card.height + PACK_GAP_Y;
+  }
+  if (current.length > 0) pages.push(current);
+  return pages;
+}
+
+function buildExportModel(
   flowContainer: HTMLElement,
   options: DiagramExportOptions,
-  selectedNodeIds?: Set<string>
-): Promise<HTMLCanvasElement> {
-  const { nodes, bounds } = parseTableNodes(flowContainer, options, selectedNodeIds);
-  const domEdges = parseEdges(flowContainer);
+  selectedNodeIds?: Set<string>,
+): ExportModel {
+  const { nodes } = parseTableNodes(flowContainer, options, selectedNodeIds);
+  const ids = new Set(nodes.map((n) => n.id));
 
-  const paper = getPaperDimensions(options.paperSize, options.orientation, bounds, options.scale);
+  // Without React Flow state there are no reliable column handles, so keep the
+  // on-screen positions and the rendered edge paths.
+  if (!options.nodesData || options.nodesData.length === 0) {
+    const domEdges = nodes.length > 1 ? parseEdges(flowContainer) : [];
+    return { cards: nodes, edges: [], domEdges, repacked: false };
+  }
+
+  const edges: ExportEdge[] =
+    nodes.length > 1
+      ? (options.edgesData || [])
+          .filter((e) => ids.has(e.source) && ids.has(e.target))
+          .map((e) => ({
+            source: e.source,
+            target: e.target,
+            sourceCol: columnFromHandle(e.sourceHandle, e.source),
+            targetCol: columnFromHandle(e.targetHandle, e.target),
+          }))
+      : [];
+
+  const cards = orderByRelationClusters(nodes.map(capCardColumns), edges);
+  return { cards, edges, domEdges: [], repacked: true };
+}
+
+function boundsOf(nodes: ParsedNode[], pad: number): RectBounds {
+  if (nodes.length === 0) return { x: 0, y: 0, width: 1200, height: 800 };
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const n of nodes) {
+    minX = Math.min(minX, n.x);
+    minY = Math.min(minY, n.y);
+    maxX = Math.max(maxX, n.x + n.width);
+    maxY = Math.max(maxY, n.y + n.height);
+  }
+  return {
+    x: minX - pad,
+    y: minY - pad,
+    width: maxX - minX + pad * 2,
+    height: maxY - minY + pad * 2,
+  };
+}
+
+/** Drawable area of a page in canvas pixels (inside margins, banner and footer). */
+function pageFrame(
+  paper: { width: number; height: number },
+  options: DiagramExportOptions,
+) {
+  const isTransparent = !!options.isTransparent && options.format === "png";
+  const s = options.scale;
+  const topBanner = isTransparent ? 0 : 44 * s;
+  const bottomFooter = isTransparent ? 0 : 28 * s;
+  const margin = (isTransparent ? 24 : 36) * s;
+  const topGap = isTransparent ? 0 : 10 * s;
+  return {
+    left: margin,
+    top: margin + topBanner + topGap,
+    width: paper.width - margin * 2,
+    height: paper.height - margin * 2 - topBanner - bottomFooter - topGap,
+  };
+}
+
+/** Canvas pixels per printed millimetre for a fixed paper size. */
+function canvasPxPerMm(options: DiagramExportOptions): number {
+  return 3.78 * options.scale;
+}
+
+/** Shorten `text` with an ellipsis so it fits in `maxWidth` with the current font. */
+function fitText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+): string {
+  if (maxWidth <= 0) return "";
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  let lo = 0;
+  let hi = text.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (ctx.measureText(text.slice(0, mid) + "…").width <= maxWidth) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo > 0 ? text.slice(0, lo) + "…" : "";
+}
+
+/**
+ * Draw one diagram page. Fits `nodes` to the page unless `fixedScale` (layout
+ * units → canvas px) is given, in which case they are drawn at that size.
+ */
+function drawDiagramPage(
+  nodes: ParsedNode[],
+  model: ExportModel,
+  options: DiagramExportOptions,
+  labels: PageLabels,
+  fixedScale?: number,
+): HTMLCanvasElement {
+  const bounds = boundsOf(nodes, fixedScale ? 0 : 24);
+  const paper = getPaperDimensions(
+    options.paperSize,
+    options.orientation,
+    bounds,
+    options.scale,
+  );
 
   const canvas = document.createElement("canvas");
   canvas.width = paper.width;
@@ -409,20 +758,20 @@ export async function captureDiagramToCanvas(
         bg: "#ffffff",
         cardBg: "#ffffff",
         cardBorder: "#cbd5e1",
-        headerBg: "#f8fafc",
+        headerBg: "#f1f5f9",
         headerText: "#0f172a",
         subText: "#64748b",
-        rowBorder: "#f1f5f9",
+        rowBorder: "#eef2f6",
         colName: "#1e293b",
         colType: "#64748b",
         pkBg: "rgba(59, 130, 246, 0.12)",
         pkText: "#2563eb",
         fkBg: "rgba(16, 185, 129, 0.12)",
         fkText: "#059669",
-        edgeStroke: "#3b82f6",
+        edgeStroke: "rgba(37, 99, 235, 0.7)",
+        edgeDot: "#2563eb",
         gridDots: "rgba(0, 0, 0, 0.04)",
         metaText: "#64748b",
-        bannerBg: "#f8fafc",
         bannerBorder: "#e2e8f0",
       }
     : {
@@ -439,19 +788,18 @@ export async function captureDiagramToCanvas(
         pkText: "#60a5fa",
         fkBg: "rgba(16, 185, 129, 0.2)",
         fkText: "#34d399",
-        edgeStroke: "#3b82f6",
+        edgeStroke: "rgba(59, 130, 246, 0.75)",
+        edgeDot: "#60a5fa",
         gridDots: "rgba(255, 255, 255, 0.04)",
         metaText: "#9ca3af",
-        bannerBg: "#111827",
         bannerBorder: "#1f2937",
       };
 
-  // 1. Draw Paper Background (Skip if Transparent PNG)
+  // 1. Paper background (skipped for transparent PNG)
   if (!isTransparent) {
     ctx.fillStyle = colors.bg;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Subtle background dot grid pattern
     ctx.fillStyle = colors.gridDots;
     const dotGap = 24 * options.scale;
     for (let gx = 0; gx < canvas.width; gx += dotGap) {
@@ -463,237 +811,260 @@ export async function captureDiagramToCanvas(
     }
   }
 
-  // Header Banner Height Allocation (0 if Transparent)
-  const topBannerHeight = isTransparent ? 0 : 44 * options.scale;
-  const bottomFooterHeight = isTransparent ? 0 : 28 * options.scale;
-
-  // Calculate Fitting Transformation with clean top alignment
-  const margin = (isTransparent ? 24 : 36) * options.scale;
-  const availW = paper.width - margin * 2;
-  const availH = paper.height - margin * 2 - topBannerHeight - bottomFooterHeight;
-
-  const scaleFactor = Math.min(availW / bounds.width, availH / bounds.height);
-  const fitW = bounds.width * scaleFactor;
-  const fitH = bounds.height * scaleFactor;
-
-  const offsetX = margin + (availW - fitW) / 2 - bounds.x * scaleFactor;
-  const offsetY = margin + topBannerHeight + 10 * options.scale - bounds.y * scaleFactor;
+  // Fit transform: horizontally centred, top aligned.
+  const frame = pageFrame(paper, options);
+  const scaleFactor =
+    fixedScale ??
+    Math.min(frame.width / bounds.width, frame.height / bounds.height);
+  const offsetX =
+    frame.left +
+    (frame.width - bounds.width * scaleFactor) / 2 -
+    bounds.x * scaleFactor;
+  const offsetY = frame.top - bounds.y * scaleFactor;
 
   ctx.save();
   ctx.translate(offsetX, offsetY);
   ctx.scale(scaleFactor, scaleFactor);
 
-  // 2. Draw Edges (Bezier curves)
+  const nodeMap = new Map<string, ParsedNode>(nodes.map((n) => [n.id, n]));
+  const fontMono =
+    "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+
+  // 2. Relationship lines, under the cards. Each line leaves the FK column row
+  //    and enters the referenced column row.
+  const rowCenterY = (n: ParsedNode, col?: string) => {
+    const idx =
+      col && !n.isCollapsed ? n.columns.findIndex((c) => c.name === col) : -1;
+    return idx >= 0
+      ? n.y + CARD_HEADER_H + idx * CARD_ROW_H + CARD_ROW_H / 2
+      : n.y + CARD_HEADER_H / 2;
+  };
+  const endpoints: Array<[number, number]> = [];
+  let drawnRelations = 0;
+
   ctx.save();
   ctx.strokeStyle = colors.edgeStroke;
-  ctx.lineWidth = (2 / scaleFactor) * Math.max(1, options.scale * 0.8);
+  ctx.lineWidth = Math.max(1.4, (1.2 * options.scale) / scaleFactor);
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
 
-  const nodeMap = new Map<string, ParsedNode>(nodes.map((n) => [n.id, n]));
-  const exportedNodeIds = new Set<string>(nodes.map((n) => n.id));
-
-  // Only draw edges if more than 1 table is selected and BOTH tables are in the export
-  const edgeMapById = new Map((options.edgesData || []).map((e) => [e.id, e]));
-
-  const validDomEdges =
-    nodes.length > 1
-      ? domEdges.filter((edge) => {
-          const edgeData = edgeMapById.get(edge.id);
-          if (edgeData) {
-            return exportedNodeIds.has(edgeData.source) && exportedNodeIds.has(edgeData.target);
-          }
-          const parts = edge.id.replace(/^e-/, "").split("-");
-          if (parts.length >= 2) {
-            return exportedNodeIds.has(parts[0]) && exportedNodeIds.has(parts[1]);
-          }
-          return false;
-        })
-      : [];
-
-  const validDataEdges =
-    nodes.length > 1 && options.edgesData
-      ? options.edgesData.filter((e) => exportedNodeIds.has(e.source) && exportedNodeIds.has(e.target))
-      : [];
-
-  if (validDomEdges.length > 0) {
-    for (const edge of validDomEdges) {
-      try {
-        const p = new Path2D(edge.pathD);
-        ctx.stroke(p);
-      } catch {
-        // Fallback
-      }
-    }
-  } else if (validDataEdges.length > 0) {
-    for (const e of validDataEdges) {
+  if (model.repacked) {
+    for (const e of model.edges) {
       const src = nodeMap.get(e.source);
       const tgt = nodeMap.get(e.target);
-      if (src && tgt) {
-        const x1 = src.x + src.width;
-        const y1 = src.y + 38 + 14;
-        const x2 = tgt.x;
-        const y2 = tgt.y + 38 + 14;
-        const c1x = x1 + Math.max(50, (x2 - x1) * 0.4);
-        const c2x = x2 - Math.max(50, (x2 - x1) * 0.4);
-        ctx.beginPath();
+      if (!src || !tgt) continue;
+      drawnRelations++;
+      const y1 = rowCenterY(src, e.sourceCol);
+      const y2 = rowCenterY(tgt, e.targetCol);
+      const srcCx = src.x + src.width / 2;
+      const tgtCx = tgt.x + tgt.width / 2;
+      let x1: number;
+      let x2: number;
+      ctx.beginPath();
+      if (src === tgt || Math.abs(srcCx - tgtCx) < src.width / 2) {
+        // Same column: loop out to the right.
+        x1 = src.x + src.width;
+        x2 = tgt.x + tgt.width;
+        const bulge = 36 + Math.min(60, Math.abs(y2 - y1) * 0.12);
         ctx.moveTo(x1, y1);
-        ctx.bezierCurveTo(c1x, y1, c2x, y2, x2, y2);
-        ctx.stroke();
+        ctx.bezierCurveTo(x1 + bulge, y1, x2 + bulge, y2, x2, y2);
+      } else if (tgtCx > srcCx) {
+        x1 = src.x + src.width;
+        x2 = tgt.x;
+        const dx = Math.max(30, (x2 - x1) * 0.5);
+        ctx.moveTo(x1, y1);
+        ctx.bezierCurveTo(x1 + dx, y1, x2 - dx, y2, x2, y2);
+      } else {
+        x1 = src.x;
+        x2 = tgt.x + tgt.width;
+        const dx = Math.max(30, (x1 - x2) * 0.5);
+        ctx.moveTo(x1, y1);
+        ctx.bezierCurveTo(x1 - dx, y1, x2 + dx, y2, x2, y2);
+      }
+      ctx.stroke();
+      endpoints.push([x1, y1], [x2, y2]);
+    }
+  } else {
+    for (const edge of model.domEdges) {
+      try {
+        ctx.stroke(new Path2D(edge.pathD));
+        drawnRelations++;
+      } catch {
+        // Unparseable path: skip it.
       }
     }
   }
   ctx.restore();
 
-  // 3. Draw Table Cards
-  const fontMono = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
-
+  // 3. Table cards
+  const cardRadius = 7;
   for (const node of nodes) {
-    const cardRadius = 7;
-
-    // Card Shadow
+    // Card shadow + body
     ctx.save();
-    ctx.shadowColor = "rgba(0, 0, 0, 0.25)";
-    ctx.shadowBlur = 10;
-    ctx.shadowOffsetY = 4;
-
-    // Card Body Fill
+    ctx.shadowColor = "rgba(15, 23, 42, 0.12)";
+    ctx.shadowBlur = 8;
+    ctx.shadowOffsetY = 2;
     ctx.fillStyle = colors.cardBg;
     drawRoundedRect(ctx, node.x, node.y, node.width, node.height, cardRadius);
     ctx.fill();
     ctx.restore();
 
-    // Card Border
-    ctx.strokeStyle = colors.cardBorder;
-    ctx.lineWidth = 1.2;
-    drawRoundedRect(ctx, node.x, node.y, node.width, node.height, cardRadius);
-    ctx.stroke();
-
-    // Card Header Banner
-    const headerHeight = 38;
+    // Header
     ctx.save();
     ctx.fillStyle = colors.headerBg;
     ctx.beginPath();
     ctx.moveTo(node.x + cardRadius, node.y);
     ctx.lineTo(node.x + node.width - cardRadius, node.y);
-    ctx.quadraticCurveTo(node.x + node.width, node.y, node.x + node.width, node.y + cardRadius);
-    ctx.lineTo(node.x + node.width, node.y + headerHeight);
-    ctx.lineTo(node.x, node.y + headerHeight);
+    ctx.quadraticCurveTo(
+      node.x + node.width,
+      node.y,
+      node.x + node.width,
+      node.y + cardRadius,
+    );
+    ctx.lineTo(node.x + node.width, node.y + CARD_HEADER_H);
+    ctx.lineTo(node.x, node.y + CARD_HEADER_H);
     ctx.lineTo(node.x, node.y + cardRadius);
     ctx.quadraticCurveTo(node.x, node.y, node.x + cardRadius, node.y);
     ctx.closePath();
     ctx.fill();
-
-    // Header divider line
     ctx.strokeStyle = colors.cardBorder;
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(node.x, node.y + headerHeight);
-    ctx.lineTo(node.x + node.width, node.y + headerHeight);
+    ctx.moveTo(node.x, node.y + CARD_HEADER_H);
+    ctx.lineTo(node.x + node.width, node.y + CARD_HEADER_H);
     ctx.stroke();
     ctx.restore();
 
-    // Header Title
+    // Border
+    ctx.strokeStyle = colors.cardBorder;
+    ctx.lineWidth = 1.2;
+    drawRoundedRect(ctx, node.x, node.y, node.width, node.height, cardRadius);
+    ctx.stroke();
+
+    // Header title + column count
+    ctx.textBaseline = "middle";
+    const countText = `${node.totalColumns ?? node.columns.length} cols`;
+    ctx.font = `10.5px ${fontMono}`;
+    const countW = ctx.measureText(countText).width;
+    ctx.fillStyle = colors.subText;
+    ctx.textAlign = "right";
+    ctx.fillText(
+      countText,
+      node.x + node.width - 12,
+      node.y + CARD_HEADER_H / 2,
+    );
+    ctx.textAlign = "left";
+
     ctx.font = `bold 12.5px ${fontMono}`;
     ctx.fillStyle = colors.headerText;
-    ctx.textBaseline = "middle";
-    ctx.fillText(node.tableName, node.x + 14, node.y + headerHeight / 2);
+    ctx.fillText(
+      fitText(ctx, node.tableName, node.width - 12 - 14 - countW - 10),
+      node.x + 14,
+      node.y + CARD_HEADER_H / 2,
+    );
 
-    // Columns count text on right of header
-    if (node.columnsCountText) {
-      ctx.font = `10.5px ${fontMono}`;
-      ctx.fillStyle = colors.subText;
-      ctx.textAlign = "right";
-      ctx.fillText(`${node.columns.length} cols`, node.x + node.width - 14, node.y + headerHeight / 2);
-      ctx.textAlign = "left";
-    }
+    if (node.isCollapsed) continue;
 
-    // Draw Column Rows
-    if (!node.isCollapsed && node.columns.length > 0) {
-      let rowY = node.y + headerHeight;
-      const rowHeight = 28;
-
-      for (let i = 0; i < node.columns.length; i++) {
-        const col = node.columns[i];
-
-        // Column row divider
-        if (i > 0) {
-          ctx.strokeStyle = colors.rowBorder;
-          ctx.lineWidth = 0.8;
-          ctx.beginPath();
-          ctx.moveTo(node.x + 10, rowY);
-          ctx.lineTo(node.x + node.width - 10, rowY);
-          ctx.stroke();
-        }
-
-        const midY = rowY + rowHeight / 2;
-
-        let textStartX = node.x + 14;
-
-        // PK pill badge
-        if (col.isPk) {
-          const pkW = 26;
-          const pkH = 15;
-          ctx.fillStyle = colors.pkBg;
-          drawRoundedRect(ctx, textStartX, midY - pkH / 2, pkW, pkH, 3);
-          ctx.fill();
-
-          ctx.font = `bold 8.5px ${fontMono}`;
-          ctx.fillStyle = colors.pkText;
-          ctx.fillText("PK", textStartX + 5, midY + 1);
-          textStartX += pkW + 8;
-        } else if (col.isFk) {
-          const fkW = 26;
-          const fkH = 15;
-          ctx.fillStyle = colors.fkBg;
-          drawRoundedRect(ctx, textStartX, midY - fkH / 2, fkW, fkH, 3);
-          ctx.fill();
-
-          ctx.font = `bold 8.5px ${fontMono}`;
-          ctx.fillStyle = colors.fkText;
-          ctx.fillText("FK", textStartX + 5, midY + 1);
-          textStartX += fkW + 8;
-        }
-
-        // Column Name
-        ctx.font = `11.5px ${fontMono}`;
-        ctx.fillStyle = colors.colName;
-        ctx.fillText(col.name, textStartX, midY + 1);
-
-        // Column Type on right
-        if (col.type) {
-          ctx.font = `10.5px ${fontMono}`;
-          ctx.fillStyle = colors.colType;
-          ctx.textAlign = "right";
-          ctx.fillText(col.type, node.x + node.width - 14, midY + 1);
-          ctx.textAlign = "left";
-        }
-
-        rowY += rowHeight;
+    // Column rows
+    let rowY = node.y + CARD_HEADER_H;
+    const rowCount = node.columns.length;
+    for (let i = 0; i < rowCount; i++) {
+      const col = node.columns[i];
+      if (i > 0) {
+        ctx.strokeStyle = colors.rowBorder;
+        ctx.lineWidth = 0.8;
+        ctx.beginPath();
+        ctx.moveTo(node.x + 10, rowY);
+        ctx.lineTo(node.x + node.width - 10, rowY);
+        ctx.stroke();
       }
+
+      const midY = rowY + CARD_ROW_H / 2;
+      let textStartX = node.x + 14;
+
+      if (col.isPk || col.isFk) {
+        const badgeW = 26;
+        const badgeH = 14;
+        ctx.fillStyle = col.isPk ? colors.pkBg : colors.fkBg;
+        drawRoundedRect(ctx, textStartX, midY - badgeH / 2, badgeW, badgeH, 3);
+        ctx.fill();
+        ctx.font = `bold 8.5px ${fontMono}`;
+        ctx.fillStyle = col.isPk ? colors.pkText : colors.fkText;
+        ctx.fillText(col.isPk ? "PK" : "FK", textStartX + 5, midY + 1);
+        textStartX += badgeW + 8;
+      }
+
+      // Right-hand text: the type, or for an FK whose target table is on
+      // another page, where it points.
+      const offPageTarget =
+        col.isFk && col.fkTable && !nodeMap.has(col.fkTable)
+          ? col.fkTable
+          : undefined;
+      const rightText = offPageTarget ? `→ ${offPageTarget}` : col.type;
+      let rightW = 0;
+      if (rightText) {
+        ctx.font = `10.5px ${fontMono}`;
+        const maxRight = node.width * 0.5;
+        const shown = fitText(ctx, rightText, maxRight);
+        rightW = ctx.measureText(shown).width;
+        ctx.fillStyle = offPageTarget ? colors.fkText : colors.colType;
+        ctx.textAlign = "right";
+        ctx.fillText(shown, node.x + node.width - 14, midY + 1);
+        ctx.textAlign = "left";
+      }
+
+      ctx.font = `${BODY_FONT_PX}px ${fontMono}`;
+      ctx.fillStyle = colors.colName;
+      const nameMax =
+        node.x + node.width - 14 - (rightW ? rightW + 8 : 0) - textStartX;
+      ctx.fillText(fitText(ctx, col.name, nameMax), textStartX, midY + 1);
+
+      rowY += CARD_ROW_H;
     }
+
+    if (node.hiddenColumns && node.hiddenColumns > 0) {
+      ctx.strokeStyle = colors.rowBorder;
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.moveTo(node.x + 10, rowY);
+      ctx.lineTo(node.x + node.width - 10, rowY);
+      ctx.stroke();
+      ctx.font = `italic 10.5px ${fontMono}`;
+      ctx.fillStyle = colors.subText;
+      ctx.fillText(
+        `+ ${node.hiddenColumns} more columns`,
+        node.x + 14,
+        rowY + CARD_ROW_H / 2 + 1,
+      );
+    }
+  }
+
+  // Line end dots on top of the card edges
+  ctx.fillStyle = colors.edgeDot;
+  for (const [x, y] of endpoints) {
+    ctx.beginPath();
+    ctx.arc(x, y, 3, 0, Math.PI * 2);
+    ctx.fill();
   }
 
   ctx.restore();
 
-  // 4. Top Header Report Banner (Only when NOT Transparent)
+  // 4. Banner + footer (not on transparent PNG)
   if (!isTransparent) {
     ctx.save();
-    const dbName = options.databaseName || "Database Schema";
-    const relCount = validDataEdges.length || validDomEdges.length;
-
-    // Title Text
+    ctx.textBaseline = "alphabetic";
     ctx.font = `bold ${Math.round(13 * options.scale)}px ${fontMono}`;
     ctx.fillStyle = isLightPrint ? "#0f172a" : "#f8fafc";
-    ctx.fillText(`ERD Architecture Diagram: ${dbName}`, 24 * options.scale, 24 * options.scale);
+    ctx.fillText(labels.title, 24 * options.scale, 24 * options.scale);
 
-    // Subtitle Metadata Chips
     ctx.font = `${Math.round(10 * options.scale)}px ${fontMono}`;
     ctx.fillStyle = colors.metaText;
-    const metaText = `${nodes.length} Table${nodes.length === 1 ? "" : "s"} • ${relCount} Relation${relCount === 1 ? "" : "s"} • ${options.paperSize} ${options.orientation.toUpperCase()}`;
-    ctx.fillText(metaText, 24 * options.scale, 38 * options.scale);
+    ctx.fillText(
+      labels.meta.replace("{relations}", String(drawnRelations)),
+      24 * options.scale,
+      38 * options.scale,
+    );
 
-    // Divider Line
     ctx.strokeStyle = colors.bannerBorder;
     ctx.lineWidth = 1 * options.scale;
     ctx.beginPath();
@@ -701,25 +1072,136 @@ export async function captureDiagramToCanvas(
     ctx.lineTo(canvas.width - 20 * options.scale, 44 * options.scale);
     ctx.stroke();
 
-    // 5. Bottom Footer with Legend & Page Number
     const footerY = canvas.height - 14 * options.scale;
-
     ctx.font = `${Math.round(9.5 * options.scale)}px ${fontMono}`;
     ctx.fillStyle = colors.metaText;
-    ctx.fillText("Legend: [PK] Primary Key   [FK] Foreign Key   ─── Relationship Reference", 24 * options.scale, footerY);
-
+    ctx.fillText(
+      "Legend: [PK] Primary Key   [FK] Foreign Key   ─── Relationship",
+      24 * options.scale,
+      footerY,
+    );
     ctx.textAlign = "right";
     ctx.fillText(
-      options.reportType === "full_report" ? "Page 1 of 2 • Architecture Diagram" : "Page 1 of 1",
+      labels.footerRight,
       canvas.width - 24 * options.scale,
-      footerY
+      footerY,
     );
     ctx.textAlign = "left";
-
     ctx.restore();
   }
 
   return canvas;
+}
+
+/**
+ * Render the ERD for export: an overview of every table on one page, plus —
+ * for print, when the overview text would be too small to read — detail pages
+ * at a readable size. PNG/JPG use only the overview.
+ */
+export async function captureDiagramPages(
+  flowContainer: HTMLElement,
+  options: DiagramExportOptions,
+  selectedNodeIds?: Set<string>,
+): Promise<HTMLCanvasElement[]> {
+  const model = buildExportModel(flowContainer, options, selectedNodeIds);
+  const dbName = options.databaseName || "Database Schema";
+  const pageLabel = `${options.paperSize} ${options.orientation.toUpperCase()}`;
+  const tableCount = model.cards.length;
+  const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
+
+  // Overview layout, packed to the page's drawable shape.
+  let overviewNodes = model.cards;
+  let overviewScale = 0;
+  let detailPages: ParsedNode[][] = [];
+  let detailScale = 0;
+
+  if (model.repacked) {
+    const isFit = options.paperSize === "Fit";
+    let aspect = 1.5;
+    if (!isFit) {
+      const probe = getPaperDimensions(
+        options.paperSize,
+        options.orientation,
+        { x: 0, y: 0, width: 1, height: 1 },
+        options.scale,
+      );
+      const frame = pageFrame(probe, options);
+      aspect = frame.width / frame.height;
+      overviewNodes = packForAspect(model.cards, aspect);
+      const b = boundsOf(overviewNodes, 24);
+      overviewScale = Math.min(frame.width / b.width, frame.height / b.height);
+
+      const emMm = (BODY_FONT_PX * overviewScale) / canvasPxPerMm(options);
+      if (
+        options.format === "print" &&
+        emMm < MIN_READABLE_EM_MM &&
+        tableCount > 1
+      ) {
+        detailScale = (DETAIL_EM_MM * canvasPxPerMm(options)) / BODY_FONT_PX;
+        const capW = frame.width / detailScale;
+        const capH = frame.height / detailScale;
+        const columnCount = Math.max(
+          1,
+          Math.floor((capW + PACK_GAP_X) / (CARD_W + PACK_GAP_X)),
+        );
+        detailPages = paginateCards(model.cards, columnCount, capH).slice(
+          0,
+          MAX_DETAIL_PAGES,
+        );
+      }
+    } else {
+      overviewNodes = packForAspect(model.cards, aspect);
+    }
+  }
+
+  const hasDetail = detailPages.length > 0;
+  const canvases: HTMLCanvasElement[] = [];
+
+  canvases.push(
+    drawDiagramPage(overviewNodes, model, options, {
+      title: `ERD Architecture Diagram: ${dbName}`,
+      meta: `${plural(tableCount, "Table")} • {relations} Relations • ${pageLabel}${
+        hasDetail
+          ? ` • Overview — readable detail on the next ${plural(detailPages.length, "page")}`
+          : ""
+      }`,
+      footerRight: hasDetail ? `Overview` : "Architecture Diagram",
+    }),
+  );
+
+  detailPages.forEach((pageNodes, i) => {
+    canvases.push(
+      drawDiagramPage(
+        pageNodes,
+        model,
+        options,
+        {
+          title: `ERD Detail ${i + 1}/${detailPages.length}: ${dbName}`,
+          meta: `${plural(pageNodes.length, "Table")} on this page • {relations} Relations shown • → table = reference on another page`,
+          footerRight: `Detail ${i + 1} of ${detailPages.length}`,
+        },
+        detailScale,
+      ),
+    );
+  });
+
+  return canvases;
+}
+
+/**
+ * Capture the ERD overview to a single canvas (PNG / JPG export).
+ */
+export async function captureDiagramToCanvas(
+  flowContainer: HTMLElement,
+  options: DiagramExportOptions,
+  selectedNodeIds?: Set<string>,
+): Promise<HTMLCanvasElement> {
+  const [overview] = await captureDiagramPages(
+    flowContainer,
+    options,
+    selectedNodeIds,
+  );
+  return overview;
 }
 
 /**
@@ -728,13 +1210,16 @@ export async function captureDiagramToCanvas(
 export function generateDataDictionaryHtml(
   flowContainer: HTMLElement,
   options: DiagramExportOptions,
-  selectedNodeIds?: Set<string>
+  selectedNodeIds?: Set<string>,
 ): string {
   const { nodes } = parseTableNodes(flowContainer, options, selectedNodeIds);
   const exportedNodeIds = new Set(nodes.map((n) => n.id));
-  const validEdges = nodes.length > 1 && options.edgesData
-    ? options.edgesData.filter((e) => exportedNodeIds.has(e.source) && exportedNodeIds.has(e.target))
-    : [];
+  const validEdges =
+    nodes.length > 1 && options.edgesData
+      ? options.edgesData.filter(
+          (e) => exportedNodeIds.has(e.source) && exportedNodeIds.has(e.target),
+        )
+      : [];
 
   const dbName = options.databaseName || "Database Schema";
   const isLandscape = options.orientation === "landscape";
@@ -745,7 +1230,9 @@ export function generateDataDictionaryHtml(
     .map((table) => {
       const rowsHtml = table.columns
         .map((col) => {
-          const pkBadge = col.isPk ? `<span class="badge pk-badge">PK</span>` : "";
+          const pkBadge = col.isPk
+            ? `<span class="badge pk-badge">PK</span>`
+            : "";
           const fkBadge = col.isFk
             ? `<span class="badge fk-badge">FK${col.fkTarget ? ` &rarr; ${escapeHtml(col.fkTarget)}` : ""}</span>`
             : "";
@@ -807,7 +1294,7 @@ export function generateDataDictionaryHtml(
                 <td style="text-align: center; color: #3b82f6; font-weight: bold;">&rarr;</td>
                 <td><strong>${escapeHtml(e.target)}</strong></td>
               </tr>
-            `
+            `,
               )
               .join("")}
           </tbody>
@@ -842,7 +1329,7 @@ export function generateDataDictionaryHtml(
       <!-- Report Footer -->
       <div class="report-footer font-mono">
         <span>ERD Schema Report &bull; Data Dictionary</span>
-        <span>Page 2 of 2</span>
+        <span>Data Dictionary</span>
       </div>
     </div>
   `;
@@ -854,31 +1341,46 @@ export function generateDataDictionaryHtml(
 export async function printDiagram(
   flowContainer: HTMLElement,
   options: DiagramExportOptions,
-  selectedNodeIds?: Set<string>
+  selectedNodeIds?: Set<string>,
 ): Promise<void> {
   const reportType = options.reportType || "full_report";
 
+  // Remove anything left over from a previous print before building a new sheet.
+  cleanupPrintPortal();
+
   // Capture Page 1 Diagram if requested
-  let diagramDataUrl = "";
+  const diagramUrls: string[] = [];
   if (reportType !== "dictionary_only") {
-    const canvas = await captureDiagramToCanvas(
+    const canvases = await captureDiagramPages(
       flowContainer,
       { ...options, format: "print", scale: 2 },
-      selectedNodeIds
+      selectedNodeIds,
     );
-    diagramDataUrl = canvas.toDataURL("image/png");
+    for (const canvas of canvases) {
+      // A Blob URL keeps multi-MB base64 strings out of innerHTML and the DOM.
+      const blob = await new Promise<Blob | null>((resolve) =>
+        canvas.toBlob(resolve, "image/png"),
+      );
+      const url = blob
+        ? URL.createObjectURL(blob)
+        : canvas.toDataURL("image/png");
+      if (url.startsWith("blob:")) activeDiagramBlobUrls.push(url);
+      diagramUrls.push(url);
+    }
 
-    // Preload image so it is fully decoded before printing
-    await new Promise<void>((resolve) => {
-      const img = new Image();
-      img.src = diagramDataUrl;
-      if (img.complete) {
-        resolve();
-      } else {
-        img.onload = () => resolve();
-        img.onerror = () => resolve();
-      }
-    });
+    // Preload images so they are fully decoded before printing
+    await Promise.all(
+      diagramUrls.map(
+        (url) =>
+          new Promise<void>((resolve) => {
+            const img = new Image();
+            img.onload = () => resolve();
+            img.onerror = () => resolve();
+            img.src = url;
+            if (img.complete) resolve();
+          }),
+      ),
+    );
   }
 
   // Generate Page 2 Data Dictionary HTML if requested
@@ -888,13 +1390,23 @@ export async function printDiagram(
       : "";
 
   const pageSizeStyle =
-    options.paperSize === "Fit" ? "A4 landscape" : `${options.paperSize} ${options.orientation}`;
+    options.paperSize === "Fit"
+      ? "A4 landscape"
+      : `${options.paperSize} ${options.orientation}`;
 
-  // Clean up any stale portal / style elements
-  const existingPortal = document.getElementById("dodb-print-portal");
-  if (existingPortal?.parentNode) existingPortal.parentNode.removeChild(existingPortal);
-  const existingStyle = document.getElementById("dodb-print-styles");
-  if (existingStyle?.parentNode) existingStyle.parentNode.removeChild(existingStyle);
+  // Height (mm) each diagram page may use. Sized in mm because `vh` is
+  // ill-defined in paged media, and kept conservative: the macOS print panel
+  // (Wails windowPrint) adds its own 30pt margins on top of the @page margin
+  // and always prints landscape, so the short side of the paper is the safe
+  // page height. Anything taller spills onto a mostly blank extra page.
+  const paperMm =
+    PAPER_MM[options.paperSize === "Fit" ? "A4" : options.paperSize];
+  const shortSideMm = Math.min(paperMm.width, paperMm.height);
+  const PAGE_MARGIN_MM = 8 * 2;
+  const NATIVE_MARGIN_MM = 10.6 * 2;
+  const diagramMaxHeightMm = Math.floor(
+    shortSideMm - PAGE_MARGIN_MM - NATIVE_MARGIN_MM - 4,
+  );
 
   // Inject print stylesheet
   const styleEl = document.createElement("style");
@@ -910,14 +1422,24 @@ export async function printDiagram(
         size: ${pageSizeStyle};
         margin: 8mm;
       }
+      /* The app shell pins html/body to the viewport (position: fixed,
+         overflow: hidden). Undo that so the report flows across pages instead
+         of WebKit paginating a tall box inside a clipped, fixed body. */
+      html, body, #__next {
+        position: static !important;
+        inset: auto !important;
+        width: auto !important;
+        height: auto !important;
+        min-height: 0 !important;
+        overflow: visible !important;
+        background: #ffffff !important;
+      }
       body > *:not(#dodb-print-portal) {
         display: none !important;
       }
       #dodb-print-portal {
         display: block !important;
-        position: absolute !important;
-        top: 0 !important;
-        left: 0 !important;
+        position: static !important;
         width: 100% !important;
         background: #ffffff !important;
         color: #0f172a !important;
@@ -935,14 +1457,21 @@ export async function printDiagram(
       .page-diagram {
         display: block;
         width: 100%;
+        height: ${diagramMaxHeightMm}mm;
         margin: 0;
         padding: 0;
-        page-break-after: always;
+        overflow: hidden;
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
+      .page-diagram + .page-diagram {
+        page-break-before: always;
       }
       .diagram-image {
         width: 100%;
-        max-height: 94vh;
+        height: 100%;
         object-fit: contain;
+        object-position: center top;
         display: block;
         margin: 0 auto;
       }
@@ -985,23 +1514,29 @@ export async function printDiagram(
         font-weight: 700;
         color: #0f172a;
       }
+      /* Plain block / multi-column flow: CSS grid + break-inside: avoid is
+         very slow to fragment in WebKit with dozens of cards. */
       .dictionary-grid {
-        display: grid;
-        gap: 14px;
+        display: block;
         margin-bottom: 18px;
       }
       .landscape-grid {
-        grid-template-columns: repeat(2, 1fr);
+        column-count: 2;
+        column-gap: 14px;
       }
       .portrait-grid {
-        grid-template-columns: 1fr;
+        column-count: 1;
       }
       .table-card {
+        display: inline-block;
+        width: 100%;
+        margin: 0 0 14px 0;
         border: 1px solid #cbd5e1;
         border-radius: 6px;
         overflow: hidden;
         background: #ffffff;
         break-inside: avoid;
+        page-break-inside: avoid;
       }
       .table-card-header {
         background: #f8fafc;
@@ -1108,35 +1643,40 @@ export async function printDiagram(
   const portal = document.createElement("div");
   portal.id = "dodb-print-portal";
   portal.innerHTML = `
-    ${
-      diagramDataUrl
-        ? `<div class="page-diagram"><img src="${diagramDataUrl}" alt="ERD Diagram" class="diagram-image" /></div>`
-        : ""
-    }
+    ${diagramUrls
+      .map(
+        (url, i) =>
+          `<div class="page-diagram"><img src="${url}" alt="ERD Diagram page ${i + 1}" class="diagram-image" /></div>`,
+      )
+      .join("")}
     ${dictionaryHtml}
   `;
   document.body.appendChild(portal);
 
-  // Short delay to allow layout reflow
+  // Let layout settle before handing the page to the print engine.
   await new Promise((resolve) => setTimeout(resolve, 100));
 
-  const cleanup = () => {
-    if (portal.parentNode) portal.parentNode.removeChild(portal);
-    if (styleEl.parentNode) styleEl.parentNode.removeChild(styleEl);
-  };
+  // The portal stays in the DOM (hidden on screen) until the print finishes or
+  // the next print starts. Removing it on a timer while the native panel is
+  // still paginating forced WebKit to re-lay out the whole app for print.
+  window.addEventListener("afterprint", cleanupPrintPortal, { once: true });
 
-  try {
-    // Attempt Wails native window print first
-    await apiClient.printWindow();
-    // Also trigger window.print() for web browsers / webview
+  // Print exactly once: the native panel in the desktop app, window.print()
+  // only when there is no native host (browser dev mode).
+  const handledNatively = await apiClient.printWindow();
+  if (!handledNatively) {
     window.print();
-  } catch (err) {
-    console.error("Print invocation error:", err);
-    window.print();
-  } finally {
-    // Clean up after print sheet closes
-    setTimeout(cleanup, 2500);
   }
+}
+
+let activeDiagramBlobUrls: string[] = [];
+
+/** Remove the print portal, its stylesheet, and the diagram Blob URL. */
+function cleanupPrintPortal(): void {
+  document.getElementById("dodb-print-portal")?.remove();
+  document.getElementById("dodb-print-styles")?.remove();
+  activeDiagramBlobUrls.forEach((url) => URL.revokeObjectURL(url));
+  activeDiagramBlobUrls = [];
 }
 
 /**
@@ -1145,18 +1685,24 @@ export async function printDiagram(
 export async function downloadDiagramImage(
   flowContainer: HTMLElement,
   options: DiagramExportOptions,
-  selectedNodeIds?: Set<string>
+  selectedNodeIds?: Set<string>,
 ): Promise<string | null> {
-  const canvas = await captureDiagramToCanvas(flowContainer, options, selectedNodeIds);
+  const canvas = await captureDiagramToCanvas(
+    flowContainer,
+    options,
+    selectedNodeIds,
+  );
   const mimeType = options.format === "jpg" ? "image/jpeg" : "image/png";
   const quality = options.format === "jpg" ? 0.92 : 1.0;
   const dataUrl = canvas.toDataURL(mimeType, quality);
 
-  const safeDb = (options.databaseName || "schema").replace(/[^a-zA-Z0-9_-]/g, "_");
+  const safeDb = (options.databaseName || "schema").replace(
+    /[^a-zA-Z0-9_-]/g,
+    "_",
+  );
   const ext = options.format === "jpg" ? "jpg" : "png";
   const defaultFilename =
-    options.filename ||
-    `${safeDb}_erd_${options.scope}_${Date.now()}.${ext}`;
+    options.filename || `${safeDb}_erd_${options.scope}_${Date.now()}.${ext}`;
 
   return await saveFile(defaultFilename, dataUrl);
 }
