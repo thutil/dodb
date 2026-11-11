@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.9] - 2026-11-11
+
+### Changed
+
+- **Readable ERD Export for Large Schemas**:
+  - The exported diagram no longer copies the on-screen layout (a wide, shallow strip with many tables). Tables are re-packed to fit the page, and tables linked by foreign keys are placed next to each other so relationship lines stay short.
+  - Cards with more than 10 columns show key columns (PK, then FK) first, followed by a `+ N more columns` row. The Data Dictionary still lists every column.
+  - When the overview would be too small to read, the Print / PDF report adds detail pages at a readable size. On detail pages, an FK whose target table is on another page shows `→ target_table` in place of the type.
+  - Relationship lines now run from the FK column row to the referenced column row, with end dots. Long table and column names are shortened with `…` instead of overflowing the card.
+  - PNG / JPG export uses the new overview layout.
+
+### Fixed
+
+- **App Freeze on Print / PDF Export**:
+  - Fixed the app hanging on "Preparing Print Sheet..." with large schemas (e.g. 77 tables) without the macOS print panel ever appearing. The print stylesheet now undoes the app shell's fixed, full-viewport `html`/`body`, and the Data Dictionary uses multi-column flow instead of a CSS grid, which WebKit is very slow to split into pages.
+  - Print now triggers once: the native print panel in the desktop app, and `window.print()` only in browser dev mode (`print_window` now reports whether the host handled it).
+  - The print content is no longer removed on a 2.5 s timer while the print panel may still be using it. It is cleared when printing finishes or the next print starts.
+  - The diagram is passed to the print page as a Blob URL instead of a multi-MB data URL.
+  - The export dialog shows its spinner before the heavy work starts, Cancel stays clickable during export, and the busy state always resets after an error.
+- **Blank Pages in the Printed Report**:
+  - Each diagram page is sized to fit inside the macOS print panel's own margins, so the bottom of the image no longer spills onto a mostly blank extra page.
+- **Header Drag Region**:
+  - Fixed window drag-region issues in the header by updating `overflow` and `-webkit-app-region` properties.
+
+### Security
+
+- **Resolved Open Dependabot Alerts**:
+  - Upgraded `next`, `eslint-config-next` and `maplibre-gl`, and refreshed vulnerable transitive packages (`sharp`, `zod`, `js-yaml`, `source-map-js`, `brace-expansion`).
+  - Moved pnpm overrides to `pnpm-workspace.yaml` (pnpm 11 ignores `pnpm.overrides` in `package.json`); `minimatch` is overridden to 11, `fast-glob` is replaced with `tinyglobby`, and Monaco is bundled instead of loaded from jsDelivr, with its vendored DOMPurify patched to 3.4.17.
+  - Set the MapLibre worker URL explicitly so GeoJSON layers still render with MapLibre v6.
+
 ## [0.4.4] - 2026-09-03
 
 ### Added

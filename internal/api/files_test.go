@@ -99,10 +99,25 @@ func TestPrintWindow(t *testing.T) {
 	win := &mockWindow{}
 	svc.SetWindow(win)
 
-	if err := svc.PrintWindow(); err != nil {
+	handled, err := svc.PrintWindow()
+	if err != nil {
 		t.Fatalf("PrintWindow error: %v", err)
+	}
+	if !handled {
+		t.Errorf("expected handled=true with a window installed")
 	}
 	if !win.printCalled {
 		t.Errorf("expected Print to be called")
+	}
+}
+
+func TestPrintWindowWithoutHost(t *testing.T) {
+	svc := New("test")
+	handled, err := svc.PrintWindow()
+	if err != nil {
+		t.Fatalf("PrintWindow error: %v", err)
+	}
+	if handled {
+		t.Errorf("expected handled=false without a host window")
 	}
 }

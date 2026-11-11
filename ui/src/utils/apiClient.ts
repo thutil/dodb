@@ -122,7 +122,6 @@ export const apiClient = {
     sortColumn?: string | null,
     sortOrder?: string,
     searchQuery?: string,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     filters?: any[],
   ) => {
     return await invoke("get_rows", {
@@ -182,11 +181,17 @@ export const apiClient = {
   ): Promise<string | null> => {
     return await invoke("save_text_file", { suggestedName, contents });
   },
-  printWindow: async (): Promise<void> => {
+  /**
+   * Opens the native print panel. Resolves true when the host window handled
+   * it, false when there is no native window (browser dev mode) or the command
+   * failed — the caller then falls back to window.print().
+   */
+  printWindow: async (): Promise<boolean> => {
     try {
-      await invoke("print_window");
+      const res = await invoke<{ handled?: boolean } | null>("print_window");
+      return !!res?.handled;
     } catch {
-      // Ignored if host does not implement print_window (e.g. browser dev mode)
+      return false;
     }
   },
   // Data Import
@@ -256,14 +261,17 @@ export const apiClient = {
         const dataLines: string[] = [];
         for (const line of frame.split("\n")) {
           if (line.startsWith("event:")) event = line.slice(6).trim();
-          else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+          else if (line.startsWith("data:"))
+            dataLines.push(line.slice(5).trim());
         }
         if (!dataLines.length) continue;
         const payload = JSON.parse(dataLines.join("\n"));
 
-        if (event === "progress") onProgress.onmessage(payload as ImportProgress);
+        if (event === "progress")
+          onProgress.onmessage(payload as ImportProgress);
         else if (event === "report") report = payload as ImportReport;
-        else if (event === "error") failure = String(payload?.error ?? "import failed");
+        else if (event === "error")
+          failure = String(payload?.error ?? "import failed");
       }
     }
 
@@ -288,7 +296,13 @@ export const apiClient = {
     charset?: string,
     collation?: string,
   ) => {
-    return await invoke("admin_create_database", { id, database, name, charset, collation });
+    return await invoke("admin_create_database", {
+      id,
+      database,
+      name,
+      charset,
+      collation,
+    });
   },
   adminDropDatabase: async (id: string, database: string, name: string) => {
     return await invoke("admin_drop_database", { id, database, name });

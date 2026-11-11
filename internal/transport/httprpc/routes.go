@@ -333,7 +333,11 @@ func (h *Handler) buildRoutes() map[string]func(json.RawMessage) (any, error) {
 			return s.AppVersion(), nil
 		},
 		"print_window": func(json.RawMessage) (any, error) {
-			return nil, s.PrintWindow()
+			handled, err := s.PrintWindow()
+			if err != nil {
+				return nil, err
+			}
+			return map[string]bool{"handled": handled}, nil
 		},
 	}
 
